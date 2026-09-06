@@ -1,0 +1,291 @@
+# ARN-467. Executable IOA contract; simulator tests run these declarations unchanged.
+[automaton]
+name = "DsfResource"
+states = ["Draft","Active","Operating","Retired"]
+initial = "Draft"
+strict_action_params = true
+# Durable records may wait indefinitely; work in progress has explicit timeouts.
+allow_indefinite_states = ["Draft","Active","Operating"]
+
+[[state]]
+name = "name"
+type = "string"
+initial = ""
+
+[[state]]
+name = "kind"
+type = "string"
+initial = ""
+
+[[state]]
+name = "parent_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "provider"
+type = "string"
+initial = ""
+
+[[state]]
+name = "provider_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "source_repository"
+type = "string"
+initial = ""
+
+[[state]]
+name = "intended_configuration"
+type = "string"
+initial = ""
+
+[[state]]
+name = "intent_decision_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "allowed_operations"
+type = "string"
+initial = ""
+
+[[state]]
+name = "observation_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "observed_configuration"
+type = "string"
+initial = ""
+
+[[state]]
+name = "observed_revision"
+type = "string"
+initial = ""
+
+[[state]]
+name = "coverage"
+type = "string"
+initial = ""
+
+[[state]]
+name = "outcome"
+type = "string"
+initial = ""
+
+[[state]]
+name = "provenance_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "observed_sequence"
+type = "counter"
+initial = "0"
+
+[[state]]
+name = "observed_at_ms"
+type = "counter"
+initial = "0"
+
+[[state]]
+name = "active_operation_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "request_effort_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "request_operation_kind"
+type = "string"
+initial = ""
+
+[[state]]
+name = "request_revision"
+type = "string"
+initial = ""
+
+[[state]]
+name = "request_configuration"
+type = "string"
+initial = ""
+
+[[state]]
+name = "request_proof_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "observation_available"
+type = "bool"
+initial = "false"
+
+[[action]]
+name = "Register"
+kind = "input"
+from = ["Draft"]
+to = "Active"
+params = [{ name = "name", type = "string" }, { name = "kind", type = "string" }, { name = "parent_id", type = "string" }, { name = "provider", type = "string" }, { name = "provider_id", type = "string" }, { name = "source_repository", type = "string" }, { name = "intended_configuration", type = "string" }, { name = "allowed_operations", type = "string" }]
+effect = []
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "kind"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provider_id"
+
+[[action]]
+name = "Observe"
+kind = "input"
+from = ["Active","Operating"]
+params = [{ name = "observation_id", type = "string" }, { name = "observed_configuration", type = "string" }, { name = "observed_revision", type = "string" }, { name = "coverage", type = "string" }, { name = "outcome", type = "string" }, { name = "provenance_ref", type = "string" }, { name = "observed_at_ms", type = "counter" }, { name = "expected_sequence", type = "counter" }]
+effect = [{ type = "increment", var = "observed_sequence" }, { type = "set_counter_from_param", var = "observed_at_ms", param = "observed_at_ms" }, { type = "set_bool", var = "observation_available", value = true }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_sequence"
+field = "observed_sequence"
+
+[[action.constraints]]
+kind = "param_greater_than_field"
+param = "observed_at_ms"
+field = "observed_at_ms"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "observation_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "coverage"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provenance_ref"
+
+[[action]]
+name = "ObserveUnavailable"
+kind = "input"
+from = ["Active","Operating"]
+params = [{ name = "observation_id", type = "string" }, { name = "coverage", type = "string" }, { name = "provenance_ref", type = "string" }, { name = "observed_at_ms", type = "counter" }, { name = "expected_sequence", type = "counter" }]
+effect = [{ type = "increment", var = "observed_sequence" }, { type = "set_counter_from_param", var = "observed_at_ms", param = "observed_at_ms" }, { type = "set_bool", var = "observation_available", value = false }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_sequence"
+field = "observed_sequence"
+
+[[action.constraints]]
+kind = "param_greater_than_field"
+param = "observed_at_ms"
+field = "observed_at_ms"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "observation_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "coverage"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provenance_ref"
+
+[[action]]
+name = "SetIntent"
+kind = "input"
+from = ["Active"]
+to = "Active"
+params = [{ name = "intended_configuration", type = "string" }, { name = "intent_decision_ref", type = "string" }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "intended_configuration"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "intent_decision_ref"
+
+[[action]]
+name = "Retire"
+kind = "input"
+from = ["Active"]
+to = "Retired"
+params = [{ name = "intent_decision_ref", type = "string" }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "intent_decision_ref"
+
+[[action]]
+name = "RequestOperation"
+kind = "input"
+from = ["Active"]
+to = "Operating"
+params = [{ name = "active_operation_id", type = "string" }, { name = "request_effort_id", type = "string" }, { name = "request_operation_kind", type = "string" }, { name = "request_revision", type = "string" }, { name = "request_configuration", type = "string" }, { name = "request_proof_ref", type = "string" }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "active_operation_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "request_effort_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "request_operation_kind"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "request_revision"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "request_proof_ref"
+
+[[action.triggers]]
+name = "create_resource_operation"
+kind = "entity"
+target_entity = "DsfOperation"
+target_action = "Request"
+
+[action.triggers.params_from]
+resource_id = "Id"
+effort_id = "request_effort_id"
+operation_kind = "request_operation_kind"
+operation_key = "active_operation_id"
+intended_revision = "request_revision"
+intended_configuration = "request_configuration"
+proof_ref = "request_proof_ref"
+
+[action.triggers.resolve_target]
+type = "create_if_missing"
+id_field = "active_operation_id"
+
+[[action]]
+name = "ReleaseOperation"
+kind = "input"
+from = ["Operating"]
+to = "Active"
+params = [{ name = "operation_key", type = "string" }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "active_operation_id"
+
+[[invariant]]
+name = "RetiredResourceIsFinal"
+when = ["Retired"]
+assert = "no_further_transitions"

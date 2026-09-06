@@ -1,0 +1,44 @@
+name = "dsf-factory"
+description = "Deep Sci-fi operational resources, evidence, delivery and experiments"
+version = "0.1.0"
+dependencies = ["paw-patrol", "paw-compute"]
+
+[[wasm_modules]]
+name = "dsf_operation_validate"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "dsf_operation_execute"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "dsf_operation_observe"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "dsf_operation_verify"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "dsf_model_collect"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "dsf_experiment_validate"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "dsf_experiment_run"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "dsf_experiment_cleanup"
+criticality = "app-required"
+startup_loading = "lazy"

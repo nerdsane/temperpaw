@@ -1,0 +1,563 @@
+# ARN-467. Executable IOA contract; simulator tests run these declarations unchanged.
+[automaton]
+name = "DsfOperation"
+states = ["Draft","Requested","Validating","Ready","Executing","Unknown","Reconciling","Observed","Verifying","Verified","Blocked","Failed","Cancelled"]
+initial = "Draft"
+strict_action_params = true
+# Durable records may wait indefinitely; work in progress has explicit timeouts.
+allow_indefinite_states = ["Draft","Requested","Ready","Unknown","Observed","Blocked","Failed"]
+
+[[state]]
+name = "resource_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "effort_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "operation_kind"
+type = "string"
+initial = ""
+
+[[state]]
+name = "operation_key"
+type = "string"
+initial = ""
+
+[[state]]
+name = "intended_revision"
+type = "string"
+initial = ""
+
+[[state]]
+name = "intended_configuration"
+type = "string"
+initial = ""
+
+[[state]]
+name = "proof_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "validation_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "ask_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "provider_execution_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "provider_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "absence_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "verified_resource_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "verified_revision"
+type = "string"
+initial = ""
+
+[[state]]
+name = "flow_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "telemetry_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "error_message"
+type = "string"
+initial = ""
+
+[[state]]
+name = "execution_attempts"
+type = "counter"
+initial = "0"
+
+[[state]]
+name = "provider_known"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "flow_verified"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "telemetry_verified"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "observation_attempts"
+type = "counter"
+initial = "0"
+
+[[state]]
+name = "verification_attempts"
+type = "counter"
+initial = "0"
+
+[[state]]
+name = "cancellation_ref"
+type = "string"
+initial = ""
+
+[[action]]
+name = "Request"
+kind = "input"
+from = ["Draft"]
+to = "Requested"
+params = [{ name = "resource_id", type = "string" }, { name = "effort_id", type = "string" }, { name = "operation_kind", type = "string" }, { name = "operation_key", type = "string" }, { name = "intended_revision", type = "string" }, { name = "intended_configuration", type = "string" }, { name = "proof_ref", type = "string" }]
+effect = [{ type = "set_bool", var = "provider_known", value = false }, { type = "set_bool", var = "flow_verified", value = false }, { type = "set_bool", var = "telemetry_verified", value = false }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "resource_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "effort_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "operation_kind"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "operation_key"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "intended_revision"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "Id"
+
+[[action.triggers]]
+name = "validate_requested_operation"
+kind = "entity"
+target_entity = "DsfOperation"
+target_action = "Validate"
+
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "Validate"
+kind = "input"
+from = ["Requested","Blocked"]
+to = "Validating"
+effect = [{ type = "trigger", name = "dsf_operation_validate" }]
+
+[[action.triggers]]
+name = "dsf_operation_validate"
+kind = "wasm"
+module = "dsf_operation_validate"
+on_failure = "ValidationFailed"
+
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+temper_api_key = "{secret:temper_api_key}"
+
+[[action]]
+name = "ValidationSucceeded"
+kind = "input"
+from = ["Validating"]
+to = "Ready"
+params = [{ name = "operation_key", type = "string" }, { name = "validation_evidence_ref", type = "string" }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "validation_evidence_ref"
+
+[[action.triggers]]
+name = "continue_validationsucceeded"
+kind = "entity"
+target_entity = "DsfOperation"
+target_action = "Execute"
+
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "ValidationBlocked"
+kind = "input"
+from = ["Validating"]
+to = "Blocked"
+params = [{ name = "operation_key", type = "string" }, { name = "ask_id", type = "string" }, { name = "error_message", type = "string" }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "ask_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "error_message"
+
+[[action]]
+name = "ValidationFailed"
+kind = "input"
+from = ["Validating"]
+to = "Failed"
+params = [{ name = "error_message", type = "string" }]
+
+[[action.triggers]]
+name = "release_resource_operation"
+kind = "entity"
+target_entity = "DsfResource"
+target_action = "ReleaseOperation"
+
+[action.triggers.params_from]
+operation_key = "operation_key"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "resource_id"
+
+[[action]]
+name = "Execute"
+kind = "input"
+from = ["Ready"]
+to = "Executing"
+guard = [{ type = "is_false", var = "provider_known" }, { type = "max_count", var = "execution_attempts", max = 3 }]
+effect = [{ type = "increment", var = "execution_attempts" }, { type = "trigger", name = "dsf_operation_execute" }]
+
+[[action.triggers]]
+name = "dsf_operation_execute"
+kind = "wasm"
+module = "dsf_operation_execute"
+on_failure = "ExecutionUncertain"
+
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+temper_api_key = "{secret:temper_api_key}"
+
+[[action]]
+name = "ExecutionSucceeded"
+kind = "input"
+from = ["Executing"]
+to = "Observed"
+params = [{ name = "operation_key", type = "string" }, { name = "provider_execution_id", type = "string" }, { name = "provider_evidence_ref", type = "string" }]
+effect = [{ type = "set_bool", var = "provider_known", value = true }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provider_execution_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provider_evidence_ref"
+
+[[action.triggers]]
+name = "continue_executionsucceeded"
+kind = "entity"
+target_entity = "DsfOperation"
+target_action = "Verify"
+
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "ExecutionUncertain"
+kind = "input"
+from = ["Executing"]
+to = "Unknown"
+params = [{ name = "error_message", type = "string" }]
+
+[[action]]
+name = "Reconcile"
+kind = "input"
+from = ["Unknown"]
+to = "Reconciling"
+guard = [{ type = "max_count", var = "observation_attempts", max = 20 }]
+effect = [{ type = "increment", var = "observation_attempts" }, { type = "trigger", name = "dsf_operation_observe" }]
+
+[[action.triggers]]
+name = "dsf_operation_observe"
+kind = "wasm"
+module = "dsf_operation_observe"
+on_failure = "ObservationFailed"
+
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+temper_api_key = "{secret:temper_api_key}"
+
+[[action]]
+name = "ProviderFound"
+kind = "input"
+from = ["Reconciling"]
+to = "Observed"
+params = [{ name = "operation_key", type = "string" }, { name = "provider_execution_id", type = "string" }, { name = "provider_evidence_ref", type = "string" }]
+effect = [{ type = "set_bool", var = "provider_known", value = true }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provider_execution_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provider_evidence_ref"
+
+[[action.triggers]]
+name = "continue_providerfound"
+kind = "entity"
+target_entity = "DsfOperation"
+target_action = "Verify"
+
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "ProviderAbsent"
+kind = "input"
+from = ["Reconciling"]
+to = "Ready"
+params = [{ name = "operation_key", type = "string" }, { name = "absence_evidence_ref", type = "string" }]
+guard = [{ type = "is_false", var = "provider_known" }, { type = "max_count", var = "execution_attempts", max = 3 }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "absence_evidence_ref"
+
+[[action.triggers]]
+name = "continue_providerabsent"
+kind = "entity"
+target_entity = "DsfOperation"
+target_action = "Execute"
+
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "ObservationFailed"
+kind = "input"
+from = ["Reconciling"]
+to = "Unknown"
+params = [{ name = "error_message", type = "string" }]
+
+[[action]]
+name = "Verify"
+kind = "input"
+from = ["Observed"]
+to = "Verifying"
+guard = [{ type = "is_true", var = "provider_known" }, { type = "max_count", var = "verification_attempts", max = 40 }]
+effect = [{ type = "increment", var = "verification_attempts" }, { type = "trigger", name = "dsf_operation_verify" }]
+
+[[action.triggers]]
+name = "dsf_operation_verify"
+kind = "wasm"
+module = "dsf_operation_verify"
+on_failure = "VerificationPending"
+
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+temper_api_key = "{secret:temper_api_key}"
+
+[[action]]
+name = "VerificationSucceeded"
+kind = "input"
+from = ["Verifying"]
+to = "Verified"
+params = [{ name = "operation_key", type = "string" }, { name = "verified_resource_id", type = "string" }, { name = "verified_revision", type = "string" }, { name = "provider_evidence_ref", type = "string" }, { name = "flow_evidence_ref", type = "string" }, { name = "telemetry_evidence_ref", type = "string" }]
+effect = [{ type = "set_bool", var = "flow_verified", value = true }, { type = "set_bool", var = "telemetry_verified", value = true }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "verified_resource_id"
+field = "resource_id"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "verified_revision"
+field = "intended_revision"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "provider_evidence_ref"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "flow_evidence_ref"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "telemetry_evidence_ref"
+
+[[action.triggers]]
+name = "release_resource_operation"
+kind = "entity"
+target_entity = "DsfResource"
+target_action = "ReleaseOperation"
+
+[action.triggers.params_from]
+operation_key = "operation_key"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "resource_id"
+
+[[action]]
+name = "VerificationPending"
+kind = "input"
+from = ["Verifying"]
+to = "Observed"
+params = [{ name = "error_message", type = "string" }]
+
+[[action]]
+name = "VerificationFailed"
+kind = "input"
+from = ["Verifying"]
+to = "Failed"
+params = [{ name = "error_message", type = "string" }]
+
+[[action.triggers]]
+name = "release_resource_operation"
+kind = "entity"
+target_entity = "DsfResource"
+target_action = "ReleaseOperation"
+
+[action.triggers.params_from]
+operation_key = "operation_key"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "resource_id"
+
+[[action]]
+name = "Cancel"
+kind = "input"
+from = ["Requested","Ready","Blocked"]
+to = "Cancelled"
+params = [{ name = "cancellation_ref", type = "string" }]
+guard = [{ type = "max_count", var = "execution_attempts", max = 1 }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "cancellation_ref"
+
+[[action.triggers]]
+name = "release_resource_operation"
+kind = "entity"
+target_entity = "DsfResource"
+target_action = "ReleaseOperation"
+
+[action.triggers.params_from]
+operation_key = "operation_key"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "resource_id"
+
+[[state_timeout]]
+state = "Validating"
+after_seconds = 300
+on_timeout = "ValidationFailed"
+
+[[state_timeout]]
+state = "Executing"
+max_occurrences = 3
+after_seconds = 300
+on_timeout = "ExecutionUncertain"
+
+[[state_timeout]]
+state = "Reconciling"
+max_occurrences = 20
+after_seconds = 300
+on_timeout = "ObservationFailed"
+
+[[state_timeout]]
+state = "Verifying"
+max_occurrences = 40
+after_seconds = 300
+on_timeout = "VerificationPending"
+
+[[state_timeout]]
+state = "Unknown"
+max_occurrences = 20
+after_seconds = 30
+on_timeout = "Reconcile"
+
+[[invariant]]
+name = "VerifiedHasProviderAndFlowEvidence"
+when = ["Verified"]
+assert = "provider_known and flow_verified and telemetry_verified"
+
+[[invariant]]
+name = "BoundedExternalAttempts"
+assert = "execution_attempts <= 3"
+
+[[invariant]]
+name = "VerifiedOperationIsFinal"
+when = ["Verified","Cancelled"]
+assert = "no_further_transitions"
+
+[[invariant]]
+name = "BoundedProviderObservations"
+assert = "observation_attempts <= 20"
+
+[[state_timeout]]
+state = "Observed"
+max_occurrences = 40
+after_seconds = 30
+on_timeout = "Verify"
+
+[[invariant]]
+name = "BoundedVerificationReads"
+assert = "verification_attempts <= 40"

@@ -79,6 +79,7 @@ clap = { version = "4", features = ["derive"] }
 cliclack = "0.3"
 
 [dev-dependencies]
+temper-wasm = { git = "https://github.com/nerdsane/temper.git", rev = "d7a48b92f7caf724067972640c0cfc302f6a350e" }
 tempfile = "3"
 toml = "0.8"
 tower = "0.5"

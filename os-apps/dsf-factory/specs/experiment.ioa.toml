@@ -1,0 +1,303 @@
+# ARN-467. Executable IOA contract; simulator tests run these declarations unchanged.
+[automaton]
+name = "DsfExperiment"
+states = ["Draft","Configured","Validating","Ready","Running","Compared","Selected","Cleaning","Cleaned","Failed"]
+initial = "Draft"
+strict_action_params = true
+# Durable records may wait indefinitely; work in progress has explicit timeouts.
+allow_indefinite_states = ["Draft","Configured","Ready","Compared","Selected","Failed"]
+
+[[state]]
+name = "effort_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "branch"
+type = "string"
+initial = ""
+
+[[state]]
+name = "source_revision"
+type = "string"
+initial = ""
+
+[[state]]
+name = "computer_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "database_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "media_bucket"
+type = "string"
+initial = ""
+
+[[state]]
+name = "media_namespace"
+type = "string"
+initial = ""
+
+[[state]]
+name = "permitted_external_calls"
+type = "string"
+initial = ""
+
+[[state]]
+name = "production_database_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "production_media_bucket"
+type = "string"
+initial = ""
+
+[[state]]
+name = "isolation_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "result_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "test_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "selection_ask_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "delivery_effort_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "cleanup_evidence_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "error_message"
+type = "string"
+initial = ""
+
+[[state]]
+name = "isolated"
+type = "bool"
+initial = "false"
+
+[[action]]
+name = "Configure"
+kind = "input"
+from = ["Draft"]
+to = "Configured"
+params = [{ name = "effort_id", type = "string" }, { name = "branch", type = "string" }, { name = "source_revision", type = "string" }, { name = "computer_id", type = "string" }, { name = "database_id", type = "string" }, { name = "media_bucket", type = "string" }, { name = "media_namespace", type = "string" }, { name = "permitted_external_calls", type = "string" }]
+effect = [{ type = "set_bool", var = "isolated", value = false }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "effort_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "branch"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "source_revision"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "computer_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "database_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "media_bucket"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "media_namespace"
+
+[[action]]
+name = "Validate"
+kind = "input"
+from = ["Configured"]
+to = "Validating"
+effect = [{ type = "trigger", name = "dsf_experiment_validate" }]
+
+[[action.triggers]]
+name = "dsf_experiment_validate"
+kind = "wasm"
+module = "dsf_experiment_validate"
+on_failure = "ValidationFailed"
+
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+temper_api_key = "{secret:temper_api_key}"
+
+[[action]]
+name = "IsolationSucceeded"
+kind = "input"
+from = ["Validating"]
+to = "Ready"
+params = [{ name = "production_database_id", type = "string" }, { name = "production_media_bucket", type = "string" }, { name = "isolation_evidence_ref", type = "string" }]
+effect = [{ type = "set_bool", var = "isolated", value = true }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "production_database_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "production_media_bucket"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "isolation_evidence_ref"
+
+[[action.constraints]]
+kind = "param_not_equals_field"
+param = "production_database_id"
+field = "database_id"
+
+[[action.constraints]]
+kind = "param_not_equals_field"
+param = "production_media_bucket"
+field = "media_bucket"
+
+[[action]]
+name = "ValidationFailed"
+kind = "input"
+from = ["Validating"]
+to = "Failed"
+params = [{ name = "error_message", type = "string" }]
+
+[[action]]
+name = "Run"
+kind = "input"
+from = ["Ready"]
+to = "Running"
+guard = [{ type = "is_true", var = "isolated" }]
+effect = [{ type = "trigger", name = "dsf_experiment_run" }]
+
+[[action.triggers]]
+name = "dsf_experiment_run"
+kind = "wasm"
+module = "dsf_experiment_run"
+on_failure = "RunFailed"
+
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+temper_api_key = "{secret:temper_api_key}"
+
+[[action]]
+name = "RunSucceeded"
+kind = "input"
+from = ["Running"]
+to = "Compared"
+params = [{ name = "result_ref", type = "string" }, { name = "test_evidence_ref", type = "string" }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "result_ref"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "test_evidence_ref"
+
+[[action]]
+name = "RunFailed"
+kind = "input"
+from = ["Running"]
+to = "Failed"
+params = [{ name = "error_message", type = "string" }]
+
+[[action]]
+name = "Select"
+kind = "input"
+from = ["Compared"]
+to = "Selected"
+params = [{ name = "selection_ask_id", type = "string" }, { name = "delivery_effort_id", type = "string" }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "selection_ask_id"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "delivery_effort_id"
+
+[[action]]
+name = "Cleanup"
+kind = "input"
+from = ["Configured","Ready","Compared","Selected","Failed"]
+to = "Cleaning"
+effect = [{ type = "trigger", name = "dsf_experiment_cleanup" }]
+
+[[action.triggers]]
+name = "dsf_experiment_cleanup"
+kind = "wasm"
+module = "dsf_experiment_cleanup"
+on_failure = "CleanupFailed"
+
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+temper_api_key = "{secret:temper_api_key}"
+
+[[action]]
+name = "CleanupSucceeded"
+kind = "input"
+from = ["Cleaning"]
+to = "Cleaned"
+params = [{ name = "cleanup_evidence_ref", type = "string" }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "cleanup_evidence_ref"
+
+[[action]]
+name = "CleanupFailed"
+kind = "input"
+from = ["Cleaning"]
+to = "Failed"
+params = [{ name = "error_message", type = "string" }]
+
+[[state_timeout]]
+state = "Validating"
+after_seconds = 300
+on_timeout = "ValidationFailed"
+
+[[state_timeout]]
+state = "Running"
+after_seconds = 3600
+on_timeout = "RunFailed"
+
+[[state_timeout]]
+state = "Cleaning"
+after_seconds = 300
+on_timeout = "CleanupFailed"
+
+[[invariant]]
+name = "RunningExperimentIsIsolated"
+when = ["Ready","Running","Compared","Selected"]
+assert = "isolated"
+
+[[invariant]]
+name = "CleanedExperimentIsFinal"
+when = ["Cleaned"]
+assert = "no_further_transitions"

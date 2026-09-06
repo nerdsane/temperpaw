@@ -1,0 +1,627 @@
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="Dsf.Factory" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+      <EntityType Name="DsfResource">
+        <Key><PropertyRef Name="Id" /></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false" />
+        <Property Name="Status" Type="Edm.String" />
+        <Property Name="Name" Type="Edm.String" />
+        <Property Name="Kind" Type="Edm.String" />
+        <Property Name="ParentId" Type="Edm.String" />
+        <Property Name="Provider" Type="Edm.String" />
+        <Property Name="ProviderId" Type="Edm.String" />
+        <Property Name="SourceRepository" Type="Edm.String" />
+        <Property Name="IntendedConfiguration" Type="Edm.String" />
+        <Property Name="IntentDecisionRef" Type="Edm.String" />
+        <Property Name="AllowedOperations" Type="Edm.String" />
+        <Property Name="ObservationId" Type="Edm.String" />
+        <Property Name="ObservedConfiguration" Type="Edm.String" />
+        <Property Name="ObservedRevision" Type="Edm.String" />
+        <Property Name="Coverage" Type="Edm.String" />
+        <Property Name="Outcome" Type="Edm.String" />
+        <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Property Name="ObservedSequence" Type="Edm.Int64" />
+        <Property Name="ObservedAtMs" Type="Edm.Int64" />
+        <Property Name="ActiveOperationId" Type="Edm.String" />
+        <Property Name="RequestEffortId" Type="Edm.String" />
+        <Property Name="RequestOperationKind" Type="Edm.String" />
+        <Property Name="RequestRevision" Type="Edm.String" />
+        <Property Name="RequestConfiguration" Type="Edm.String" />
+        <Property Name="RequestProofRef" Type="Edm.String" />
+        <Property Name="ObservationAvailable" Type="Edm.Boolean" />
+        <Action Name="Register" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfResource" />
+          <Parameter Name="name" Type="Edm.String" />
+          <Parameter Name="kind" Type="Edm.String" />
+          <Parameter Name="parent_id" Type="Edm.String" />
+          <Parameter Name="provider" Type="Edm.String" />
+          <Parameter Name="provider_id" Type="Edm.String" />
+          <Parameter Name="source_repository" Type="Edm.String" />
+          <Parameter Name="intended_configuration" Type="Edm.String" />
+          <Parameter Name="allowed_operations" Type="Edm.String" />
+        </Action>
+        <Action Name="Observe" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfResource" />
+          <Parameter Name="observation_id" Type="Edm.String" />
+          <Parameter Name="observed_configuration" Type="Edm.String" />
+          <Parameter Name="observed_revision" Type="Edm.String" />
+          <Parameter Name="coverage" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="provenance_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+        </Action>
+        <Action Name="ObserveUnavailable" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfResource" />
+          <Parameter Name="observation_id" Type="Edm.String" />
+          <Parameter Name="coverage" Type="Edm.String" />
+          <Parameter Name="provenance_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+        </Action>
+        <Action Name="SetIntent" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfResource" />
+          <Parameter Name="intended_configuration" Type="Edm.String" />
+          <Parameter Name="intent_decision_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="Retire" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfResource" />
+          <Parameter Name="intent_decision_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="RequestOperation" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfResource" />
+          <Parameter Name="active_operation_id" Type="Edm.String" />
+          <Parameter Name="request_effort_id" Type="Edm.String" />
+          <Parameter Name="request_operation_kind" Type="Edm.String" />
+          <Parameter Name="request_revision" Type="Edm.String" />
+          <Parameter Name="request_configuration" Type="Edm.String" />
+          <Parameter Name="request_proof_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="ReleaseOperation" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfResource" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+        </Action>
+      </EntityType>
+      <EntityType Name="DsfFlow">
+        <Key><PropertyRef Name="Id" /></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false" />
+        <Property Name="Status" Type="Edm.String" />
+        <Property Name="ApplicationId" Type="Edm.String" />
+        <Property Name="Name" Type="Edm.String" />
+        <Property Name="SourceRevision" Type="Edm.String" />
+        <Property Name="EntryPoints" Type="Edm.String" />
+        <Property Name="ResourceIds" Type="Edm.String" />
+        <Property Name="OutcomeDefinitions" Type="Edm.String" />
+        <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Property Name="RevisionSequence" Type="Edm.Int64" />
+        <Action Name="Register" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfFlow" />
+          <Parameter Name="application_id" Type="Edm.String" />
+          <Parameter Name="name" Type="Edm.String" />
+          <Parameter Name="source_revision" Type="Edm.String" />
+          <Parameter Name="entry_points" Type="Edm.String" />
+          <Parameter Name="resource_ids" Type="Edm.String" />
+          <Parameter Name="outcome_definitions" Type="Edm.String" />
+          <Parameter Name="provenance_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="Revise" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfFlow" />
+          <Parameter Name="source_revision" Type="Edm.String" />
+          <Parameter Name="entry_points" Type="Edm.String" />
+          <Parameter Name="resource_ids" Type="Edm.String" />
+          <Parameter Name="outcome_definitions" Type="Edm.String" />
+          <Parameter Name="provenance_ref" Type="Edm.String" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+        </Action>
+        <Action Name="Retire" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfFlow" />
+          <Parameter Name="provenance_ref" Type="Edm.String" />
+        </Action>
+      </EntityType>
+      <EntityType Name="DsfParticipant">
+        <Key><PropertyRef Name="Id" /></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false" />
+        <Property Name="Status" Type="Edm.String" />
+        <Property Name="ApplicationId" Type="Edm.String" />
+        <Property Name="ProductParticipantId" Type="Edm.String" />
+        <Property Name="CohortDefinition" Type="Edm.String" />
+        <Property Name="IdentityProvenanceRef" Type="Edm.String" />
+        <Property Name="ActivityWindow" Type="Edm.String" />
+        <Property Name="ActivitySummary" Type="Edm.String" />
+        <Property Name="ObservationId" Type="Edm.String" />
+        <Property Name="Coverage" Type="Edm.String" />
+        <Property Name="ObservedSequence" Type="Edm.Int64" />
+        <Property Name="ObservedAtMs" Type="Edm.Int64" />
+        <Action Name="RegisterAgent" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfParticipant" />
+          <Parameter Name="application_id" Type="Edm.String" />
+          <Parameter Name="product_participant_id" Type="Edm.String" />
+          <Parameter Name="identity_provenance_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="RegisterCohort" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfParticipant" />
+          <Parameter Name="application_id" Type="Edm.String" />
+          <Parameter Name="cohort_definition" Type="Edm.String" />
+          <Parameter Name="identity_provenance_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="ObserveActivity" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfParticipant" />
+          <Parameter Name="activity_window" Type="Edm.String" />
+          <Parameter Name="activity_summary" Type="Edm.String" />
+          <Parameter Name="observation_id" Type="Edm.String" />
+          <Parameter Name="coverage" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+        </Action>
+        <Action Name="Retire" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfParticipant" />
+        </Action>
+      </EntityType>
+      <EntityType Name="DsfObservation">
+        <Key><PropertyRef Name="Id" /></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false" />
+        <Property Name="Status" Type="Edm.String" />
+        <Property Name="SubjectType" Type="Edm.String" />
+        <Property Name="SubjectId" Type="Edm.String" />
+        <Property Name="Source" Type="Edm.String" />
+        <Property Name="SourceEventId" Type="Edm.String" />
+        <Property Name="Query" Type="Edm.String" />
+        <Property Name="WindowStart" Type="Edm.String" />
+        <Property Name="WindowEnd" Type="Edm.String" />
+        <Property Name="SampleKind" Type="Edm.String" />
+        <Property Name="Outcome" Type="Edm.String" />
+        <Property Name="Summary" Type="Edm.String" />
+        <Property Name="EvidenceRef" Type="Edm.String" />
+        <Property Name="ObservedAtMs" Type="Edm.Int64" />
+        <Property Name="ObservedConfiguration" Type="Edm.String" />
+        <Property Name="ObservedRevision" Type="Edm.String" />
+        <Property Name="ExpectedResourceSequence" Type="Edm.Int64" />
+        <Action Name="RecordMeasured" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+        </Action>
+        <Action Name="RecordAbsent" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+        </Action>
+        <Action Name="RecordInaccessible" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+        </Action>
+        <Action Name="RecordStale" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+        </Action>
+        <Action Name="RecordResourceMeasured" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+          <Parameter Name="observed_configuration" Type="Edm.String" />
+          <Parameter Name="observed_revision" Type="Edm.String" />
+        </Action>
+        <Action Name="RecordResourceAbsent" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+        </Action>
+        <Action Name="RecordResourceInaccessible" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+        </Action>
+        <Action Name="RecordResourceStale" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfObservation" />
+          <Parameter Name="subject_type" Type="Edm.String" />
+          <Parameter Name="subject_id" Type="Edm.String" />
+          <Parameter Name="source" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+        </Action>
+      </EntityType>
+      <EntityType Name="DsfOperation">
+        <Key><PropertyRef Name="Id" /></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false" />
+        <Property Name="Status" Type="Edm.String" />
+        <Property Name="ResourceId" Type="Edm.String" />
+        <Property Name="EffortId" Type="Edm.String" />
+        <Property Name="OperationKind" Type="Edm.String" />
+        <Property Name="OperationKey" Type="Edm.String" />
+        <Property Name="IntendedRevision" Type="Edm.String" />
+        <Property Name="IntendedConfiguration" Type="Edm.String" />
+        <Property Name="ProofRef" Type="Edm.String" />
+        <Property Name="ValidationEvidenceRef" Type="Edm.String" />
+        <Property Name="AskId" Type="Edm.String" />
+        <Property Name="ProviderExecutionId" Type="Edm.String" />
+        <Property Name="ProviderEvidenceRef" Type="Edm.String" />
+        <Property Name="AbsenceEvidenceRef" Type="Edm.String" />
+        <Property Name="VerifiedResourceId" Type="Edm.String" />
+        <Property Name="VerifiedRevision" Type="Edm.String" />
+        <Property Name="FlowEvidenceRef" Type="Edm.String" />
+        <Property Name="TelemetryEvidenceRef" Type="Edm.String" />
+        <Property Name="ErrorMessage" Type="Edm.String" />
+        <Property Name="ExecutionAttempts" Type="Edm.Int64" />
+        <Property Name="ProviderKnown" Type="Edm.Boolean" />
+        <Property Name="FlowVerified" Type="Edm.Boolean" />
+        <Property Name="TelemetryVerified" Type="Edm.Boolean" />
+        <Property Name="ObservationAttempts" Type="Edm.Int64" />
+        <Property Name="VerificationAttempts" Type="Edm.Int64" />
+        <Property Name="CancellationRef" Type="Edm.String" />
+        <Action Name="Request" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="resource_id" Type="Edm.String" />
+          <Parameter Name="effort_id" Type="Edm.String" />
+          <Parameter Name="operation_kind" Type="Edm.String" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+          <Parameter Name="intended_revision" Type="Edm.String" />
+          <Parameter Name="intended_configuration" Type="Edm.String" />
+          <Parameter Name="proof_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="Validate" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+        </Action>
+        <Action Name="ValidationSucceeded" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+          <Parameter Name="validation_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="ValidationBlocked" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+          <Parameter Name="ask_id" Type="Edm.String" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="ValidationFailed" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="Execute" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+        </Action>
+        <Action Name="ExecutionSucceeded" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+          <Parameter Name="provider_execution_id" Type="Edm.String" />
+          <Parameter Name="provider_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="ExecutionUncertain" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="Reconcile" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+        </Action>
+        <Action Name="ProviderFound" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+          <Parameter Name="provider_execution_id" Type="Edm.String" />
+          <Parameter Name="provider_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="ProviderAbsent" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+          <Parameter Name="absence_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="ObservationFailed" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="Verify" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+        </Action>
+        <Action Name="VerificationSucceeded" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="operation_key" Type="Edm.String" />
+          <Parameter Name="verified_resource_id" Type="Edm.String" />
+          <Parameter Name="verified_revision" Type="Edm.String" />
+          <Parameter Name="provider_evidence_ref" Type="Edm.String" />
+          <Parameter Name="flow_evidence_ref" Type="Edm.String" />
+          <Parameter Name="telemetry_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="VerificationPending" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="VerificationFailed" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="Cancel" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfOperation" />
+          <Parameter Name="cancellation_ref" Type="Edm.String" />
+        </Action>
+      </EntityType>
+      <EntityType Name="DsfModelSync">
+        <Key><PropertyRef Name="Id" /></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false" />
+        <Property Name="Status" Type="Edm.String" />
+        <Property Name="SourceKind" Type="Edm.String" />
+        <Property Name="SourceId" Type="Edm.String" />
+        <Property Name="ResourceId" Type="Edm.String" />
+        <Property Name="SourceConfigRef" Type="Edm.String" />
+        <Property Name="ComputerId" Type="Edm.String" />
+        <Property Name="SourceCursor" Type="Edm.String" />
+        <Property Name="LastSuccessAt" Type="Edm.String" />
+        <Property Name="NextDueAt" Type="Edm.String" />
+        <Property Name="ErrorMessage" Type="Edm.String" />
+        <Property Name="SyncSequence" Type="Edm.Int64" />
+        <Property Name="FailureCount" Type="Edm.Int64" />
+        <Property Name="ObservationId" Type="Edm.String" />
+        <Property Name="SourceEventId" Type="Edm.String" />
+        <Property Name="Query" Type="Edm.String" />
+        <Property Name="WindowStart" Type="Edm.String" />
+        <Property Name="WindowEnd" Type="Edm.String" />
+        <Property Name="SampleKind" Type="Edm.String" />
+        <Property Name="Outcome" Type="Edm.String" />
+        <Property Name="Summary" Type="Edm.String" />
+        <Property Name="EvidenceRef" Type="Edm.String" />
+        <Property Name="ObservedConfiguration" Type="Edm.String" />
+        <Property Name="ObservedRevision" Type="Edm.String" />
+        <Property Name="ObservedAtMs" Type="Edm.Int64" />
+        <Property Name="ExpectedResourceSequence" Type="Edm.Int64" />
+        <Action Name="Configure" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+          <Parameter Name="source_kind" Type="Edm.String" />
+          <Parameter Name="source_id" Type="Edm.String" />
+          <Parameter Name="resource_id" Type="Edm.String" />
+          <Parameter Name="source_config_ref" Type="Edm.String" />
+          <Parameter Name="computer_id" Type="Edm.String" />
+        </Action>
+        <Action Name="Refresh" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+        </Action>
+        <Action Name="CollectionFailed" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="Pause" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+        </Action>
+        <Action Name="Resume" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+        </Action>
+        <Action Name="CollectionSucceeded" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+          <Parameter Name="observation_id" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+          <Parameter Name="source_cursor" Type="Edm.String" />
+          <Parameter Name="last_success_at" Type="Edm.String" />
+          <Parameter Name="next_due_at" Type="Edm.String" />
+          <Parameter Name="observed_configuration" Type="Edm.String" />
+          <Parameter Name="observed_revision" Type="Edm.String" />
+        </Action>
+        <Action Name="CollectionAbsent" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+          <Parameter Name="observation_id" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+          <Parameter Name="source_cursor" Type="Edm.String" />
+          <Parameter Name="last_success_at" Type="Edm.String" />
+          <Parameter Name="next_due_at" Type="Edm.String" />
+        </Action>
+        <Action Name="CollectionInaccessible" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+          <Parameter Name="observation_id" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="CollectionStale" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfModelSync" />
+          <Parameter Name="expected_sequence" Type="Edm.Int64" />
+          <Parameter Name="observation_id" Type="Edm.String" />
+          <Parameter Name="source_event_id" Type="Edm.String" />
+          <Parameter Name="query" Type="Edm.String" />
+          <Parameter Name="window_start" Type="Edm.String" />
+          <Parameter Name="window_end" Type="Edm.String" />
+          <Parameter Name="sample_kind" Type="Edm.String" />
+          <Parameter Name="outcome" Type="Edm.String" />
+          <Parameter Name="summary" Type="Edm.String" />
+          <Parameter Name="evidence_ref" Type="Edm.String" />
+          <Parameter Name="observed_at_ms" Type="Edm.Int64" />
+          <Parameter Name="expected_resource_sequence" Type="Edm.Int64" />
+          <Parameter Name="source_cursor" Type="Edm.String" />
+          <Parameter Name="last_success_at" Type="Edm.String" />
+          <Parameter Name="next_due_at" Type="Edm.String" />
+        </Action>
+      </EntityType>
+      <EntityType Name="DsfExperiment">
+        <Key><PropertyRef Name="Id" /></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false" />
+        <Property Name="Status" Type="Edm.String" />
+        <Property Name="EffortId" Type="Edm.String" />
+        <Property Name="Branch" Type="Edm.String" />
+        <Property Name="SourceRevision" Type="Edm.String" />
+        <Property Name="ComputerId" Type="Edm.String" />
+        <Property Name="DatabaseId" Type="Edm.String" />
+        <Property Name="MediaBucket" Type="Edm.String" />
+        <Property Name="MediaNamespace" Type="Edm.String" />
+        <Property Name="PermittedExternalCalls" Type="Edm.String" />
+        <Property Name="ProductionDatabaseId" Type="Edm.String" />
+        <Property Name="ProductionMediaBucket" Type="Edm.String" />
+        <Property Name="IsolationEvidenceRef" Type="Edm.String" />
+        <Property Name="ResultRef" Type="Edm.String" />
+        <Property Name="TestEvidenceRef" Type="Edm.String" />
+        <Property Name="SelectionAskId" Type="Edm.String" />
+        <Property Name="DeliveryEffortId" Type="Edm.String" />
+        <Property Name="CleanupEvidenceRef" Type="Edm.String" />
+        <Property Name="ErrorMessage" Type="Edm.String" />
+        <Property Name="Isolated" Type="Edm.Boolean" />
+        <Action Name="Configure" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="effort_id" Type="Edm.String" />
+          <Parameter Name="branch" Type="Edm.String" />
+          <Parameter Name="source_revision" Type="Edm.String" />
+          <Parameter Name="computer_id" Type="Edm.String" />
+          <Parameter Name="database_id" Type="Edm.String" />
+          <Parameter Name="media_bucket" Type="Edm.String" />
+          <Parameter Name="media_namespace" Type="Edm.String" />
+          <Parameter Name="permitted_external_calls" Type="Edm.String" />
+        </Action>
+        <Action Name="Validate" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+        </Action>
+        <Action Name="IsolationSucceeded" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="production_database_id" Type="Edm.String" />
+          <Parameter Name="production_media_bucket" Type="Edm.String" />
+          <Parameter Name="isolation_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="ValidationFailed" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="Run" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+        </Action>
+        <Action Name="RunSucceeded" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="result_ref" Type="Edm.String" />
+          <Parameter Name="test_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="RunFailed" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+        <Action Name="Select" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="selection_ask_id" Type="Edm.String" />
+          <Parameter Name="delivery_effort_id" Type="Edm.String" />
+        </Action>
+        <Action Name="Cleanup" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+        </Action>
+        <Action Name="CleanupSucceeded" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="cleanup_evidence_ref" Type="Edm.String" />
+        </Action>
+        <Action Name="CleanupFailed" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Dsf.Factory.DsfExperiment" />
+          <Parameter Name="error_message" Type="Edm.String" />
+        </Action>
+      </EntityType>
+      <EntityContainer Name="DsfFactoryContainer">
+        <EntitySet Name="DsfResources" EntityType="Dsf.Factory.DsfResource" />
+        <EntitySet Name="DsfFlows" EntityType="Dsf.Factory.DsfFlow" />
+        <EntitySet Name="DsfParticipants" EntityType="Dsf.Factory.DsfParticipant" />
+        <EntitySet Name="DsfObservations" EntityType="Dsf.Factory.DsfObservation" />
+        <EntitySet Name="DsfOperations" EntityType="Dsf.Factory.DsfOperation" />
+        <EntitySet Name="DsfModelSyncs" EntityType="Dsf.Factory.DsfModelSync" />
+        <EntitySet Name="DsfExperiments" EntityType="Dsf.Factory.DsfExperiment" />
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
