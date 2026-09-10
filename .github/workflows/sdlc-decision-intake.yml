@@ -22,7 +22,7 @@ permissions:
                         # trigger alone would never fire
 jobs:
   intake:
-    # only PR comments, only from the repo's own people, only DECISION: comments
+    # Only PR comments beginning with an existing DECISION or RESOLVE command.
     if: >-
       github.event.issue.pull_request != null &&
       (startsWith(github.event.comment.body, 'DECISION:') || startsWith(github.event.comment.body, 'RESOLVE:'))
@@ -46,12 +46,11 @@ jobs:
           # which requires a PAT (GITHUB_TOKEN-created events are suppressed).
           if [[ "$COMMENT_BODY" == RESOLVE:* ]]; then
             HEAD=$(gh pr view "$PR_NUM" --json headRefOid -q .headRefOid)
-            RUN=$(gh run list --workflow sdlc-review --limit 200 --json databaseId,headSha,status -q "[.[] | select(.headSha == \"$HEAD\" and .status == \"completed\")][0].databaseId" || true)
-            if [ -n "${RUN:-}" ] && [ "$RUN" != "null" ]; then
-              gh run rerun "$RUN" && echo "review gate re-run - RESOLVE comments are read live"
-            else
-              echo "no completed review run for this head - RESOLVE applies on the next run"
+            if [ -z "${STACK_TOKEN:-}" ]; then
+              echo "::error::STACK_TOKEN is required to read the trusted gate helper"; exit 1
             fi
+            git clone --depth 1 "https://x-access-token:${STACK_TOKEN}@github.com/arni-labs/stack" /tmp/stack
+            python3 /tmp/stack/gates/rerun-record-checks.py --head "$HEAD" --check review --repo "$GH_REPO"
             exit 0
           fi
           if [ -z "${STACK_TOKEN:-}" ]; then
@@ -81,5 +80,5 @@ jobs:
           gh pr edit "$PR_NUM" --body-file /tmp/body.md
           gh label create converge-ack -d "owner decided after convergence stall - re-arms the review gate" -c "0e8a16" 2>/dev/null || true
           gh pr edit "$PR_NUM" --add-label converge-ack
-          gh pr comment "$PR_NUM" --body "Ruling recorded in the standing decisions; review gate re-armed. The next panel round reads it as intent."
+          gh pr comment "$PR_NUM" --body "Ruling recorded in the standing decisions; review gate re-armed. The owning effort follows the recorded scope decision."
           echo "body edited with PAT - the edited event re-runs the gate with the fresh payload"

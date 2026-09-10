@@ -47,11 +47,10 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
     }
     let mut commits = BTreeSet::new();
     let mut reviewers = BTreeSet::new();
-    let mut recorded = 0usize;
     for (i, run) in runs.iter().enumerate() {
         let fields = run.get("fields").unwrap_or(run);
         let status = str_of(fields, "status").or_else(|| str_of(fields, "Status"));
-        if status.as_deref() != Some("Recorded") {
+        if !matches!(status.as_deref(), Some("Recorded" | "Superseded")) {
             return Err(format!(
                 "chain_review_ready: ReviewRun[{i}] status {status:?} is not Recorded"
             ));
@@ -60,6 +59,10 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
             return Err(format!(
                 "chain_review_ready: ReviewRun[{i}] record_present is false"
             ));
+        }
+        // Superseded rows retain evidence but no longer vote in the active panel.
+        if status.as_deref() == Some("Superseded") {
+            continue;
         }
         if bool_of(fields, "fix_it_failed") {
             return Err(format!(
@@ -81,16 +84,14 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
             ));
         }
         commits.insert(commit);
-        if let Some(reviewer) = str_of(fields, "reviewer_id").or_else(|| str_of(fields, "ReviewerId"))
+        if let Some(reviewer) =
+            str_of(fields, "reviewer_id").or_else(|| str_of(fields, "ReviewerId"))
         {
-            if !reviewer.is_empty() {
-                reviewers.insert(reviewer);
-            }
+            reviewers.insert(reviewer);
         }
         for reviewer in string_list(fields, "reviewers_ran") {
             reviewers.insert(reviewer);
         }
-        recorded += 1;
     }
     if commits.len() != 1 {
         return Err("chain_review_ready: ReviewRuns do not share one commit".to_string());
@@ -114,7 +115,6 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
             reviewers
         ));
     }
-    let _ = recorded;
     Ok(())
 }
 
@@ -134,7 +134,10 @@ fn open_act_on_count(findings: &Value) -> usize {
 }
 
 fn is_full_sha(commit: &str) -> bool {
-    commit.len() == 40 && commit.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn json_field(fields: &Value, name: &str) -> Result<Value, String> {
@@ -353,5 +356,103 @@ mod tests {
                 .unwrap_err()
                 .contains("not Recorded")
         );
+    }
+    fn history_run(status: &str, reviewer: &str, commit: &str, failed: bool) -> Value {
+        json!({"fields": {
+            "status": status, "record_present": true, "commit": commit,
+            "reviewer_id": reviewer, "fix_it_failed": failed,
+            "findings": if failed { "[{\"severity\":\"act-on\",\"resolved\":false}]" } else { "[]" }
+        }})
+    }
+
+    fn current_panel() -> Vec<Value> {
+        vec![
+            history_run("Recorded", "grok", SHA, false),
+            history_run("Recorded", "codex", SHA, false),
+            history_run("Recorded", "fable", SHA, false),
+        ]
+    }
+
+    #[test]
+    fn superseded_failed_round_preserves_history_without_blocking_current_panel() {
+        let old_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let historical = history_run("Superseded", "grok", old_sha, true);
+        let unchanged = historical.clone();
+        let mut runs = current_panel();
+        runs.insert(0, historical);
+        assert!(review_panel_holds(&runs, Some(SHA)).is_ok());
+        assert_eq!(runs[0], unchanged);
+        assert!(review_panel_holds(&runs, Some(old_sha)).is_err());
+    }
+
+    #[test]
+    fn historical_rows_never_supply_the_active_panel() {
+        assert!(review_panel_holds(&[], Some(SHA)).is_err());
+        let superseded = history_run("Superseded", "grok", SHA, false);
+        assert!(review_panel_holds(std::slice::from_ref(&superseded), Some(SHA)).is_err());
+        assert!(
+            review_panel_holds(
+                &[superseded, history_run("Recorded", "codex", SHA, false)],
+                Some(SHA)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn superseded_without_preserved_record_is_rejected() {
+        let mut runs = current_panel();
+        let mut missing = history_run("Superseded", "grok", SHA, false);
+        missing["fields"]["record_present"] = json!(false);
+        runs.push(missing);
+        assert!(review_panel_holds(&runs, Some(SHA)).is_err());
+    }
+
+    #[test]
+    fn only_explicit_supersession_retires_history() {
+        for status in ["Requested", "Failed", "Recorded", "unknown"] {
+            let mut runs = current_panel();
+            runs.push(history_run(
+                status,
+                "grok",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                true,
+            ));
+            assert!(review_panel_holds(&runs, Some(SHA)).is_err(), "{status}");
+        }
+    }
+
+    #[test]
+    fn active_failure_and_open_findings_remain_blocking() {
+        for failed in [true, false] {
+            let mut runs = current_panel();
+            let mut failure = history_run("Recorded", "grok", SHA, failed);
+            failure["fields"]["findings"] = json!("[{\"severity\":\"act-on\",\"resolved\":false}]");
+            runs.push(failure);
+            assert!(review_panel_holds(&runs, Some(SHA)).is_err());
+        }
+    }
+
+    #[test]
+    fn active_panel_requires_one_valid_commit_and_preserved_records() {
+        for (field, value) in [
+            ("commit", json!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")),
+            ("commit", json!("not-a-sha")),
+            ("record_present", json!(false)),
+        ] {
+            let mut runs = current_panel();
+            runs[0]["fields"][field] = value;
+            assert!(review_panel_holds(&runs, Some(SHA)).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn repeated_or_unknown_reviewers_do_not_supply_a_majority() {
+        let runs = vec![
+            history_run("Recorded", "codex", SHA, false),
+            history_run("Recorded", "codex", SHA, false),
+            history_run("Recorded", "unknown", SHA, false),
+        ];
+        assert!(review_panel_holds(&runs, Some(SHA)).is_err());
     }
 }

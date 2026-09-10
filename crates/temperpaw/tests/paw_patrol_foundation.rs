@@ -4082,3 +4082,27 @@ fn effort_merge_permits_l0_l1_and_denies_l2() {
         "ordinary Agent must not drive ReleaseRun callbacks"
     );
 }
+
+#[test]
+fn harness_can_submit_evidence_but_cannot_forge_validator_callbacks() {
+    let policy = read(repo_root().join("os-apps/paw-patrol/policies/patrol.cedar"));
+    let engine = AuthzEngine::new(&policy).expect("patrol.cedar should parse");
+    let harness = agent_context("codex", "harness");
+    let attrs = resource_attrs(&[("id", serde_json::json!("evidence"))]);
+    for (action, resource) in [
+        ("RecordPanel", "ReviewRun"),
+        ("RecordPanelFixItFailed", "ReviewRun"),
+        ("Supersede", "ReviewRun"),
+        ("SubmitProof", "ProofPacket"),
+    ] {
+        assert!(engine.authorize(&harness, action, resource, &attrs).is_allowed(),
+            "registered harness cannot submit {resource}.{action}");
+    }
+    for (action, resource) in [
+        ("IngestProof", "ProofPacket"),
+        ("IngestRecord", "ReviewRun"),
+    ] {
+        assert!(!engine.authorize(&harness, action, resource, &attrs).is_allowed(),
+            "harness must not forge {resource}.{action}");
+    }
+}

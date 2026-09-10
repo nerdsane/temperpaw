@@ -1,3 +1,4 @@
+# Fork contributions are inspected as data; never execute their code in this workflow.
 # The review gate: no merge without a valid review record for this head.
 # Vendor as .github/workflows/sdlc-review.yml.
 #
@@ -7,35 +8,63 @@
 # record to the PR (stack/review/post-review-record.sh). This gate checks that a
 # record exists for the head being merged, applies any owner RESOLVE
 # adjudications, validates it (panel complete, act-ons resolved), and routes:
-# panel risk low -> auto-merge; anything else -> a human presses merge, reading
-# the report. One guard: workflow-changing PRs always go to a human.
+# Merge is owned by the authorized Temper effort; this validator never auto-merges.
 #
 # A red gate with "no record" is an instruction to the owner, not a failure of
 # the pipeline: run the panel, post the record. Rabbit-hole detection and the
 # arbiter are the owner agent's tools (arni-mode babysit playbook), not CI steps.
 name: sdlc-review
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, labeled, edited]
 concurrency:
   group: sdlc-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 permissions:
-  contents: write        # routing enables auto-merge
+  contents: read
   pull-requests: write
   issues: write          # label create/apply is the Issues API
 jobs:
   review:
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
     runs-on: ubuntu-latest
     steps:
+      - name: Start the gate on the contributor commit
+        id: contributor_check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: check} = await github.rest.checks.create({
+              ...context.repo, name: 'review',
+              head_sha: context.payload.pull_request.head.sha,
+              status: 'in_progress',
+              details_url: context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId
+            });
+            core.setOutput('check_id', check.id);
       - uses: actions/checkout@v6.0.2
-        with: { fetch-depth: 0 }
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Fetch contribution objects without checking out its code
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUM" =~ ^[0-9]+$ && "$PR_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin "refs/pull/${PR_NUM}/head"
+          test "$(git rev-parse FETCH_HEAD)" = "$PR_HEAD" || {
+            echo "::error::PR changed during this run; use the latest event"; exit 1;
+          }
       - name: Fetch the review toolkit from stack
         env:
           STACK_TOKEN: ${{ secrets.STACK_TOKEN }}
         run: |
           if [ -z "${STACK_TOKEN:-}" ]; then
-            echo "::error::STACK_TOKEN unavailable - fork PRs cannot run the gates; a maintainer re-pushes the branch in-repo"; exit 1; fi
+            echo "::error::STACK_TOKEN is missing from the trusted base-repository gate configuration"; exit 1; fi
           git clone --depth 1 https://x-access-token:${STACK_TOKEN}@github.com/arni-labs/stack /tmp/stack || {
             echo "::error::cannot reach arni-labs/stack"; exit 1; }
       - name: Ask Temper for ReviewRuns on this head
@@ -162,39 +191,37 @@ jobs:
           test -f .review/review.json
           python3 -c "import json; r=json.load(open('.review/review.json')); assert r.get('commit')"
           echo "Temper review rows hold for $PR_HEAD"
-      - name: Route on the panel's risk judgment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUM: ${{ github.event.pull_request.number }}
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          RISK=$(python3 -c "import json; print(json.load(open('.review/review.json')).get('risk','high'))")
-          CHANGED=$(git diff --name-only "origin/${PR_BASE_REF}...HEAD") \
-            || { echo "::error::cannot diff against base - failing closed"; exit 1; }
-          disarm() {
-            # deterministic revoke: skip when nothing is armed, and any failure
-            # to revoke an ARMED auto-merge is fatal - no message matching
-            local armed
-            armed=$(gh pr view "$PR_NUM" --json autoMergeRequest -q '.autoMergeRequest != null')
-            [ "$armed" = "true" ] || return 0
-            gh pr merge "$PR_NUM" --disable-auto || { echo "::error::auto-merge is armed and could not be revoked"; exit 1; }
-          }
-          if grep -q '^\.github/workflows/' <<<"$CHANGED"; then
-            disarm
-            gh label create human-review --color D93F0B --description "SDLC: routed to a human decision" 2>/dev/null || true
-            gh pr edit "$PR_NUM" --add-label human-review 2>/dev/null || true
-            echo "workflow files changed - a human presses merge"; exit 0; fi
-          if [ "$RISK" = "low" ]; then
-            gh pr merge "$PR_NUM" --squash --auto && echo "auto-merge enabled: panel risk low"
-          else
-            # an earlier low-risk run may have armed auto-merge; revoke it
-            disarm
-            gh pr edit "$PR_NUM" --add-label human-review 2>/dev/null || true
-            echo "panel risk $RISK - a human presses merge"
-          fi
       - name: Write the verdict to the job summary
         if: always()
         run: |
           if [ -f .review/review.json ]; then
             python3 -c "import json; r=json.load(open('.review/review.json')); print(f\"### Review PASS\\nPanel: {', '.join(r.get('reviewers_ran',[]))}\\nrisk: {r.get('risk','?')}\")" >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Report this gate on the contributor commit
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const {data: current} = await github.rest.pulls.get({
+              ...context.repo, pull_number: pr.number
+            });
+            if (current.head.sha !== pr.head.sha) {
+              core.notice('PR head changed; this result cannot authorize the newer commit.');
+              return;
+            }
+            const result = '${{ job.status }}';
+            const checkId = Number('${{ steps.contributor_check.outputs.check_id }}');
+            const report = {
+              ...context.repo, name: 'review', head_sha: pr.head.sha,
+              status: 'completed',
+              conclusion: result === 'success' ? 'success' :
+                result === 'cancelled' ? 'cancelled' : 'failure',
+              details_url: context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId,
+              output: {title: 'review', summary: 'Validated using trusted base-repository gate code.'}
+            };
+            if (checkId) {
+              await github.rest.checks.update({...report, check_run_id: checkId});
+            } else {
+              await github.rest.checks.create(report);
+            }

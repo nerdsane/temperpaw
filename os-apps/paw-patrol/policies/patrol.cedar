@@ -384,11 +384,12 @@ permit(
     Action::"AttachReviewFile",
     Action::"RetractReviewFile",
     Action::"RecordPanel",
-    Action::"RecordPanelFixItFailed"
+    Action::"RecordPanelFixItFailed",
+    Action::"Supersede"
   ],
   resource is ReviewRun
 ) when {
-  ["agent", "worker", "system", "supervisor", "human"].contains(principal.agent_type)
+  ["agent", "worker", "system", "supervisor", "human", "harness"].contains(principal.agent_type)
 };
 
 permit(
@@ -413,7 +414,8 @@ permit(
     Action::"AttachDraft",
     Action::"AttachProofFile",
     Action::"RetractProofFile",
-    Action::"MarkReady"
+    Action::"MarkReady",
+    Action::"SubmitProof"
   ],
   resource is ProofPacket
 );

@@ -63,12 +63,27 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             return 0;
         }
     };
-    let body = ctx
-        .trigger_params
-        .get("comment_body")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let parsed = parse_record(body);
+    let parsed =
+        if ctx.entity_type == PROOF_ENTITY && ctx.trigger_params.get("proof_json").is_some() {
+            let raw = ctx
+                .trigger_params
+                .get("proof_json")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let parsed = parse_json_record("proof", raw);
+            if !parsed.parse_ok {
+                set_error_result(&parsed.reason);
+                return 0;
+            }
+            parsed
+        } else {
+            let body = ctx
+                .trigger_params
+                .get("comment_body")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            parse_record(body)
+        };
     let action = ingest_action(&ctx.entity_type, &parsed);
     if action == NO_DISPATCH {
         // Empty action => the kernel dispatches nothing. Success, no error: a
@@ -176,7 +191,12 @@ fn decode(kind: &'static str, b64: &str) -> ParsedRecord {
         Ok(t) => t,
         Err(_) => return failed(kind, "payload is not valid UTF-8"),
     };
-    let record: Value = match serde_json::from_str(&text) {
+    parse_json_record(kind, &text)
+}
+
+/// Validate direct JSON with the same rules as the historical encoded records.
+pub fn parse_json_record(kind: &'static str, text: &str) -> ParsedRecord {
+    let record: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => return failed(kind, "payload is not valid JSON"),
     };
@@ -462,6 +482,29 @@ mod tests {
     }
     fn proof_477() -> ParsedRecord {
         parse_record(include_str!("../tests/fixtures/pr477_proof.txt"))
+    }
+
+    #[test]
+    fn direct_proof_json_preserves_the_validated_record() {
+        let original = proof_480();
+        let direct = parse_json_record("proof", &original.record.to_string());
+        assert!(direct.parse_ok, "{}", direct.reason);
+        assert_eq!(write_params(&direct), write_params(&original));
+        assert_eq!(ingest_action(PROOF_ENTITY, &direct), INGEST_PROOF_ACTION);
+    }
+
+    #[test]
+    fn direct_proof_rejects_malformed_and_failing_evidence() {
+        for raw in ["{", "[]", "{}", r#"{"commit":"not-a-sha"}"#] {
+            let parsed = parse_json_record("proof", raw);
+            assert!(!parsed.parse_ok);
+            assert_eq!(ingest_action(PROOF_ENTITY, &parsed), NO_DISPATCH);
+        }
+        let mut record = proof_480().record;
+        record["tests"]["result"] = json!("fail");
+        let parsed = parse_json_record("proof", &record.to_string());
+        assert!(!parsed.parse_ok);
+        assert_eq!(ingest_action(PROOF_ENTITY, &parsed), NO_DISPATCH);
     }
 
     // --- the real records decode and validate ---

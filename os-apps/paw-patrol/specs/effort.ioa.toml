@@ -457,7 +457,7 @@ kind = "input"
 from = ["InReview"]
 to = "InReview"
 effect = "set review_fix_it_clear true"
-hint = "Every attached ReviewRun has fix-it rubrics clear. If any failed, RequestChanges instead."
+hint = "Every active (non-Superseded) attached ReviewRun has fix-it rubrics clear. If any failed, RequestChanges instead."
 
 [[action]]
 name = "MarkRiskClear"
@@ -478,7 +478,7 @@ guard = [
   { type = "is_true", var = "review_fix_it_clear" }
 ]
 effect = "set review_passed true"
-hint = "Sets review_passed. chain_review_ready retracts unless attached ReviewRuns are Recorded and pass validate.py."
+hint = "Sets review_passed. chain_review_ready retracts unless the active (non-Superseded) attached ReviewRuns form a Recorded passing panel."
 
 [[action.triggers]]
 name = "pass_review_checks_runs"
@@ -494,7 +494,7 @@ kind = "input"
 from = ["InReview"]
 to = "InReview"
 effect = "set review_passed false"
-hint = "Callback: attached ReviewRuns are missing, not Recorded, or fail validate.py."
+hint = "Callback: the active (non-Superseded) attached panel is missing, not Recorded, or fails review validation."
 
 [[action]]
 name = "RequestChanges"

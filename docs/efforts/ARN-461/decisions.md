@@ -33,3 +33,39 @@
 **Chose shared contract repair over one-off grants and a redesign because:** It addresses the recurring failure while retaining validation and keeping the task bounded.
 
 **Where:** docs/efforts/ARN-461; Temper Intent arn461-gate-repair-20260910; user authorization in Codex task 01a08157-a252-7b43-b1d9-facd84cd2695.
+
+## Preserve retired review rounds without blocking their replacements
+
+**Decision:** Exclude explicitly Superseded ReviewRuns from the active review and merge panel, while requiring their original record to remain present.
+
+**Came up because:** Effort appends review IDs across rounds, but both row validators rejected the existing terminal Superseded state, so a historical failed round blocked a later passing panel indefinitely.
+
+**Options:** Delete historical attachments; infer retirement from commit differences; honor the existing Supersede transition.
+
+**Chose explicit supersession over deletion or inference because:** It preserves honest evidence and makes retirement intentional. Requested, failed, or stale active runs still block; retired runs never contribute model votes. Requiring record_present also retains the ReviewRun RecordedHasRecord invariant. The tradeoff is one explicit retirement action after replacement confirmation exists.
+
+**Where:** os-apps/paw-patrol/wasm/chain_review_ready/src/lib.rs; os-apps/paw-patrol/wasm/chain_merge_ready/src/lib.rs; os-apps/paw-patrol/specs/effort.ioa.toml; os-apps/paw-patrol/policies/patrol.cedar.
+
+## Keep contributor pull requests in their original repository
+
+**Decision:** Run privileged SDLC validation from the trusted base repository, inspecting the contribution as Git objects and PR data, and report each gate against the actual contributor commit.
+
+**Came up because:** GitHub withholds STACK_TOKEN from fork pull_request workflows, but our required gates clone private arni-labs/stack. Rehosting Nick's work avoided that restriction without fixing the shared failure.
+
+**Options:** Rehost contributor branches; remove the token while retaining the private clone; publish private Stack code; separate trusted gate execution from unprivileged contribution builds.
+
+**Chose trusted gate execution because:** It preserves Nick's original PRs and keeps Stack private. The workflow must never check out or execute the contributor's code with repository secrets. Explicit checks remain tied to the PR head because pull_request_target itself runs against the base. Merge remains owned by the authorized Temper effort; this privileged validator does not auto-merge.
+
+**Where:** Stack gates/sdlc.yml and check-effort-artifacts.py; Temper .github/workflows/sdlc-*.yml; original Temper PRs 411 and 412.
+
+## Submit evidence through the validator boundary
+
+**Decision:** Permit registered harnesses to record actual review panels and submit raw proof JSON through SubmitProof, while keeping IngestProof and IngestRecord internal.
+
+**Came up because:** The installed policies excluded the harness class from review submission and ordinary proof callers had no public path into the existing validator.
+
+**Options:** Grant the internal callbacks to agents; keep issuing per-session exceptions; expose the already validated proof input and repair the existing panel permit.
+
+**Chose the validated public input because:** It removes the recurring recording dead end without allowing callers to declare invalid evidence Recorded. The packaged module reuses the current proof validation rules and preserves the submitted commit and evidence fields. Invalid input remains unrecorded.
+
+**Where:** patrol.cedar; proof_packet.ioa.toml; record_ingest/src/lib.rs; paw_patrol_foundation.rs.

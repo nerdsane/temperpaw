@@ -157,6 +157,22 @@ to = "Ready"
 params = ["summary_markdown", "proof_json"]
 hint = "Mark proof ready for final workflow gates."
 
+# Public proof input is validated by record_ingest. Only its internal callback
+# writes Recorded fields; callers cannot fire IngestProof directly.
+[[action]]
+name = "SubmitProof"
+kind = "input"
+from = ["Drafting", "Ready"]
+to = "Drafting"
+params = ["proof_json"]
+effect = [{ type = "trigger", name = "proof_json_submit" }]
+hint = "Submit raw proof.json for validation. Re-read the row: only Recorded is accepted evidence; invalid input remains Drafting."
+
+[[action.triggers]]
+name = "proof_json_submit"
+kind = "wasm"
+module = "record_ingest"
+
 [[action]]
 name = "Reject"
 kind = "input"
