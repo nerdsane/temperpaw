@@ -58,6 +58,50 @@ RESOURCES = {
     ),
 }
 
+# The schema declares what it already knows, so a renderer draws the twin graph
+# from these annotations alone. All values are emitted into the generated CSDL.
+
+# The provider a resource type mirrors. The twin's provider vocabulary is not the
+# internal module provider string: the Cloudflare R2 bucket uses "r2" for its WASM
+# module names but declares provider "cloudflare".
+PROVIDER_ANNOTATION = {
+    "railway": "railway",
+    "vercel": "vercel",
+    "supabase": "supabase",
+    "r2": "cloudflare",
+    "datadog": "datadog",
+    "media": "media",
+}
+# The twin's own record types are provided by Temper; each declares its node role.
+RECORD_ROLES = {
+    "DsfObservation": "observation",
+    "DsfFlow": "flow",
+    "DsfParticipant": "participant",
+    "DsfExperiment": "experiment",
+    "DsfModelSync": "sync",
+}
+# Comma-separated entity type names the ids in a property may belong to.
+DSF_RESOURCE_TYPES = ",".join(entity for entity, *_ in RESOURCES.values())
+APPLICATION_TYPES = "DsfRailwayServiceInstance,DsfVercelProject"
+# State var -> (referenced entity types, reference shape). Only fields that truly
+# hold ids of other entities. Keyed by the state var name, so a property is
+# annotated wherever the generated schema declares it; "single" is one id and
+# "json_list" is a JSON array string of ids. File is the Temper config contract.
+PROPERTY_REFERENCES = {
+    "application_id": (APPLICATION_TYPES, "single"),
+    "config_ref": ("File", "single"),
+    "dependency_ids": (DSF_RESOURCE_TYPES, "json_list"),
+    "subject_id": (DSF_RESOURCE_TYPES, "single"),
+    "resource_ids": (DSF_RESOURCE_TYPES, "json_list"),
+    "resource_id": (DSF_RESOURCE_TYPES, "single"),
+    "api_resource_id": ("DsfRailwayServiceInstance", "single"),
+    "bucket_resource_id": ("DsfCloudflareR2Bucket", "single"),
+}
+
+
+def property_name(state_name):
+    return "".join(part.capitalize() for part in state_name.split("_"))
+
 
 def inline(value):
     if isinstance(value, dict):
@@ -918,6 +962,18 @@ def csdl(documents):
     def add(parent, tag, **attrs):
         return ET.SubElement(parent, f"{{{edm}}}{tag}", attrs)
 
+    # Any schema carrying Temper.Twin is a twin; the String is its display name.
+    add(schema, "Annotation", Term="Temper.Twin", String="Deep Sci-Fi")
+    resource_providers = {
+        entity: PROVIDER_ANNOTATION[provider]
+        for entity, provider, *_ in RESOURCES.values()
+    }
+    # Property reference edges are declared with OData external targeting rather
+    # than nested inside <Property>: the kernel CSDL parser reads a property only
+    # as a self-closing element, so giving <Property> children would drop it from
+    # the parsed schema. Targeting keeps every property intact and still declares
+    # the edge against the same property.
+    references = []
     for document in documents:
         name = document["automaton"]["name"]
         entity = add(schema, "EntityType", Name=name)
@@ -925,12 +981,18 @@ def csdl(documents):
         add(entity, "Property", Name="Id", Type="Edm.String", Nullable="false")
         add(entity, "Property", Name="Status", Type="Edm.String")
         for variable in document.get("state", []):
-            add(
-                entity,
-                "Property",
-                Name="".join(part.capitalize() for part in variable["name"].split("_")),
-                Type=kinds[variable["type"]],
-            )
+            property_label = property_name(variable["name"])
+            add(entity, "Property", Name=property_label, Type=kinds[variable["type"]])
+            reference = PROPERTY_REFERENCES.get(variable["name"])
+            if reference:
+                references.append((f"Dsf.Twin.{name}/{property_label}", *reference))
+        # Provider groups nodes by the external system; role groups by twin concern.
+        if name in resource_providers:
+            provider, role = resource_providers[name], "resource"
+        else:
+            provider, role = "temper", RECORD_ROLES[name]
+        add(entity, "Annotation", Term="Temper.Provider", String=provider)
+        add(entity, "Annotation", Term="Temper.Role", String=role)
         for operation in document["action"]:
             bound = add(schema, "Action", Name=operation["name"], IsBound="true")
             add(bound, "Parameter", Name="bindingParameter", Type=f"Dsf.Twin.{name}")
@@ -945,6 +1007,10 @@ def csdl(documents):
     for document in documents:
         name = document["automaton"]["name"]
         add(container, "EntitySet", Name=name + "s", EntityType=f"Dsf.Twin.{name}")
+    for target, targets, shape in references:
+        block = add(schema, "Annotations", Target=target)
+        add(block, "Annotation", Term="Temper.References", String=targets)
+        add(block, "Annotation", Term="Temper.ReferenceShape", String=shape)
     ET.indent(root, space="  ")
     return ET.tostring(root, encoding="unicode", xml_declaration=True) + "\n"
 
