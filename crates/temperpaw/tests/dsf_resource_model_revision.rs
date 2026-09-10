@@ -6,7 +6,7 @@ use temper_runtime::scheduler::SimActorHandler;
 use temper_server::entity_actor::sim_handler::EntityActorHandler;
 
 fn app() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-factory")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin")
 }
 
 fn registered(name: &str) -> EntityActorHandler {

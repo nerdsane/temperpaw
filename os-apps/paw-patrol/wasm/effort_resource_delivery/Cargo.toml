@@ -6,7 +6,7 @@ edition = "2024"
 [workspace]
 
 [dependencies]
-dsf-resource-common = { path = "../../../dsf-factory/wasm/dsf_resource_common" }
+dsf-resource-common = { path = "../../../dsf-twin/wasm/dsf_resource_common" }
 chain-merge-ready = { path = "../chain_merge_ready", features = ["library"] }
 chain-proof-ready = { path = "../chain_proof_ready", features = ["library"] }
 serde = { version = "1", features = ["derive"] }

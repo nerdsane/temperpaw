@@ -219,7 +219,7 @@ fn github_url(
     }
     request
         .headers
-        .push(("user-agent".into(), "temper-dsf-factory".into()));
+        .push(("user-agent".into(), "temper-dsf-twin".into()));
     request
         .headers
         .push(("X-GitHub-Api-Version".into(), "2022-11-28".into()));

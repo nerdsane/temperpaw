@@ -1,8 +1,10 @@
-# DSF factory
+# DSF twin
 
-This app models Deep Sci-fi's running infrastructure, application flows and real
-participant activity. DSF's product code stays in its existing repository. Intent,
-Effort, Ask, File and Computer remain the existing Temper contracts.
+This app is a live model of Deep Sci-fi: its running infrastructure, application
+flows and real participant activity. All changes to DSF go through this model. The
+factory is the surrounding lifecycle: Intent, Effort and Ask in paw-patrol, computers
+in paw-compute, and Foundry. DSF's product code stays in its existing repository.
+Intent, Effort, Ask, File and Computer remain the existing Temper contracts.
 
 The installation and live proof are tracked in [ARN-467](https://linear.app/arni-build/issue/ARN-467).
 Source and passing local tests do not establish which revision is installed.
@@ -119,12 +121,12 @@ database and bucket. Production staging names do not prove isolation.
 ## Build and verify
 
 ```sh
-python3 os-apps/dsf-factory/specs/generate.py --check
-python3 os-apps/dsf-factory/wasm/generate_modules.py --check
-bash os-apps/dsf-factory/wasm/build.sh
+python3 os-apps/dsf-twin/specs/generate.py --check
+python3 os-apps/dsf-twin/wasm/generate_modules.py --check
+bash os-apps/dsf-twin/wasm/build.sh
 cargo test -p temperpaw --test dsf_factory_contract
 cargo test -p temperpaw --test dsf_resource_wasm
-python3 -m unittest discover -s os-apps/dsf-factory -p test_names.py
+python3 -m unittest discover -s os-apps/dsf-twin -p test_names.py
 ```
 
 The build derives the module manifest from the executable triggers and packages
@@ -136,7 +138,7 @@ required separately before deployment is complete.
 Before installation, fetch fresh metadata from the target tenant and run:
 
 ```sh
-python3 os-apps/dsf-factory/check_names.py --tenant default --live-metadata /path/to/target-metadata.xml
+python3 os-apps/dsf-twin/check_names.py --tenant default --live-metadata /path/to/target-metadata.xml
 ```
 
 For upgrades, also supply --installed-record and --installed-model exported from

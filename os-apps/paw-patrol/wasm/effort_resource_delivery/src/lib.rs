@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(target_arch = "wasm32")]
 pub mod guest;
-const MANIFEST: &str = include_str!("../../../../dsf-factory/specs/module-contracts.json");
+const MANIFEST: &str = include_str!("../../../../dsf-twin/specs/module-contracts.json");
 const MAX_OPERATIONS: usize = 8;
 
 #[derive(Clone)]

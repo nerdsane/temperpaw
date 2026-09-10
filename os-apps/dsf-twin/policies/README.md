@@ -1,4 +1,4 @@
-# Factory permissions
+# DSF twin permissions
 
 Run `python3 policies/generate.py` after changing the IOA actions or packaged modules. `--check` rejects an outdated policy. The generator takes resource commands from `module-contracts.json` and classifies every remaining declared action as a runtime callback. The retained model types have explicit command lists.
 

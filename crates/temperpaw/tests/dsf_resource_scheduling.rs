@@ -9,7 +9,7 @@ use temper_server::{
 };
 
 fn specs() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-factory/specs")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin/specs")
 }
 
 #[test]

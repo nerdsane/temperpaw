@@ -26,7 +26,7 @@ async fn native_model_investigation_creates_one_worker_and_reports_correlated_ev
     let policy = format!(
         "{}\n{}",
         fs::read_to_string(root.join("paw-patrol/policies/patrol.cedar")).unwrap(),
-        fs::read_to_string(root.join("dsf-factory/policies/model_investigation.cedar")).unwrap()
+        fs::read_to_string(root.join("dsf-twin/policies/model_investigation.cedar")).unwrap()
     );
     state
         .authz
@@ -177,7 +177,7 @@ async fn native_model_investigation_creates_one_worker_and_reports_correlated_ev
 fn installed_bundle_includes_investigation_policy_and_retains_provider_guards() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps");
     temper_platform::os_apps::add_os_apps_dir_preferred(root);
-    let bundle = temper_platform::os_apps::get_os_app("dsf-factory").unwrap();
+    let bundle = temper_platform::os_apps::get_os_app("dsf-twin").unwrap();
     assert!(
         bundle
             .cedar_policy_sources
@@ -196,7 +196,7 @@ fn installed_bundle_includes_investigation_policy_and_retains_provider_guards() 
 #[test]
 fn investigation_policy_refuses_forged_results_and_reassignment_even_with_ambient_permit() {
     use std::collections::HashMap;
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-factory");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin");
     let policy = fs::read_to_string(root.join("policies/model_investigation.cedar")).unwrap();
     let engine =
         temper_authz::AuthzEngine::new(&format!("{policy}\npermit(principal,action,resource);"))
