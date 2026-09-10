@@ -371,6 +371,120 @@ fn validate_proof(r: &Value) -> Result<(), String> {
             return Err(format!("independent_verifier did not rerun '{key}'"));
         }
     }
+    validate_proof_shape(r)
+}
+
+fn allowed_fields(r: &Value, allowed: &[&str]) -> Result<(), String> {
+    let fields = r.as_object().ok_or("is not an object")?;
+    for key in fields.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Err(format!("{key} is not an allowed field"));
+        }
+    }
+    Ok(())
+}
+
+fn optional_string(r: &Value, key: &str) -> Result<(), String> {
+    if r.get(key).is_some() {
+        str_field(r, key)?;
+    }
+    Ok(())
+}
+
+fn enum_field(r: &Value, key: &str, choices: &[&str]) -> Result<(), String> {
+    let value = str_field(r, key)?;
+    if !choices.contains(&value) {
+        return Err(format!("{key} '{value}' is not one of {choices:?}"));
+    }
+    Ok(())
+}
+
+/// Required/optional field types and enums from Stack proof/schema.json.
+/// Semantic pass/rerun checks remain in validate_proof.
+fn validate_proof_shape(r: &Value) -> Result<(), String> {
+    allowed_fields(
+        r,
+        &[
+            "effort",
+            "repo",
+            "commit",
+            "changed_surface",
+            "blast_radius",
+            "tests",
+            "features",
+            "independent_verifier",
+        ],
+    )?;
+    str_field(r, "effort")?;
+    str_field(r, "repo")?;
+    let tests = object_field(r, "tests")?;
+    allowed_fields(tests, &["added", "command", "result", "evidence"])?;
+    str_field(tests, "command").map_err(|e| format!("tests.{e}"))?;
+    optional_string(tests, "evidence")?;
+    if tests.get("added").is_some() {
+        str_array_field(tests, "added")?;
+    }
+    let iv = object_field(r, "independent_verifier")?;
+    allowed_fields(iv, &["reran", "agrees", "findings"])?;
+    optional_string(iv, "findings")?;
+    for (i, feature) in array_field(r, "features")?.iter().enumerate() {
+        let check = || -> Result<(), String> {
+            allowed_fields(
+                feature,
+                &[
+                    "key",
+                    "coverage",
+                    "verification",
+                    "driven_by",
+                    "steps",
+                    "ui",
+                    "verdict",
+                    "unreachable_reason",
+                ],
+            )?;
+            enum_field(
+                feature,
+                "coverage",
+                &["changed", "blast_radius", "untouched"],
+            )?;
+            enum_field(feature, "verification", &["rerun", "review"])?;
+            enum_field(feature, "driven_by", &["author", "independent", "both"])?;
+            optional_string(feature, "unreachable_reason")?;
+            let steps = array_field(feature, "steps")?;
+            if steps.is_empty() {
+                return Err("steps is empty".to_string());
+            }
+            for (j, step) in steps.iter().enumerate() {
+                let check_step = || -> Result<(), String> {
+                    allowed_fields(step, &["action", "observed", "evidence"])?;
+                    str_field(step, "action")?;
+                    str_field(step, "observed")?;
+                    optional_string(step, "evidence")
+                };
+                check_step().map_err(|e| format!("steps[{j}].{e}"))?;
+            }
+            if let Some(ui) = feature.get("ui") {
+                allowed_fields(
+                    ui,
+                    &[
+                        "looked",
+                        "works",
+                        "usable",
+                        "looks_good",
+                        "notes",
+                        "screenshots",
+                    ],
+                )?;
+                for judgment in ["looked", "works", "usable", "looks_good"] {
+                    bool_field(ui, judgment).map_err(|e| format!("ui.{e}"))?;
+                }
+                str_array_field(ui, "screenshots").map_err(|e| format!("ui.{e}"))?;
+                optional_string(ui, "notes")?;
+            }
+            Ok(())
+        };
+        check().map_err(|e| format!("features[{i}].{e}"))?;
+    }
     Ok(())
 }
 
@@ -715,10 +829,11 @@ mod tests {
     fn good_proof() -> Value {
         json!({
             "commit": "27a90bf7c6971263ea9858861d95f58d27e933f5",
+            "effort": "ARN-461", "repo": "nerdsane/temperpaw",
             "changed_surface": ["x"],
             "blast_radius": [],
-            "features": [{ "key": "x", "verification": "rerun", "verdict": "pass", "steps": [] }],
-            "tests": { "result": "pass" },
+            "features": [{ "key": "x", "coverage": "changed", "driven_by": "both", "verification": "rerun", "verdict": "pass", "steps": [{"action":"run", "observed":"pass"}] }],
+            "tests": { "command": "test", "result": "pass" },
             "independent_verifier": { "reran": ["x"], "agrees": true }
         })
     }
@@ -856,5 +971,56 @@ mod tests {
     fn base64_decodes_standard_input() {
         assert_eq!(base64_decode("aGVsbG8=").unwrap(), b"hello");
         assert!(base64_decode("not valid!!!").is_none());
+    }
+    #[test]
+    fn direct_proof_requires_stack_shape() {
+        for pointer in [
+            "/effort",
+            "/repo",
+            "/tests/command",
+            "/features/0/coverage",
+            "/features/0/driven_by",
+            "/features/0/steps",
+        ] {
+            let mut r = good_proof();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            r.pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(
+                !parse_json_record("proof", &r.to_string()).parse_ok,
+                "{pointer}"
+            );
+        }
+        for (pointer, invalid) in [
+            ("/features/0/coverage", json!("other")),
+            ("/features/0/driven_by", json!("robot")),
+            ("/features/0/steps", json!([])),
+            ("/features/0/steps", json!([{"action":"run"}])),
+            ("/features/0/steps", json!([{"action":7,"observed":"pass"}])),
+            ("/tests/command", json!(7)),
+            ("/independent_verifier/findings", json!([])),
+            ("/features/0/ui", json!({"screenshots":["x"],"works":true})),
+            (
+                "/features/0/ui",
+                json!({"looked":true,"works":true,"usable":true,"looks_good":true,"screenshots":[7]}),
+            ),
+        ] {
+            let mut r = good_proof();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            r.pointer_mut(parent).unwrap()[key] = invalid;
+            assert!(
+                !parse_json_record("proof", &r.to_string()).parse_ok,
+                "{pointer}"
+            );
+        }
+        let mut r = good_proof();
+        r["surprise"] = json!(true);
+        assert!(!parse_json_record("proof", &r.to_string()).parse_ok);
+        let mut r = good_proof();
+        r["features"].as_array_mut().unwrap().push(json!({"key":"untouched","coverage":"untouched","verification":"invented","driven_by":"author","steps":[{"action":"read","observed":"same"}],"verdict":"pass"}));
+        assert!(!parse_json_record("proof", &r.to_string()).parse_ok);
     }
 }

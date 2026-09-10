@@ -1,5 +1,8 @@
 # ARN-461 plan
 
+> Historical September 3 contract: the initial Temper-row CI migration was installed only in TemperPaw. The September 10 repair below preserves explicit legacy comment consumers in Stack and Temper, prevents helper writes to the wrong backend, and repairs public Temper recording. It does not claim that all repositories have completed the migration.
+
+
 What we are addressing: Effort.Merge believed implementer bools. CI believed a hidden PR comment. Those were two books, and neither was the rows.
 
 Expected end state: PassReview / AttachProofPacket / Merge retract unless Temper rows pass the same rules as validate.py. CI asks those rows by commit. No hidden comment.

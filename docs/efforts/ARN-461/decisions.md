@@ -69,3 +69,15 @@
 **Chose the validated public input because:** It removes the recurring recording dead end without allowing callers to declare invalid evidence Recorded. The packaged module reuses the current proof validation rules and preserves the submitted commit and evidence fields. Invalid input remains unrecorded.
 
 **Where:** patrol.cedar; proof_packet.ioa.toml; record_ingest/src/lib.rs; paw_patrol_foundation.rs.
+
+## Validate complete proof evidence and explicit review replacements
+
+**Decision:** Require the complete Stack proof shape at SubmitProof's existing Rust boundary, and require retired review runs to link to an attached recorded replacement that covers their reviewers.
+
+**Came up because:** Panel findings reproduced proof submissions without coverage, driven_by, steps, or other required schema fields; the first historical-review repair also allowed retirement without replacement evidence. A caller could choose RecordPanel while its structured rubric or canonical verdict still reported failure.
+
+**Options:** Trust the recording action and retirement status alone; add a new validation service; complete the existing boundary and chain validators.
+
+**Chose the existing validators because:** They already own these checks. Proof validation now checks required and optional field types, enums, nonempty steps, and allowed keys against Stack proof/schema.json. Active review runs fail on fix_it_failed, rubrics.fix_it_failed, RequestChanges, or unresolved act-ons. Supersede records replacement_run_id; validators follow only already attached links, reject missing links and cycles, and require a final Recorded replacement with matching reviewer coverage and the ordinary current-commit/passing-panel checks. A reasoned structured skip covers a retired reviewer but supplies no passing model vote. Following links supports A→B→C across normal review rounds without rewriting archived evidence. This adds no provenance or approval system.
+
+**Where:** os-apps/paw-patrol/wasm/record_ingest/src/lib.rs; chain_review_ready/src/lib.rs; chain_merge_ready/src/lib.rs; specs/review_run.ioa.toml; specs/model.csdl.xml.

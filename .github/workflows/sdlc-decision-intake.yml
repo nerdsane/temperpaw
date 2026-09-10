@@ -17,6 +17,7 @@ concurrency:
   cancel-in-progress: false   # serialize: concurrent rulings must not clobber
 permissions:
   pull-requests: write
+  checks: read         # select the current contributor check before rerunning
   actions: write        # re-run the review gate directly: GITHUB_TOKEN-created
                         # label events are suppressed by GitHub, so the labeled
                         # trigger alone would never fire

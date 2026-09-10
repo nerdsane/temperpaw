@@ -1,5 +1,8 @@
 # ARN-461 spec
 
+> Historical September 3 contract: the initial Temper-row CI migration was installed only in TemperPaw. The September 10 repair below preserves explicit legacy comment consumers in Stack and Temper, prevents helper writes to the wrong backend, and repairs public Temper recording. It does not claim that all repositories have completed the migration.
+
+
 ## Door
 
 `PassReview`, `AttachProofPacket`, and `Merge` stay the verbs. The implementer still fires them. The machine does not believe the declaration.

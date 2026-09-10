@@ -478,7 +478,7 @@ guard = [
   { type = "is_true", var = "review_fix_it_clear" }
 ]
 effect = "set review_passed true"
-hint = "Sets review_passed. chain_review_ready retracts unless the active (non-Superseded) attached ReviewRuns form a Recorded passing panel."
+hint = "Sets review_passed. chain_review_ready requires a Recorded passing active panel and explicit replacement links for Superseded runs; the final attached replacement must cover retired reviewers."
 
 [[action.triggers]]
 name = "pass_review_checks_runs"

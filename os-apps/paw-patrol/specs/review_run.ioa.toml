@@ -1,7 +1,6 @@
 [automaton]
-# One ReviewRun is one panel agent's pass (Grok, Codex, or Claude), not the
-# whole panel. Effort.review_run_ids holds every agent's run. Attach three
-# Recorded runs; L1 cannot require count 3.
+# A ReviewRun holds one reviewer or a combined panel. Effort.review_run_ids
+# retains all rounds; replacement links retire history without rewriting evidence.
 name = "ReviewRun"
 states = ["Requested", "Claimed", "Reviewing", "ChangesRequested", "Approved", "Escalated", "Failed", "Recorded", "Superseded"]
 initial = "Requested"
@@ -25,6 +24,11 @@ initial = ""
 
 [[state]]
 name = "reviewer_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "replacement_run_id"
 type = "string"
 initial = ""
 
@@ -279,7 +283,7 @@ module = "record_ingest"
 # IngestRecord fires once per run: the S0 shadow creates a FRESH run for each
 # record, so a run ingests from Requested and never re-ingests (Recorded is
 # terminal apart from Supersede). A corrected record is a NEW run; the old run
-# is retired with Supersede - last-created wins.
+# is retired with Supersede naming its replacement; creation order is irrelevant.
 [[action]]
 name = "IngestRecord"
 kind = "input"
@@ -297,7 +301,8 @@ name = "Supersede"
 kind = "input"
 from = ["Recorded"]
 to = "Superseded"
-hint = "Supersede this run when a newer review record for a later head has been recorded on its own run."
+params = ["replacement_run_id"]
+hint = "Name the attached replacement ReviewRun. PassReview and Merge follow replacement links to a Recorded current-head run covering these reviewers; reasoned skips cover a retired reviewer but do not count as passing votes. Historical evidence is preserved."
 
 [[invariant]]
 name = "RecordedHasRecord"

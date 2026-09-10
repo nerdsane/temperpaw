@@ -25,7 +25,10 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         let headers = odata_headers(&ctx);
         let mut runs = Vec::new();
         for id in &ids {
-            runs.push(get_entity(&ctx, &base_url, &headers, "ReviewRuns", id)?);
+            let mut run = get_entity(&ctx, &base_url, &headers, "ReviewRuns", id)?;
+            // Bind lookup to the attached id used in this GET.
+            run["id"] = json!(id);
+            runs.push(run);
         }
         review_panel_holds(&runs, None)?;
         ctx.log(
@@ -60,11 +63,19 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
                 "chain_review_ready: ReviewRun[{i}] record_present is false"
             ));
         }
-        // Superseded rows retain evidence but no longer vote in the active panel.
+        // Retired evidence is excluded only when an attached replacement covers it.
         if status.as_deref() == Some("Superseded") {
+            replacement_holds(fields, runs)?;
             continue;
         }
-        if bool_of(fields, "fix_it_failed") {
+        let rubrics = json_field(fields, "rubrics")?;
+        if bool_of(fields, "fix_it_failed")
+            || rubrics.get("fix_it_failed").and_then(Value::as_bool) == Some(true)
+            || str_of(fields, "verdict")
+                .or_else(|| str_of(fields, "Verdict"))
+                .as_deref()
+                == Some("RequestChanges")
+        {
             return Err(format!(
                 "chain_review_ready: ReviewRun[{i}] fix-it rubrics failed"
             ));
@@ -131,6 +142,70 @@ fn open_act_on_count(findings: &Value) -> usize {
                 .count()
         })
         .unwrap_or(0)
+}
+
+fn reviewer_coverage(fields: &Value, include_skips: bool) -> Result<BTreeSet<String>, String> {
+    let mut reviewers: BTreeSet<String> =
+        string_list(fields, "reviewers_ran").into_iter().collect();
+    if let Some(reviewer) = str_of(fields, "reviewer_id").or_else(|| str_of(fields, "ReviewerId")) {
+        reviewers.insert(reviewer);
+    }
+    if include_skips {
+        let rubrics = json_field(fields, "rubrics")?;
+        if let Some(skips) = rubrics.get("reviewers_skipped").and_then(Value::as_array) {
+            for skip in skips {
+                if str_of(skip, "reason").is_some()
+                    && let Some(reviewer) = str_of(skip, "reviewer")
+                {
+                    reviewers.insert(reviewer);
+                }
+            }
+        }
+    }
+    reviewers.retain(|r| MODEL_REVIEWERS.contains(&r.as_str()));
+    Ok(reviewers)
+}
+
+/// Follow attached replacement links without modifying archived evidence.
+/// The final Recorded run is checked by the ordinary active-panel validation.
+fn replacement_holds(retired: &Value, runs: &[Value]) -> Result<(), String> {
+    let required = reviewer_coverage(retired, false)?;
+    if required.is_empty() {
+        return Err(
+            "chain_review_ready: superseded run has no model reviewer coverage".to_string(),
+        );
+    }
+    let mut current = retired;
+    // Each distinct link must name an attached row, so traversal is bounded
+    // by runs.len(); repeated links fail before any additional traversal.
+    let mut seen = BTreeSet::new();
+    loop {
+        let id = str_of(current, "replacement_run_id")
+            .or_else(|| str_of(current, "ReplacementRunId"))
+            .ok_or("chain_review_ready: superseded run has no replacement_run_id")?;
+        if !seen.insert(id.clone()) {
+            return Err("chain_review_ready: replacement links contain a cycle".to_string());
+        }
+        let run = runs
+            .iter()
+            .find(|run| run.get("id").and_then(Value::as_str) == Some(&id))
+            .ok_or("chain_review_ready: replacement run is not attached")?;
+        current = run.get("fields").unwrap_or(run);
+        let status = str_of(current, "status").or_else(|| str_of(current, "Status"));
+        match status.as_deref() {
+            Some("Superseded") => continue,
+            Some("Recorded") => {
+                if !required.is_subset(&reviewer_coverage(current, true)?) {
+                    return Err(
+                        "chain_review_ready: replacement does not cover retired reviewers"
+                            .to_string(),
+                    );
+                }
+                return Ok(());
+            }
+            _ => return Err("chain_review_ready: replacement is not Recorded".to_string()),
+        }
+    }
 }
 
 fn is_full_sha(commit: &str) -> bool {
@@ -376,9 +451,11 @@ mod tests {
     #[test]
     fn superseded_failed_round_preserves_history_without_blocking_current_panel() {
         let old_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        let historical = history_run("Superseded", "grok", old_sha, true);
+        let mut historical = history_run("Superseded", "grok", old_sha, true);
+        historical["fields"]["replacement_run_id"] = json!("replacement");
         let unchanged = historical.clone();
         let mut runs = current_panel();
+        runs[0]["id"] = json!("replacement");
         runs.insert(0, historical);
         assert!(review_panel_holds(&runs, Some(SHA)).is_ok());
         assert_eq!(runs[0], unchanged);
@@ -453,6 +530,86 @@ mod tests {
             history_run("Recorded", "codex", SHA, false),
             history_run("Recorded", "unknown", SHA, false),
         ];
+        assert!(review_panel_holds(&runs, Some(SHA)).is_err());
+    }
+    #[test]
+    fn structured_failure_cannot_be_written_as_a_passing_panel() {
+        for (key, value) in [
+            ("rubrics", json!("{\"fix_it_failed\":true}")),
+            ("verdict", json!("RequestChanges")),
+        ] {
+            let mut runs = current_panel();
+            runs[0]["fields"][key] = value;
+            assert!(review_panel_holds(&runs, Some(SHA)).is_err(), "{key}");
+        }
+    }
+
+    #[test]
+    fn supersession_requires_attached_recorded_covering_replacement() {
+        for replacement in ["", "not-attached", "old"] {
+            let mut old = history_run("Superseded", "grok", SHA, true);
+            old["id"] = json!("old");
+            old["fields"]["replacement_run_id"] = json!(replacement);
+            let mut runs = current_panel();
+            runs.push(old);
+            assert!(
+                review_panel_holds(&runs, Some(SHA)).is_err(),
+                "{replacement}"
+            );
+        }
+        let mut old = history_run("Superseded", "fable", SHA, true);
+        old["fields"]["replacement_run_id"] = json!("replacement");
+        let mut runs = current_panel();
+        runs[0]["id"] = json!("replacement"); // Grok cannot replace Fable.
+        runs.push(old);
+        assert!(review_panel_holds(&runs, Some(SHA)).is_err());
+    }
+
+    #[test]
+    fn combined_replacement_can_cover_reasoned_skips_without_counting_them_as_votes() {
+        let mut old = history_run(
+            "Superseded",
+            "",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            true,
+        );
+        old["fields"]["reviewers_ran"] = json!("[\"grok\",\"codex\",\"fable\"]");
+        old["fields"]["replacement_run_id"] = json!("replacement");
+        let preserved = old.clone();
+        let mut new = history_run("Recorded", "", SHA, false);
+        new["id"] = json!("replacement");
+        new["fields"]["reviewers_ran"] = json!("[\"grok\",\"codex\"]");
+        new["fields"]["rubrics"] = json!(
+            "{\"fix_it_failed\":false,\"reviewers_skipped\":[{\"reviewer\":\"fable\",\"reason\":\"Account usage limit\"}]}"
+        );
+        let mut runs = vec![old, new];
+        assert!(review_panel_holds(&runs, Some(SHA)).is_ok());
+        assert_eq!(runs[0], preserved);
+        runs[1]["fields"]["reviewers_ran"] = json!("[\"codex\"]");
+        assert!(review_panel_holds(&runs, Some(SHA)).is_err());
+        runs[1]["fields"]["reviewers_ran"] = json!("[\"grok\",\"codex\"]");
+        runs[1]["fields"]["rubrics"] =
+            json!("{\"reviewers_skipped\":[{\"reviewer\":\"fable\",\"reason\":\" \"}]}");
+        assert!(review_panel_holds(&runs, Some(SHA)).is_err());
+        runs[1]["fields"]["rubrics"] =
+            json!("{\"reviewers_skipped\":[{\"reviewer\":\"fable\",\"reason\":\"limit\"}]}");
+        runs[1]["fields"]["status"] = json!("Superseded");
+        assert!(review_panel_holds(&runs, Some(SHA)).is_err());
+    }
+
+    #[test]
+    fn replacement_links_support_later_rounds_and_reject_cycles() {
+        let mut first = history_run("Superseded", "grok", SHA, true);
+        first["id"] = json!("first");
+        first["fields"]["replacement_run_id"] = json!("second");
+        let mut second = history_run("Superseded", "grok", SHA, true);
+        second["id"] = json!("second");
+        second["fields"]["replacement_run_id"] = json!("last");
+        let mut runs = current_panel();
+        runs[0]["id"] = json!("last");
+        runs.extend([first, second]);
+        assert!(review_panel_holds(&runs, Some(SHA)).is_ok());
+        runs[4]["fields"]["replacement_run_id"] = json!("first");
         assert!(review_panel_holds(&runs, Some(SHA)).is_err());
     }
 }

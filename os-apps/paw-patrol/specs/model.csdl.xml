@@ -233,6 +233,7 @@
         <Property Name="EffortId" Type="Edm.String"/>
         <Property Name="WorkerRunId" Type="Edm.String"/>
         <Property Name="ReviewerId" Type="Edm.String"/>
+        <Property Name="ReplacementRunId" Type="Edm.String"/>
         <Property Name="ReviewSummary" Type="Edm.String"/>
         <Property Name="LiveE2eSummary" Type="Edm.String"/>
         <Property Name="Verdict" Type="Edm.String"/>
