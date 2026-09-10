@@ -20,34 +20,39 @@ and not a flag.
   the child's `ProvisionFromCopy` params via `copy_fields`.
 - The child runs its OWN copy, ASYNCHRONOUSLY: `ProvisionFromCopy →
   computer_copy_start → CopyStarted → Copying → (poll loop) → CopyComplete →
-  Leased`. A live-copy of a real box takes minutes — past the ~120s WASM invocation
-  cap — so `computer_copy_start` only KICKS OFF the copy (a short-timeout POST that
-  returns the new sandbox id) and `computer_copy_poll` health-checks readiness from
+  Leased`. A live copy can take longer than the WASM invocation deadline. An
+  uncertain request therefore enters `CopyUnknown`; `ReconcileCopy` reads the
+  exact named destination without another POST. Once the destination is known,
+  `computer_copy_poll` health-checks readiness from
   a `Copying` `state_timeout` (`reset_on=["CopyPoll"]`) across invocations, the same
   pattern as the async Exec (ARN-443 D). A copy that never becomes ready
   (`CopyExpired`) is torn down through `Terminating` (its machine_id is the copy's).
   `CopyStarted` records `source_machine_id` (the parent reference; the parent's
-  entity id is derivable by query, not precomputed) and a distinct `copy-…` name —
-  never the source's name, which is an attach/resolution key.
+  entity id is derivable by query, not precomputed). The provider name includes
+  the complete child and source IDs. Unsupported IDs fail before provider I/O;
+  names are never truncated. A lookup must match that name, a different
+  destination ID, and the source's project namespace. A received POST response
+  must additionally identify the exact source and destination. A lost-response
+  lookup proves request correlation, not independently reported source lineage:
+  the provider's GET response does not expose lineage.
 - Children land in a distinct **Leased** state, never `Ready`. A lease
   `state_timeout` lives ONLY on `Leased`, so it reaps copies and can NEVER touch a
   source (sources stay `Ready`, `allow_indefinite`). `Heartbeat` renews the lease.
 - `Destroy → Terminating → computer_terminate → Destroyed` actually tears the
   sandbox down (previously `Destroy` was a bare transition). `Destroy` is NOT
-  allowed from `Provisioning`, where a child's machine_id is still the SOURCE's —
+  allowed from `Provisioning` or `CopyUnknown`, where a child's machine_id is still the SOURCE's —
   destroying there would kill the source.
 
 Each module is one concern on its own entity; no WASM dispatches transitions on
 another machine. The choice of Option A (spawn + child's own copy) over a WASM
 that materializes the child inline, and of a state over a flag/second-entity, is
-what keeps this entity-first and the no-orphans guarantee structural.
+keeps the copy's lifecycle in one governed record.
 
 ## Consequences
 
 - The panel's copies become auditable Computer rows; teardown and reaping are
   declared transitions, not CLI side effects.
-- A copy is exec-able only once `Ready`; a `Leased` copy is not (a forward pointer
-  for ADR-0004/D: the exec Ready-gate will widen to accept `Leased`).
-- A copy sandbox leaked by a partial copy failure is caught by the panel's
-  stale-copy reaper (an accepted residual; C5 in the effort decision log defers
-  the real-provider proof to the Genesis-publish verification).
+- Exec accepts a `Leased` copy through the existing computer gate.
+- An unresolved copy remains visible in `CopyUnknown`; it is not reported as
+  destroyed or safe to reap. Investigating and cleaning an uncertain provider
+  resource requires verified ownership, never the row's stored source ID.

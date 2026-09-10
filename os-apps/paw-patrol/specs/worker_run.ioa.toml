@@ -80,6 +80,21 @@ name = "claimed"
 type = "bool"
 initial = "false"
 
+[[state]]
+name = "patrol_run_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "evidence_json"
+type = "string"
+initial = ""
+
+[[state]]
+name = "model_investigation"
+type = "bool"
+initial = "false"
+
 [[action]]
 name = "Configure"
 kind = "input"
@@ -210,3 +225,115 @@ state = "CloudApproved"
 after_seconds = 21600
 on_timeout = "Timeout"
 params = { error_message = "WorkerRun cloud overflow stayed approved for 6h without dispatch." }
+
+[[action]]
+name = "ConfigureModelInvestigation"
+kind = "input"
+from = ["Queued"]
+to = "Queued"
+guard = "is_false claimed"
+params = ["patrol_run_id", "task", "branch_name", "worktree_path", "allowed_worker_id", "provider_id", "runner_kind"]
+effect = "set model_investigation true"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "patrol_run_id"
+
+[[action]]
+name = "ReportInvestigation"
+kind = "input"
+from = ["Running"]
+to = "Done"
+guard = "is_true model_investigation"
+params = ["result_summary", "evidence_json"]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "evidence_json"
+
+[[action.triggers]]
+name = "model_investigation_complete"
+kind = "entity"
+principal = "dsf-factory-runtime"
+target_entity = "PatrolRun"
+target_action = "CompleteModelInvestigation"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "patrol_run_id"
+
+[action.triggers.params_from]
+expected_worker_run_id = "Id"
+summary = "result_summary"
+evidence_json = "evidence_json"
+
+[[action]]
+name = "FailInvestigation"
+kind = "input"
+from = ["Claimed", "Running"]
+to = "Failed"
+guard = "is_true model_investigation"
+params = ["error_message"]
+
+[[action.triggers]]
+name = "model_investigation_failed"
+kind = "entity"
+principal = "dsf-factory-runtime"
+target_entity = "PatrolRun"
+target_action = "FailModelInvestigation"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "patrol_run_id"
+
+[action.triggers.params_from]
+expected_worker_run_id = "Id"
+error_message = "error_message"
+
+[[action]]
+name = "ReplayInvestigationResult"
+kind = "input"
+from = ["Done"]
+to = "Done"
+guard = "is_true model_investigation"
+params = []
+
+[[action.triggers]]
+name = "model_investigation_replays_complete"
+kind = "entity"
+principal = "dsf-factory-runtime"
+target_entity = "PatrolRun"
+target_action = "CompleteModelInvestigation"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "patrol_run_id"
+
+[action.triggers.params_from]
+expected_worker_run_id = "Id"
+summary = "result_summary"
+evidence_json = "evidence_json"
+
+
+[[action]]
+name = "ReplayInvestigationFailure"
+kind = "input"
+from = ["Failed", "TimedOut"]
+to = "Failed"
+guard = "is_true model_investigation"
+params = []
+
+[[action.triggers]]
+name = "model_investigation_replays_failure"
+kind = "entity"
+principal = "dsf-factory-runtime"
+target_entity = "PatrolRun"
+target_action = "FailModelInvestigation"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "patrol_run_id"
+
+[action.triggers.params_from]
+expected_worker_run_id = "Id"
+error_message = "error_message"

@@ -321,7 +321,7 @@ fn paw_patrol_intent_accept_births_an_effort_via_a_declarative_trigger() {
         "on_failure = \"RetractReviewPassed\"",
         "on_failure = \"RetractProofAttached\"",
         "on_failure = \"RetractMerge\"",
-        "from = [\"Building\", \"InReview\", \"Proving\", \"Deploying\"]",
+        "from = [\"Building\", \"InReview\", \"Proving\", \"Deploying\", \"ResourceMergeChecking\", \"ResourceVerifying\"]",
     ] {
         assert!(
             effort.contains(needle),

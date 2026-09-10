@@ -33,7 +33,9 @@ RUN cd os-apps/paw-agent/wasm && bash build.sh \
     && cd /app/os-apps/paw-foresight/wasm && bash build.sh \
     && cd /app/os-apps/paw-skills/wasm && bash build.sh \
     && cd /app/os-apps/paw-research/wasm && bash build.sh \
-    && cd /app/os-apps/paw-patrol/wasm && bash build.sh
+    && cd /app/os-apps/paw-compute/wasm && bash build.sh \
+    && cd /app/os-apps/paw-patrol/wasm && bash build.sh \
+    && cd /app/os-apps/dsf-factory/wasm && bash build.sh
 RUN bash scripts/verify_route_message_wasm.sh /app/os-apps/paw-channels/wasm/route_message/route_message.wasm
 RUN find os-apps -type d -name target -prune -exec rm -rf {} +
 

@@ -52,6 +52,7 @@ permit(
         Action::"Computer.Wake", Action::"Wake",
         Action::"Computer.Destroy", Action::"Destroy",
         Action::"Computer.Copy", Action::"Copy",
+        Action::"Computer.ReconcileCopy", Action::"ReconcileCopy",
         Action::"Computer.Heartbeat", Action::"Heartbeat"
     ],
     resource is Computer

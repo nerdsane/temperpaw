@@ -75,7 +75,9 @@ jobs:
             os-apps/paw-foresight/wasm/build.sh \
             os-apps/paw-skills/wasm/build.sh \
             os-apps/paw-research/wasm/build.sh \
-            os-apps/paw-patrol/wasm/build.sh; do
+            os-apps/paw-compute/wasm/build.sh \
+            os-apps/paw-patrol/wasm/build.sh \
+            os-apps/dsf-factory/wasm/build.sh; do
             echo "=== Running $script ==="
             (cd "$(dirname "$script")" && bash "$(basename "$script")")
           done
@@ -93,6 +95,8 @@ jobs:
           cargo test --manifest-path os-apps/paw-agent/wasm/emit_ots_trajectory/Cargo.toml --quiet
           cargo test --manifest-path os-apps/paw-agent/wasm/provider_response_applier/Cargo.toml --quiet
           cargo test --manifest-path os-apps/paw-agent/wasm/wasm-helpers/Cargo.toml --quiet
+          cargo test --manifest-path os-apps/paw-compute/wasm/computer_copy_start/Cargo.toml --quiet
+          cargo test --manifest-path os-apps/paw-compute/wasm/computer_copy_poll/Cargo.toml --quiet
           cargo test --manifest-path os-apps/paw-agent/wasm/openai-chat-wire/Cargo.toml --quiet
           cargo test --manifest-path os-apps/paw-agent/wasm/monty_repl/Cargo.toml --quiet
       - name: Dashboard build

@@ -15,6 +15,7 @@ use temper_wasm_sdk::prelude::*;
 const MODEL_REVIEWERS: &[&str] = &["grok", "codex", "fable"];
 const MIN_MODELS: usize = 2;
 
+#[cfg(not(feature = "library"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
     let result = (|| -> Result<(), String> {
@@ -60,7 +61,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
     0
 }
 
-fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Result<(), String> {
+pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Result<(), String> {
     if runs.is_empty() {
         return Err("chain_merge_ready: no ReviewRuns".to_string());
     }
@@ -138,7 +139,7 @@ fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Result<()
     Ok(())
 }
 
-fn proof_packet_holds(packet: &Value, require_commit: Option<&str>) -> Result<(), String> {
+pub fn proof_packet_holds(packet: &Value, require_commit: Option<&str>) -> Result<(), String> {
     let fields = packet.get("fields").unwrap_or(packet);
     if str_field(fields, "status").or_else(|| str_field(fields, "Status")).as_deref()
         != Some("Recorded")
@@ -290,6 +291,7 @@ fn pascal(field: &str) -> String {
         .collect()
 }
 
+#[cfg(not(feature = "library"))]
 fn resolve_api_url(ctx: &Context) -> String {
     ctx.config
         .get("temper_api_url")
@@ -298,6 +300,7 @@ fn resolve_api_url(ctx: &Context) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:3000".to_string())
 }
 
+#[cfg(not(feature = "library"))]
 fn odata_headers(ctx: &Context) -> Vec<(String, String)> {
     vec![
         ("content-type".to_string(), "application/json".to_string()),
@@ -308,6 +311,7 @@ fn odata_headers(ctx: &Context) -> Vec<(String, String)> {
     ]
 }
 
+#[cfg(not(feature = "library"))]
 fn get_entity(
     ctx: &Context,
     base_url: &str,

@@ -1,14 +1,9 @@
-//! computer_copy_start — START an async live-copy of a source computer's sandbox
-//! for a CHILD Computer row (ARN-443 C, async copy).
+//! Start or reconcile one named provider copy for a child Computer.
 //!
-//! Fires on the child's ProvisionFromCopy. The child's `machine_id` field holds
-//! the SOURCE's machine (carried by the Copy spawn's copy_fields) — the machine to
-//! copy from. A real live-copy takes MINUTES, far past the ~120s WASM invocation
-//! cap, so this module only KICKS OFF the copy (a short-timeout POST that returns
-//! the new sandbox id promptly) and reports CopyStarted; computer_copy_poll then
-//! drives readiness from the Copying state across invocations. On failure the
-//! trigger's on_failure routes to CopyFailed (which does NOT terminate — the
-//! machine_id is still the source's at that point).
+//! ProvisionFromCopy may submit a copy request after checking the exact name.
+//! ReconcileCopy performs GET-only recovery after an uncertain response. The
+//! child retains its source machine ID until a verified destination callback
+//! lands. Readiness is then polled by computer_copy_poll in Copying.
 //!
 //! Build: `cargo build --target wasm32-wasip1 --release`.
 
@@ -16,10 +11,6 @@ use temper_wasm_sdk::prelude::*;
 use wasm_helpers::entity_field_str;
 use wasm_helpers::sandbox::{self, normalize_sandbox_provider};
 
-/// Seconds to let the provider work before it returns the new sandbox id. Kept
-/// WELL under the 120s cap — this call must return promptly with the id; full
-/// readiness is polled from Copying, not waited on here.
-const COPY_START_TIMEOUT_SECS: u64 = 10;
 /// Wall-clock budget (ms) for the copy to become ready, stamped on the row so the
 /// poll reads a single deadline. A live-copy of a real box takes minutes.
 const COPY_READY_BUDGET_MS: i64 = 300_000;
@@ -36,17 +27,14 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             .ok_or("computer_copy_start: no source machine_id to copy from")?
             .to_string();
 
+        let name = sandbox::sandbox_copy_name(&ctx.entity_id, &source_machine_id)?;
+        let mode = copy_mode(&ctx.trigger_action)?;
         ctx.log(
             "info",
-            &format!(
-                "computer_copy_start: starting copy of {source_machine_id} for child {}",
-                ctx.entity_id
-            ),
+            &format!("computer_copy_start: {mode:?} for child {}", ctx.entity_id),
         );
-
-        // Kick off the copy; returns the new sandbox id promptly (may still boot).
         let handle =
-            sandbox::sandbox_copy(&ctx, &provider, &source_machine_id, COPY_START_TIMEOUT_SECS)?;
+            sandbox::sandbox_copy(&ctx, &provider, &source_machine_id, &ctx.entity_id, mode)?;
 
         let deadline_at_ms = Context::get_time_millis() + COPY_READY_BUDGET_MS;
         set_success_result(
@@ -55,7 +43,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
                 "machine_id": handle.sandbox_id,
                 "sandbox_url": handle.sandbox_url,
                 "source_machine_id": source_machine_id,
-                "name": copy_name(&ctx.entity_id),
+                "name": name,
                 "copy_deadline_at_ms": deadline_at_ms.to_string(),
             }),
         );
@@ -68,19 +56,11 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
     0
 }
 
-/// A distinct name for the child copy — NEVER the source's name (which is an
-/// attach/resolution key). Derived from the child's own entity id, so it is unique
-/// per copy and clearly marked.
-fn copy_name(entity_id: &str) -> String {
-    let short: String = entity_id
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .take(12)
-        .collect();
-    if short.is_empty() {
-        "copy".to_string()
-    } else {
-        format!("copy-{short}")
+fn copy_mode(action: &str) -> Result<sandbox::CopyMode, String> {
+    match action {
+        "ProvisionFromCopy" => Ok(sandbox::CopyMode::Start),
+        "ReconcileCopy" => Ok(sandbox::CopyMode::Reconcile),
+        _ => Err("computer_copy_start requires a native start or reconciliation action".into()),
     }
 }
 
@@ -99,15 +79,50 @@ mod tests {
     #[test]
     fn provider_defaults_and_normalizes() {
         assert_eq!(provider_from_fields(&json!({})), "tensorlake");
-        assert_eq!(provider_from_fields(&json!({"provider": "tl"})), "tensorlake");
+        assert_eq!(
+            provider_from_fields(&json!({"provider": "tl"})),
+            "tensorlake"
+        );
         assert_eq!(provider_from_fields(&json!({"provider": "modal"})), "modal");
     }
 
     #[test]
-    fn copy_name_is_distinct_and_never_empty() {
-        assert_eq!(copy_name("abc123def456ghi"), "copy-abc123def456");
-        assert_eq!(copy_name(""), "copy");
-        // never equals a plausible source name
-        assert_ne!(copy_name("arni-big"), "arni-big");
+    fn copy_names_preserve_the_complete_native_child_id() {
+        let first = "01a0778b-09f1-75e3-84d1-2eda36a64f6b";
+        let second = "01a0778b-09f1-75e3-84d1-2eda36a64f6c";
+        let source = "lw947cgusmggtko7l4mgz";
+        assert_eq!(
+            sandbox::sandbox_copy_name(first, source).unwrap(),
+            format!("copy-{first}-{source}")
+        );
+        assert_eq!(sandbox::sandbox_copy_name(first, source).unwrap().len(), 63);
+        assert_ne!(
+            sandbox::sandbox_copy_name(first, source).unwrap(),
+            sandbox::sandbox_copy_name(second, source).unwrap()
+        );
+        assert_ne!(
+            sandbox::sandbox_copy_name(first, source).unwrap(),
+            sandbox::sandbox_copy_name(first, "different-source").unwrap()
+        );
+        for invalid in ["", "child/name", "Uppercase", "bad_underscore"] {
+            assert!(sandbox::sandbox_copy_name(invalid, source).is_err());
+            assert!(sandbox::sandbox_copy_name(first, invalid).is_err());
+        }
+        assert!(sandbox::sandbox_copy_name(first, &"a".repeat(22)).is_err());
+    }
+
+    #[test]
+    fn only_native_start_and_reconcile_actions_choose_a_copy_mode() {
+        assert_eq!(
+            copy_mode("ProvisionFromCopy").unwrap(),
+            sandbox::CopyMode::Start
+        );
+        assert_eq!(
+            copy_mode("ReconcileCopy").unwrap(),
+            sandbox::CopyMode::Reconcile
+        );
+        for action in ["", "Copy", "CopyStarted", "Retry"] {
+            assert!(copy_mode(action).is_err());
+        }
     }
 }
