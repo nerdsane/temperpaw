@@ -163,7 +163,7 @@ async fn reconcile_dsf_model_sources(client: &reqwest::Client, config: &Config) 
         return Ok(());
     }
     let manifest: Value = serde_json::from_str(include_str!(
-        "../../../os-apps/dsf-factory/specs/module-contracts.json"
+        "../../../os-apps/dsf-twin/specs/module-contracts.json"
     ))?;
     let mut sets = manifest["resources"]
         .as_object()

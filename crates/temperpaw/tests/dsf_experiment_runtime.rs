@@ -8,7 +8,7 @@ use temper_server::entity_actor::sim_handler::EntityActorHandler;
 fn simulator(seed: u64) -> SimActorSystem {
     let source = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../os-apps/dsf-factory/specs/experiment.ioa.toml"),
+            .join("../../os-apps/dsf-twin/specs/experiment.ioa.toml"),
     )
     .unwrap();
     let handler = EntityActorHandler::new(
@@ -75,9 +75,9 @@ fn lost_preparation_and_late_results_cannot_start_another_execution() {
 fn prepared_starts_native_exec_and_reconciled_does_not_start_again() {
     use temper_server::{registry::SpecRegistry, trigger::sim_dispatcher::SimReactionSystem};
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps");
-    let ioa = fs::read_to_string(root.join("dsf-factory/specs/experiment.ioa.toml")).unwrap();
+    let ioa = fs::read_to_string(root.join("dsf-twin/specs/experiment.ioa.toml")).unwrap();
     let exec = fs::read_to_string(root.join("paw-compute/specs/exec.ioa.toml")).unwrap();
-    let xml = fs::read_to_string(root.join("dsf-factory/specs/model.csdl.xml")).unwrap();
+    let xml = fs::read_to_string(root.join("dsf-twin/specs/model.csdl.xml")).unwrap();
     let mut registry = SpecRegistry::new();
     registry.register_tenant(
         "default",
@@ -130,7 +130,7 @@ fn prepared_starts_native_exec_and_reconciled_does_not_start_again() {
 fn scheduler_faults_cannot_restart_or_rebind_an_accepted_run() {
     let source = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../os-apps/dsf-factory/specs/experiment.ioa.toml"),
+            .join("../../os-apps/dsf-twin/specs/experiment.ioa.toml"),
     )
     .unwrap();
     for seed in 1..=32 {
@@ -180,7 +180,7 @@ async fn preparation_timeout_rearms_on_resume_and_old_generation_is_cancelled() 
         request_context::AgentContext,
         state::{DispatchCommand, ServerState},
     };
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-factory/specs");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin/specs");
     // Only elapsed duration changes; the real strict actions and callbacks are unchanged.
     let ioa = fs::read_to_string(root.join("experiment.ioa.toml"))
         .unwrap()

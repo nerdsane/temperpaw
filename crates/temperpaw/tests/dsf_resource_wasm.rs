@@ -10,7 +10,7 @@ use temper_wasm::{
 };
 
 fn app() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-factory")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin")
 }
 
 fn context(entity: &str, module: &str, state: Value) -> WasmInvocationContext {
@@ -38,7 +38,7 @@ fn context(entity: &str, module: &str, state: Value) -> WasmInvocationContext {
 
 fn bytes(module: &str) -> Vec<u8> {
     std::fs::read(app().join(format!("wasm/{module}/{module}.wasm"))).unwrap_or_else(|error| {
-        panic!("Build dsf-factory WASMs before this proof: {module}: {error}")
+        panic!("Build dsf-twin WASMs before this proof: {module}: {error}")
     })
 }
 

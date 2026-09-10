@@ -911,7 +911,7 @@ def csdl(documents):
     schema = ET.SubElement(
         ET.SubElement(root, f"{{{edmx}}}DataServices"),
         f"{{{edm}}}Schema",
-        Namespace="Dsf.Factory",
+        Namespace="Dsf.Twin",
     )
     kinds = {"string": "Edm.String", "counter": "Edm.Int64", "bool": "Edm.Boolean"}
 
@@ -933,7 +933,7 @@ def csdl(documents):
             )
         for operation in document["action"]:
             bound = add(schema, "Action", Name=operation["name"], IsBound="true")
-            add(bound, "Parameter", Name="bindingParameter", Type=f"Dsf.Factory.{name}")
+            add(bound, "Parameter", Name="bindingParameter", Type=f"Dsf.Twin.{name}")
             for parameter in operation.get("params", []):
                 add(
                     bound,
@@ -944,7 +944,7 @@ def csdl(documents):
     container = add(schema, "EntityContainer", Name="Container")
     for document in documents:
         name = document["automaton"]["name"]
-        add(container, "EntitySet", Name=name + "s", EntityType=f"Dsf.Factory.{name}")
+        add(container, "EntitySet", Name=name + "s", EntityType=f"Dsf.Twin.{name}")
     ET.indent(root, space="  ")
     return ET.tostring(root, encoding="unicode", xml_declaration=True) + "\n"
 

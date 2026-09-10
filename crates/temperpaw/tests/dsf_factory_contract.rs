@@ -19,7 +19,7 @@ const ENTITIES: &[(&str, &str)] = &[
 ];
 fn source(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../../os-apps/dsf-factory/specs/{name}.ioa.toml"));
+        .join(format!("../../os-apps/dsf-twin/specs/{name}.ioa.toml"));
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
@@ -206,7 +206,7 @@ fn pascal_case(name: &str) -> String {
 fn csdl_matches_every_declared_ioa_field_action_and_parameter() {
     use std::collections::BTreeMap;
     let csdl_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../os-apps/dsf-factory/specs/model.csdl.xml");
+        .join("../../os-apps/dsf-twin/specs/model.csdl.xml");
     let document = temper_spec::csdl::parse_csdl(&fs::read_to_string(csdl_path).unwrap()).unwrap();
     let schema = &document.schemas[0];
     assert_eq!(schema.entity_types.len(), ENTITIES.len());
@@ -237,7 +237,7 @@ fn csdl_matches_every_declared_ioa_field_action_and_parameter() {
             })
             .collect();
         assert_eq!(field_types, expected_types, "{name} properties");
-        let binding = format!("Dsf.Factory.{name}");
+        let binding = format!("Dsf.Twin.{name}");
         let actions: BTreeMap<_, _> = schema
             .actions
             .iter()
@@ -537,7 +537,7 @@ fn reaction_simulator_with_registration(
     use temper_server::{registry::SpecRegistry, trigger::sim_dispatcher::SimReactionSystem};
     let xml = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../os-apps/dsf-factory/specs/model.csdl.xml"),
+            .join("../../os-apps/dsf-twin/specs/model.csdl.xml"),
     )
     .unwrap();
     let csdl = temper_spec::csdl::parse_csdl(&xml).unwrap();
@@ -741,7 +741,7 @@ async fn resource_timer_reuse_cancels_the_previous_operation_generation() {
     };
     let xml = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../os-apps/dsf-factory/specs/model.csdl.xml"),
+            .join("../../os-apps/dsf-twin/specs/model.csdl.xml"),
     )
     .unwrap();
     // Only wall-clock duration is shortened. Actions, guards and provider triggers
@@ -841,7 +841,7 @@ fn explicit_resume_restores_only_the_exhausted_read_budget() {
 #[test]
 fn generated_csdl_and_module_manifest_are_current() {
     let generator = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../os-apps/dsf-factory/specs/generate.py");
+        .join("../../os-apps/dsf-twin/specs/generate.py");
     let result = std::process::Command::new("python3")
         .arg(generator)
         .arg("--check")
@@ -944,7 +944,7 @@ fn every_provider_action_validates_and_verifies_its_exact_configuration_or_revis
 #[test]
 fn agent_action_manifest_matches_ioa_and_has_no_retired_resource_routes() {
     let directory =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-factory/specs");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin/specs");
     let manifest: Value =
         serde_json::from_str(&fs::read_to_string(directory.join("module-contracts.json")).unwrap())
             .unwrap();

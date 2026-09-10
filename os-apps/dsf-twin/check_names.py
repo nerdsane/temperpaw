@@ -64,7 +64,7 @@ def check(candidate: Names, live: Names, owned: Names | None = None) -> None:
     sets = (candidate.sets & live.sets) - owned.sets
     if types or sets:
         raise ValueError(
-            f"Names already owned outside dsf-factory: types={sorted(types)}, sets={sorted(sets)}"
+            f"Names already owned outside dsf-twin: types={sorted(types)}, sets={sorted(sets)}"
         )
 
 
@@ -78,12 +78,12 @@ def previous_names(record_path: Path, model_path: Path, tenant: str) -> Names:
     record: object = json.loads(record_path.read_text())
     if not isinstance(record, dict):
         raise TypeError("Installed app record must be an object")
-    if record.get("tenant") != tenant or record.get("app_name") != "dsf-factory":
+    if record.get("tenant") != tenant or record.get("app_name") != "dsf-twin":
         raise ValueError("Installed app record belongs to another tenant or app")
     ref = record.get("app_ref")
     if (
         not isinstance(ref, str)
-        or re.fullmatch(r"[^/@]+/dsf-factory@[a-f0-9]{40,64}", ref) is None
+        or re.fullmatch(r"[^/@]+/dsf-twin@[a-f0-9]{40,64}", ref) is None
     ):
         raise ValueError("Installed app record requires a pinned Genesis ref")
     model = model_path.read_bytes()
@@ -117,7 +117,7 @@ def main() -> None:
     print(
         json.dumps(
             {
-                "app": "dsf-factory",
+                "app": "dsf-twin",
                 "tenant": args.tenant,
                 "entity_types": sorted(candidate.types),
                 "entity_sets": sorted(candidate.sets),

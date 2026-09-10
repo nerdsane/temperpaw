@@ -5,7 +5,7 @@ use temper_authz::{AuthzDecision, AuthzEngine, SecurityContext};
 
 fn permits(ctx: &SecurityContext, action: &str, id: &str) -> bool {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../os-apps/dsf-factory/policies/model_investigation.cedar");
+        .join("../../os-apps/dsf-twin/policies/model_investigation.cedar");
     let engine = AuthzEngine::new(&fs::read_to_string(path).unwrap()).unwrap();
     matches!(
         engine.authorize(

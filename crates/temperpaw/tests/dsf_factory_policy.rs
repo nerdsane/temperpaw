@@ -4,7 +4,7 @@ use std::{collections::HashMap, fs, path::PathBuf};
 use temper_authz::{AuthzDecision, AuthzEngine, SecurityContext};
 use temper_server::request_context::AgentContext;
 fn app() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-factory")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin")
 }
 fn policy(extra: &str) -> AuthzEngine {
     AuthzEngine::new(&format!(

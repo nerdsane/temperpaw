@@ -77,7 +77,7 @@ jobs:
             os-apps/paw-research/wasm/build.sh \
             os-apps/paw-compute/wasm/build.sh \
             os-apps/paw-patrol/wasm/build.sh \
-            os-apps/dsf-factory/wasm/build.sh; do
+            os-apps/dsf-twin/wasm/build.sh; do
             echo "=== Running $script ==="
             (cd "$(dirname "$script")" && bash "$(basename "$script")")
           done

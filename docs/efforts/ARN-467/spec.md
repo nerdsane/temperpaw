@@ -10,7 +10,7 @@ The scope includes delivery, operations and isolated exploration. DSF product fe
 
 Temper owns operational resources, observations, operations, experiments and the existing Intent/Effort/Ask/review/proof records. Foundry owns its computer-run lifecycle, command mailbox and transcript. A stable effort/run association connects them. Provider identifiers and observed revisions identify external resources. Source files and Datadog links support interpretations; neither a human label nor a successful HTTP transport response substitutes for evidence.
 
-The new application belongs in `os-apps/dsf-factory`, published to Genesis with a pinned installed revision. Existing SDLC changes belong in `paw-patrol`. Foundry integration stays in the private `arni-labs/foundry` fork. Necessary DSF application instrumentation and startup corrections stay in `arni-labs/deep-sci-fi`. Kernel changes require an actual missing primitive and a separately recorded architectural decision.
+The new application belongs in `os-apps/dsf-twin`, published to Genesis with a pinned installed revision. Existing SDLC changes belong in `paw-patrol`. Foundry integration stays in the private `arni-labs/foundry` fork. Necessary DSF application instrumentation and startup corrections stay in `arni-labs/deep-sci-fi`. Kernel changes require an actual missing primitive and a separately recorded architectural decision.
 
 ## Operational records
 
