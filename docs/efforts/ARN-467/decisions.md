@@ -437,3 +437,28 @@ Successful collection also carries an empty declared error_message, so a recover
 **Chose the GitHub merge because:** Rita owns the merge decision and gave it explicitly. Installing from an unmerged branch was the shortcut she had already rejected. What is given up: the panel review and proof record for this head, which remain owed under ARN-467 before the twin is called delivered.
 
 **Where:** temperpaw PR #504, PR #508; foundry PR #14; this file.
+
+
+## D36: Emit graph annotations from the generator's own field knowledge
+
+**Decision:** Extend `specs/generate.py` so the generated `model.csdl.xml` carries OData `Temper.Twin`, `Temper.Provider`, `Temper.Role`, `Temper.References` and `Temper.ReferenceShape` annotations, emitted from declarative tables in the generator; the hand-authored CSDL is never edited.
+
+**Came up because:** Foundry needs to render the twin as a graph without hardcoding the twin's types or which fields hold ids. The schema is the natural place to declare what the twin already knows.
+
+**Options:** Hand-edit `model.csdl.xml` (rejected: it is generated, and would drift on the next render); annotate every property that names an id including experiment infra ids and provider coordinates (rejected: invents references and points at entity types absent from the schema); or drive annotations from small declarative tables in the generator keyed by the resource manifest and state var names.
+
+**Chose the generator tables because:** The annotations then follow the same source of truth as the types and stay in sync under `--check`. Provider values use the twin's vocabulary (`cloudflare`, not the internal module string `r2`) via an explicit map. References are limited to fields that truly hold entity ids: `ApplicationId`, `ConfigRef`, `DependencyIds` on every resource, plus `ApiResourceId`/`BucketResourceId` on the media pipeline, `SubjectId` on observations, `ResourceId` on model sync, and `ApplicationId`/`ResourceIds` on flow and participant. `DsfExperiment` is left unannotated: its `computer_id`, `database_id` and bucket fields point at Temper Computer, database and bucket entities that are not part of the `Dsf.Twin` schema vocabulary, so annotating them would create dangling references. The regenerated CSDL differs from the previous one only by the new annotations (proven by diff).
+
+**Where:** os-apps/dsf-twin/specs/generate.py (annotation tables and `csdl`); os-apps/dsf-twin/specs/model.csdl.xml (regenerated); os-apps/dsf-twin/test_names.py (`TwinAnnotationsTest`).
+
+## D37: Declare property references with external targeting, not nested in <Property>
+
+**Decision:** The twin marker and per-entity `Temper.Provider`/`Temper.Role` are emitted as annotations inside their `<Schema>` and `<EntityType>` elements, but the per-property `Temper.References`/`Temper.ReferenceShape` are emitted as schema-level `<Annotations Target="Dsf.Twin.<Entity>/<Property>">` blocks rather than as children of each `<Property>`.
+
+**Came up because:** Nesting annotations inside `<Property>` failed the existing kernel contract test `csdl_matches_every_declared_ioa_field_action_and_parameter`: the pinned kernel CSDL parser (temper-spec rev a82410bd, `parser/schema.rs::parse_entity_type`) reads a property only from a self-closing `Event::Empty` element and sends every other `Event::Start` child of an `EntityType` to `skip_element`. A `<Property>` given `<Annotation>` children therefore parses as a Start element and is dropped from the schema entirely, which also breaks live tenant registration, not just the test.
+
+**Options:** Nest the annotations in `<Property>` as first drafted (rejected: drops the property in the deployed kernel, so the app cannot register); upgrade the kernel parser to read `<Property>` children and re-pin it (rejected: a kernel change in the separate temper repo, outside this effort's scope, and it does not help other consumers on the current pin); or declare the same edges with OData external targeting at schema level, keeping every `<Property>` self-closing.
+
+**Chose external targeting because:** It is standard OData CSDL, keeps every property intact for the kernel parser and the contract test, and still declares each edge against the exact property target (`Dsf.Twin.DsfRailwayServiceInstance/DependencyIds`). The entity- and schema-level annotations are unaffected because the parser stores or harmlessly ignores them. Given up: the property-nested XML shape the intent illustrated. Foundry must read the reference edges from the `<Annotations Target=...>` blocks; this is flagged for confirmation in the completion report.
+
+**Where:** os-apps/dsf-twin/specs/generate.py (`csdl`, the `references` block); os-apps/dsf-twin/specs/model.csdl.xml (25 `<Annotations Target=...>` blocks); os-apps/dsf-twin/test_names.py (`test_dependency_ids_carries_references`); temper-spec rev a82410bd `crates/temper-spec/src/csdl/parser/schema.rs`.
