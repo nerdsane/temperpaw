@@ -38,3 +38,13 @@ Guards stay the existing bools. After the transition, `chain_merge_ready` checks
 ## Out of scope
 
 `review_gate_lifecycle` is unchanged. Genesis publish is a later walk.
+
+## September 10 acceptance cases
+
+- A registered harness can submit passing and failing review evidence; a failed result remains failed.
+- An ordinary authorized implementer can submit raw proof JSON through the existing validator and reach Recorded only when validation passes. Direct validation callbacks remain unavailable to that implementer.
+- Evidence upload produces a real Ready File with matching bytes; metadata-only creation never counts as proof.
+- A denial tells the client whether human elicitation is available and why delivery failed. Task consent never silently becomes a Cedar grant.
+- An authenticated human arbitration outcome can authorize a bounded terminal check, bound to repository, PR and head, without fabricating reviewers. Default review requirements remain unchanged.
+- Shared submission helpers and migrated CI read the same Temper evidence. Older comment-only gates have explicit migration handling.
+- Tooling-only installation has honest completion evidence; no fabricated application image deployment.

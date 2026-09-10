@@ -8,3 +8,7 @@ L1 still cannot require `panel_count >= 3`. The WASM can require the panel; the 
 
 Linear: https://linear.app/arni-build/issue/ARN-461
 Temper Intent: `en-01a069b4-02c5-7753-a9f3-148d59357f7b`
+
+## September 10 repair
+
+Rita authorized fixing the confirmed gate failures: harness review/proof submission, evidence files, approval delivery and authenticated arbitration, plus shared helper/CI agreement. Existing validation, exact commit provenance and the three-round human decision boundary remain required. Fork PRs 411/412 were rehosted unchanged as 459/460; no secret exposure to forks is needed.

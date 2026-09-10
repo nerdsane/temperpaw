@@ -21,3 +21,15 @@
 **Options:** (1) keep comments as fallback; (2) Temper only, fail closed.
 **Chose (2) because:** Rita said one book and no hidden comment. What we gave up: a PR with only a comment record and no Temper rows fails until the implementer writes the rows.
 **Where:** `.github/workflows/sdlc-review.yml`, `sdlc-verification.yml`.
+
+## Continue the existing recording effort
+
+**Decision:** Repair the confirmed operational gaps under ARN-461 with one PR per affected repository.
+
+**Came up because:** TemperPaw PR 500 installed merge gates before ordinary harnesses had a complete validated submission path; three current tasks are blocked by related contract mismatches.
+
+**Options:** Patch each blocked record with a one-off grant; repair shared contracts; redesign the full lifecycle.
+
+**Chose shared contract repair over one-off grants and a redesign because:** It addresses the recurring failure while retaining validation and keeping the task bounded.
+
+**Where:** docs/efforts/ARN-461; Temper Intent arn461-gate-repair-20260910; user authorization in Codex task 01a08157-a252-7b43-b1d9-facd84cd2695.
