@@ -1,29 +1,9 @@
 #!/usr/bin/env bash
-# Build all WASM modules for the paw-compute app.
-# Usage: cd os-apps/paw-compute/wasm && ./build.sh
+# Build and package the required WASM modules for paw-compute.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/../../wasm-build-env.sh"
-
-copy_artifact() {
-    local module="$1"
-    local target="$2"
-    local source_file="$SCRIPT_DIR/$module/target/$target/release/${module}.wasm"
-    if [ ! -f "$source_file" ]; then
-        source_file="$SCRIPT_DIR/$module/target/$target/release/$(echo "$module" | tr '_' '-').wasm"
-    fi
-    if [ -f "$source_file" ]; then
-        cp "$source_file" "$SCRIPT_DIR/$module/$module.wasm"
-    fi
-}
-
-# Target MUST be wasm32-wasip1 (the host wires wasi_snapshot_preview1).
-# wasm32-unknown-unknown is FORBIDDEN: it links wasm-bindgen via chrono's
-# wasmbind feature and fails host instantiation (__wbindgen_placeholder__ —
-# the 2026-07-20 prod incident). A correct blob imports WASI and carries ZERO
-# wbindgen strings — verified below before the artifact is copied.
-TARGET="wasm32-wasip1"
 
 verify_blob() {
     local wasm="$1"
@@ -45,11 +25,11 @@ verify_blob() {
 }
 
 for module in computer_exec computer_exec_start computer_exec_poll computer_copy_start computer_copy_poll computer_terminate computer_sleep computer_wake; do
-    echo "Building $module..."
-    (cd "$SCRIPT_DIR/$module" && cargo build --target "$TARGET" --release)
-    src="$SCRIPT_DIR/$module/target/$TARGET/release/${module}.wasm"
-    [ -f "$src" ] || src="$SCRIPT_DIR/$module/target/$TARGET/release/$(echo "$module" | tr '_' '-').wasm"
+    echo "Building $module (wasm32-wasip1)..."
+    src="$(temperpaw_build_wasm "$SCRIPT_DIR/$module" wasm32-wasip1)"
     verify_blob "$src"
-    copy_artifact "$module" "$TARGET"
-    echo "  -> $module built successfully"
+    cp "$src" "$SCRIPT_DIR/$module/$module.wasm"
+    echo "  -> packaged $SCRIPT_DIR/$module/$module.wasm"
 done
+
+echo "All paw-compute WASM modules built and packaged."
