@@ -23,15 +23,19 @@ while (($#)); do
     shift
 done
 module="${PWD##*/}"
+case "$target_dir" in
+    /*) ;;
+    *) target_dir="$PWD/$target_dir";;
+esac
 artifact="$target_dir/$target/release/${module//-/_}.wasm"
 if [[ "${TEST_CARGO_MODE:-}" == fail ]]; then exit 17; fi
 if [[ "${TEST_CARGO_MODE:-}" != missing ]]; then
     mkdir -p "$(dirname "$artifact")"
     printf 'fresh %s wasi_snapshot_preview1\n' "$module" > "$artifact"
 fi
-printf '%s\n' "$PWD/$module.wasm" >> "$TEST_ARTIFACT_LOG"
+printf '%s\t%s\n' "$artifact" "$PWD/$module.wasm" >> "$TEST_ARTIFACT_LOG"
 if [[ "$PWD" == */paw-fs/wasm/* ]]; then
-    printf '%s\n' "$PWD/../$module.wasm" >> "$TEST_ARTIFACT_LOG"
+    printf '%s\t%s\n' "$artifact" "$PWD/../$module.wasm" >> "$TEST_ARTIFACT_LOG"
 fi
 CARGO
 cat > "$TMP/bin/wasm-tools" <<'WASM'
@@ -72,9 +76,9 @@ for mode in default absolute relative missing fail; do
             fi
         else
             if [[ "$result" != 0 ]]; then cat "$TMP/log" >&2; exit 1; fi
-            while IFS= read -r package; do
-                if [[ ! -f "$package" ]] || ! grep -q '^fresh ' "$package"; then
-                    echo "FAIL: $builder packaged stale/missing $package ($mode)" >&2
+            while IFS=$'\t' read -r artifact package; do
+                if ! cmp -s "$artifact" "$package"; then
+                    echo "FAIL: $builder packaged bytes differ from $artifact: $package ($mode)" >&2
                     exit 1
                 fi
             done < "$TEST_ARTIFACT_LOG"

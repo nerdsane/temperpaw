@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/../../wasm-build-env.sh"
 
+# Temper supplies WASI preview1; unknown-unknown can pull in unsupported
+# wasm-bindgen imports (the July 2026 production failure). Verify before copy.
 verify_blob() {
     local wasm="$1"
     if command -v wasm-tools >/dev/null 2>&1; then

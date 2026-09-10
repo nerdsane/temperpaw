@@ -2441,12 +2441,7 @@ fn paw_patrol_has_webhook_intake_routes_through_paw_ingest() {
     }
 
     let ingest_build = read(root.join("os-apps/paw-ingest/wasm/build.sh"));
-    for needle in [
-        "validate_webhook",
-        "route_webhook",
-        "process_webhook",
-        "cargo build --target wasm32-unknown-unknown --release",
-    ] {
+    for needle in ["validate_webhook", "route_webhook", "process_webhook"] {
         assert!(
             ingest_build.contains(needle),
             "paw-ingest build.sh should build {needle}"
@@ -3642,8 +3637,6 @@ fn paw_patrol_wasm_modules_have_startup_build_script() {
         "review_gate_lifecycle",
         "repo_sweep_lifecycle",
         "daily_brief_lifecycle",
-        "cargo build --target wasm32-unknown-unknown --release",
-        "cp \"$source_file\" \"$SCRIPT_DIR/$module/$module.wasm\"",
     ] {
         assert!(script.contains(needle), "build.sh should contain {needle}");
     }
