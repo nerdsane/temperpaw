@@ -425,3 +425,15 @@ Successful collection also carries an empty declared error_message, so a recover
 **Chose the shared pin because:** The factory and its worker use the same runtime contracts. Input validation and persistence remain kernel responsibilities. This dependency update does not change the accepted scope, the D31 native-runtime DST exception, its five findings, or ARN-179.
 
 **Where:** crates/temperpaw/Cargo.toml; crates/paw-codex-worker/Cargo.toml; Cargo.lock; kernel PR456 D34-D43. The final correction rejects malformed typed declarations and unsupported uint64 state comparisons, and native actors compile initialization and transitions from the same parsed specification.
+
+## D35: Rename the app to dsf-twin and merge it to main on Rita's direct authorization
+
+**Decision:** The app `os-apps/dsf-factory` is renamed `os-apps/dsf-twin` (namespace `Dsf.Twin`), and PR #504 plus this rename merge to `main` through GitHub on Rita's explicit instruction of 2026-09-10, without the Effort `01a074e0-61c3-7e51-bc70-2c0130bb73b8` passing its Merge door.
+
+**Came up because:** Rita and her partner settled the vocabulary: this app is a live model of Deep Sci-Fi (a twin), and the factory is the lifecycle around it (Intent, Effort, Ask, computers, Foundry). The app had only ever existed on the PR #504 branch, so nothing could be installed from `main`. Rita asked for fast, incremental, end-to-end results and directed the merge twice, knowing the review and proof gates on #504 had not passed.
+
+**Options:** Drive the Effort through SubmitForReview, the three-reviewer panel, proof and Merge first (hours, and the twin stays unmerged meanwhile); merge on GitHub now and record the deviation; or install from the branch without merging.
+
+**Chose the GitHub merge because:** Rita owns the merge decision and gave it explicitly. Installing from an unmerged branch was the shortcut she had already rejected. What is given up: the panel review and proof record for this head, which remain owed under ARN-467 before the twin is called delivered.
+
+**Where:** temperpaw PR #504, PR #508; foundry PR #14; this file.
