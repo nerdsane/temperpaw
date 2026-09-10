@@ -29,7 +29,14 @@ pub fn run<C: Collector>() -> i32 {
         if context.entity_type.rsplit('.').next() != Some(C::Binding::ENTITY_TYPE) {
             return Err(Error::Binding("collector belongs to another resource type"));
         }
-        sequence = Some(counter(&context.entity_state, "refresh_sequence")?);
+        // Strict on purpose: this value only fences the failure callback and
+        // has no zero branch, so an absent counter here is an undecodable
+        // collector context rather than a resource that has never refreshed.
+        sequence = Some(
+            field(&context.entity_state, "refresh_sequence")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| Error::Field("refresh_sequence".into()))?,
+        );
         let base = context
             .config
             .get("temper_api_url")

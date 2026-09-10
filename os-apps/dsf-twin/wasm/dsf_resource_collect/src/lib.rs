@@ -72,11 +72,6 @@ pub trait Collector {
         target: &<Self::Binding as ResourceAction>::Target,
     ) -> Result<Facts, Error>;
 }
-fn counter(row: &Value, name: &str) -> Result<u64, Error> {
-    field(row, name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| Error::Field(name.into()))
-}
 fn timestamp(ms: i64) -> Result<String, Error> {
     DateTime::from_timestamp_millis(ms)
         .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true))
@@ -114,6 +109,10 @@ pub fn collect<C: Collector>(
     captured: &Value,
 ) -> Result<Callback, Error> {
     identifier(resource_id)?;
+    // Both counters read their declared initial of zero when the kernel has
+    // never incremented them. A resource that has never been refreshed is
+    // rejected below by its own message; a resource that has never been
+    // observed legitimately fences its first callback against sequence zero.
     let sequence = counter(captured, "refresh_sequence")?;
     if required(captured, "status")? != "Refreshing" || sequence == 0 || runtime.now_ms <= 0 {
         return Err(Error::Binding("resource is not refreshing"));

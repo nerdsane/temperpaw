@@ -267,3 +267,51 @@ fn collection_failures_explain_static_bindings_without_exposing_payloads() {
         assert!(!failure_message(&error).contains("PRIVATE"));
     }
 }
+
+#[test]
+fn never_incremented_resource_sequence_reads_as_its_declared_initial() {
+    let mut captured = row();
+    captured
+        .as_object_mut()
+        .expect("captured row object")
+        .remove("observed_sequence");
+    let mut h=mock(Response{status:200,body:json!({"id":"prj-1","accountId":"team-1","name":"dsf","targets":{"production":{"id":"dpl-1","readyState":"READY","meta":{"githubCommitSha":"a".repeat(40)}}},"buildCommand":"npm run build"}).to_string()});
+    let callback = collect::<Vercel>(&mut rt(&mut h), "resource-1", &captured).unwrap();
+    assert_eq!(callback.action, "CollectionMeasured");
+    assert_eq!(callback.params["collected_expected_resource_sequence"], 0);
+    assert_eq!(callback.params["expected_refresh_sequence"], 1);
+}
+
+#[test]
+fn present_resource_sequence_of_the_wrong_type_still_refuses_the_collection() {
+    for wrong in [json!("7"), json!(-1), json!(1.5), json!(null)] {
+        let mut captured = row();
+        captured["observed_sequence"] = wrong;
+        let mut host = mock(Response {
+            status: 404,
+            body: "{}".into(),
+        });
+        assert!(matches!(
+            collect::<Vercel>(&mut rt(&mut host), "resource-1", &captured),
+            Err(Error::Field(name)) if name == "observed_sequence"
+        ));
+    }
+}
+
+#[test]
+fn absent_refresh_sequence_refuses_with_the_not_refreshing_message() {
+    let mut captured = row();
+    captured
+        .as_object_mut()
+        .expect("captured row object")
+        .remove("refresh_sequence");
+    let mut host = mock(Response {
+        status: 200,
+        body: "{}".into(),
+    });
+    assert!(matches!(
+        collect::<Vercel>(&mut rt(&mut host), "resource-1", &captured),
+        Err(Error::Binding("resource is not refreshing"))
+    ));
+    assert!(host.requests.is_empty());
+}
