@@ -35,6 +35,18 @@ pub fn field<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
         .collect();
     value.get(name).or_else(|| value.get(pascal))
 }
+/// Read a declared counter from entity state.
+///
+/// The kernel materializes a counter only on its first increment, so a counter
+/// still holding its declared `initial = "0"` is absent from the serialized
+/// state entirely. Absence is therefore the declared initial, zero. A value
+/// that is present but is not an unsigned integer remains a binding error.
+pub fn counter(value: &Value, name: &str) -> Result<u64, Error> {
+    match field(value, name) {
+        None => Ok(0),
+        Some(present) => present.as_u64().ok_or_else(|| Error::Field(name.into())),
+    }
+}
 pub fn required<'a>(value: &'a Value, name: &str) -> Result<&'a str, Error> {
     field(value, name)
         .and_then(Value::as_str)

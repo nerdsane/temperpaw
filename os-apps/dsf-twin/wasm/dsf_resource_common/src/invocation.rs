@@ -1,4 +1,4 @@
-use crate::{Error, field, identifier, required};
+use crate::{Error, counter, field, identifier, required};
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -32,11 +32,9 @@ impl Invocation {
     pub fn parse(id: &str, resource: &Value) -> Result<Self, Error> {
         identifier(id)?;
         let text = |name: &str| required(resource, name).map(str::to_owned);
-        let count = |name: &str| {
-            field(resource, name)
-                .and_then(Value::as_u64)
-                .ok_or_else(|| Error::Field(name.into()))
-        };
+        let count = |name: &str| counter(resource, name);
+        // Zero is the declared initial, so an unstarted operation must reach
+        // its own message here rather than read as a missing field.
         let sequence = count("operation_sequence")?;
         if sequence == 0 {
             return Err(Error::Binding("operation has not started"));
