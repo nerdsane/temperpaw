@@ -1,8 +1,13 @@
 """Exercise the tenant-wide short-name boundary with real CSDL parsing."""
 
 import unittest
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from check_names import Names, check, names
+
+EDM = "{http://docs.oasis-open.org/odata/ns/edm}"
+CSDL = Path(__file__).resolve().parent / "specs" / "model.csdl.xml"
 
 
 def model(*schemas: str) -> bytes:
@@ -76,6 +81,51 @@ class NamesTest(unittest.TestCase):
                 model('<EntityType Name="Effort"/><EntitySet Name="Efforts"/>'),
                 candidate=True,
             )
+
+
+class TwinAnnotationsTest(unittest.TestCase):
+    """The generated schema declares the twin and its graph edges."""
+
+    def setUp(self) -> None:
+        self.schema = ET.parse(CSDL).find(f".//{EDM}Schema")
+
+    def annotations(self, element) -> dict:
+        return {
+            a.get("Term"): a.get("String")
+            for a in element.findall(f"{EDM}Annotation")
+        }
+
+    def entity(self, name: str):
+        for et in self.schema.findall(f"{EDM}EntityType"):
+            if et.get("Name") == name:
+                return et
+        raise AssertionError(f"missing entity type {name}")
+
+    def target(self, path: str):
+        for block in self.schema.findall(f"{EDM}Annotations"):
+            if block.get("Target") == path:
+                return block
+        raise AssertionError(f"missing annotation target {path}")
+
+    def property_names(self, entity_name: str) -> set:
+        return {p.get("Name") for p in self.entity(entity_name).findall(f"{EDM}Property")}
+
+    def test_schema_carries_twin_marker(self) -> None:
+        self.assertEqual(self.annotations(self.schema).get("Temper.Twin"), "Deep Sci-Fi")
+
+    def test_dependency_ids_carries_references(self) -> None:
+        # The property itself stays a self-closing element the kernel parser reads.
+        self.assertIn("DependencyIds", self.property_names("DsfRailwayServiceInstance"))
+        annotations = self.annotations(
+            self.target("Dsf.Twin.DsfRailwayServiceInstance/DependencyIds")
+        )
+        self.assertIn("DsfMediaPipeline", annotations["Temper.References"])
+        self.assertEqual(annotations["Temper.ReferenceShape"], "json_list")
+
+    def test_resource_type_declares_its_provider(self) -> None:
+        annotations = self.annotations(self.entity("DsfCloudflareR2Bucket"))
+        self.assertEqual(annotations["Temper.Provider"], "cloudflare")
+        self.assertEqual(annotations["Temper.Role"], "resource")
 
 
 if __name__ == "__main__":

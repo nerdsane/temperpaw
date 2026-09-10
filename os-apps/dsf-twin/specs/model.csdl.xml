@@ -2,6 +2,7 @@
 <edmx:Edmx xmlns="http://docs.oasis-open.org/odata/ns/edm" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx" Version="4.0">
   <edmx:DataServices>
     <Schema Namespace="Dsf.Twin">
+      <Annotation Term="Temper.Twin" String="Deep Sci-Fi" />
       <EntityType Name="DsfRailwayServiceInstance">
         <Key>
           <PropertyRef Name="Id" />
@@ -68,6 +69,8 @@
         <Property Name="RollbackVerified" Type="Edm.Boolean" />
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Annotation Term="Temper.Provider" String="railway" />
+        <Annotation Term="Temper.Role" String="resource" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
@@ -634,6 +637,8 @@
         <Property Name="SetAliasVerified" Type="Edm.Boolean" />
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Annotation Term="Temper.Provider" String="vercel" />
+        <Annotation Term="Temper.Role" String="resource" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
@@ -1321,6 +1326,8 @@
         <Property Name="ApplyConfigurationVerified" Type="Edm.Boolean" />
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Annotation Term="Temper.Provider" String="supabase" />
+        <Annotation Term="Temper.Role" String="resource" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
@@ -1632,6 +1639,8 @@
         <Property Name="ApplyConfigurationVerified" Type="Edm.Boolean" />
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Annotation Term="Temper.Provider" String="cloudflare" />
+        <Annotation Term="Temper.Role" String="resource" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
@@ -1945,6 +1954,8 @@
         <Property Name="ApplyConfigurationVerified" Type="Edm.Boolean" />
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Annotation Term="Temper.Provider" String="datadog" />
+        <Annotation Term="Temper.Role" String="resource" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
@@ -2261,6 +2272,8 @@
         <Property Name="RetrySelectedVerified" Type="Edm.Boolean" />
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
+        <Annotation Term="Temper.Provider" String="media" />
+        <Annotation Term="Temper.Role" String="resource" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />
@@ -2535,6 +2548,8 @@
         <Property Name="ObservedConfiguration" Type="Edm.String" />
         <Property Name="ObservedRevision" Type="Edm.String" />
         <Property Name="ExpectedResourceSequence" Type="Edm.Int64" />
+        <Annotation Term="Temper.Provider" String="temper" />
+        <Annotation Term="Temper.Role" String="observation" />
       </EntityType>
       <Action Name="RecordMeasured" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfObservation" />
@@ -3022,6 +3037,8 @@
         <Property Name="ObservedRevision" Type="Edm.String" />
         <Property Name="ObservedAtMs" Type="Edm.Int64" />
         <Property Name="SubjectType" Type="Edm.String" />
+        <Annotation Term="Temper.Provider" String="temper" />
+        <Annotation Term="Temper.Role" String="sync" />
       </EntityType>
       <Action Name="Configure" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
@@ -3131,6 +3148,8 @@
         <Property Name="OutcomeDefinitions" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
         <Property Name="RevisionSequence" Type="Edm.Int64" />
+        <Annotation Term="Temper.Provider" String="temper" />
+        <Annotation Term="Temper.Role" String="flow" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfFlow" />
@@ -3171,6 +3190,8 @@
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ObservedSequence" Type="Edm.Int64" />
         <Property Name="ObservedAtMs" Type="Edm.Int64" />
+        <Annotation Term="Temper.Provider" String="temper" />
+        <Annotation Term="Temper.Role" String="participant" />
       </EntityType>
       <Action Name="RegisterAgent" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfParticipant" />
@@ -3227,6 +3248,8 @@
         <Property Name="PhaseDeadlineMs" Type="Edm.String" />
         <Property Name="Isolated" Type="Edm.Boolean" />
         <Property Name="OperationSequence" Type="Edm.Int64" />
+        <Annotation Term="Temper.Provider" String="temper" />
+        <Annotation Term="Temper.Role" String="experiment" />
       </EntityType>
       <Action Name="Configure" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfExperiment" />
@@ -3415,6 +3438,106 @@
         <EntitySet Name="DsfParticipants" EntityType="Dsf.Twin.DsfParticipant" />
         <EntitySet Name="DsfExperiments" EntityType="Dsf.Twin.DsfExperiment" />
       </EntityContainer>
+      <Annotations Target="Dsf.Twin.DsfRailwayServiceInstance/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfRailwayServiceInstance/ConfigRef">
+        <Annotation Term="Temper.References" String="File" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfRailwayServiceInstance/DependencyIds">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="json_list" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfVercelProject/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfVercelProject/ConfigRef">
+        <Annotation Term="Temper.References" String="File" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfVercelProject/DependencyIds">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="json_list" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfSupabaseProject/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfSupabaseProject/ConfigRef">
+        <Annotation Term="Temper.References" String="File" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfSupabaseProject/DependencyIds">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="json_list" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfCloudflareR2Bucket/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfCloudflareR2Bucket/ConfigRef">
+        <Annotation Term="Temper.References" String="File" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfCloudflareR2Bucket/DependencyIds">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="json_list" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfDatadogMonitor/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfDatadogMonitor/ConfigRef">
+        <Annotation Term="Temper.References" String="File" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfDatadogMonitor/DependencyIds">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="json_list" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfMediaPipeline/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfMediaPipeline/ApiResourceId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfMediaPipeline/BucketResourceId">
+        <Annotation Term="Temper.References" String="DsfCloudflareR2Bucket" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfMediaPipeline/ConfigRef">
+        <Annotation Term="Temper.References" String="File" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfMediaPipeline/DependencyIds">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="json_list" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfObservation/SubjectId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfModelSync/ResourceId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfFlow/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfFlow/ResourceIds">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject,DsfSupabaseProject,DsfCloudflareR2Bucket,DsfDatadogMonitor,DsfMediaPipeline" />
+        <Annotation Term="Temper.ReferenceShape" String="json_list" />
+      </Annotations>
+      <Annotations Target="Dsf.Twin.DsfParticipant/ApplicationId">
+        <Annotation Term="Temper.References" String="DsfRailwayServiceInstance,DsfVercelProject" />
+        <Annotation Term="Temper.ReferenceShape" String="single" />
+      </Annotations>
     </Schema>
   </edmx:DataServices>
 </edmx:Edmx>
