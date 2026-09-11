@@ -12,16 +12,16 @@ path = "src/main.rs"
 
 [dependencies]
 # Temper platform engine
-temper-platform = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
-temper-observe = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
-temper-server = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011", features = ["observe"] }
-temper-runtime = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
-temper-jit = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
-temper-authz = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
-temper-store-postgres = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
-temper-store-turso = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
+temper-platform = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
+temper-observe = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
+temper-server = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2", features = ["observe"] }
+temper-runtime = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
+temper-jit = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
+temper-authz = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
+temper-store-postgres = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
+temper-store-turso = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
 # CSDL parsing for the targeted platform-identity spec registration (see identity_bootstrap.rs)
-temper-spec = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
+temper-spec = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
 
 # Paw transport (local)
 paw-transport = { path = "../paw-transport" }
@@ -80,7 +80,7 @@ cliclack = "0.3"
 
 [dev-dependencies]
 dsf-resource-collect = { path = "../../os-apps/dsf-twin/wasm/dsf_resource_collect" }
-temper-wasm = { git = "https://github.com/nerdsane/temper.git", rev = "3878ad82f199f64e97f403a5c7d7b9d641223011" }
+temper-wasm = { git = "https://github.com/nerdsane/temper.git", rev = "85c34ec1f41ddb9dc87008b88afd1492627a92d2" }
 tempfile = "3"
 toml = "0.8"
 tower = "0.5"
