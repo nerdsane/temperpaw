@@ -72,6 +72,67 @@ fn lost_preparation_and_late_results_cannot_start_another_execution() {
 }
 
 #[test]
+fn a_retried_selection_refuses_the_previous_attempt_s_result() {
+    let mut sim = simulator(7);
+    sim.step("experiment", "Validate", "{}").unwrap();
+    let prepared = json!({"expected_sequence":1,"exec_id":"exec-a","command":"pinned runner","phase_deadline_ms":"300000"});
+    sim.step("experiment", "ValidationPrepared", &prepared.to_string())
+        .unwrap();
+    sim.step("experiment","IsolationSucceeded",&json!({"expected_sequence":1,"production_database_id":"production-db","production_media_bucket":"production-media","isolation_evidence_ref":"exec-a"}).to_string()).unwrap();
+    sim.step("experiment", "Run", "{}").unwrap();
+    sim.step("experiment","RunPrepared",&json!({"expected_sequence":2,"exec_id":"exec-b","command":"pinned runner","phase_deadline_ms":"300000"}).to_string()).unwrap();
+    let compared = sim
+        .step(
+            "experiment",
+            "RunSucceeded",
+            &json!({"expected_sequence":2,"result_ref":"result-1","test_evidence_ref":"tests-1"})
+                .to_string(),
+        )
+        .unwrap();
+    sim.assert_status("experiment", "Compared");
+    // The two Exec phases have already spent the shared fence.
+    assert_eq!(compared["fields"]["operation_sequence"], 2);
+
+    let select = json!({"selection_ask_id":"ask-1","delivery_effort_id":"delivery-1"}).to_string();
+    let selecting = sim.step("experiment", "Select", &select).unwrap();
+    sim.assert_status("experiment", "Selecting");
+    assert_eq!(
+        selecting["fields"]["selection_sequence"], 1,
+        "selection runs on its own fence"
+    );
+
+    sim.step(
+        "experiment",
+        "SelectionFailed",
+        &json!({"expected_sequence":1,"error_message":"ask withdrawn"}).to_string(),
+    )
+    .unwrap();
+    sim.assert_status("experiment", "Compared");
+    let retried = sim.step("experiment", "Select", &select).unwrap();
+    assert_eq!(retried["fields"]["selection_sequence"], 2);
+
+    // The first attempt's late result names the spent fence and must not land.
+    assert!(
+        sim.step(
+            "experiment",
+            "SelectionSucceeded",
+            &json!({"expected_sequence":1,"selection_evidence_ref":"stale"}).to_string()
+        )
+        .is_err(),
+        "a superseded selection attempt must not promote the experiment"
+    );
+    sim.assert_status("experiment", "Selecting");
+    sim.step(
+        "experiment",
+        "SelectionSucceeded",
+        &json!({"expected_sequence":2,"selection_evidence_ref":"Asks('ask-1') -> Efforts('delivery-1')"}).to_string(),
+    )
+    .unwrap();
+    sim.assert_status("experiment", "Selected");
+    assert!(!sim.has_violations());
+}
+
+#[test]
 fn prepared_starts_native_exec_and_reconciled_does_not_start_again() {
     use temper_server::{registry::SpecRegistry, trigger::sim_dispatcher::SimReactionSystem};
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps");

@@ -29,7 +29,7 @@ pub fn run(phase: Phase) -> i32 {
         if ctx.entity_type.rsplit('.').next() != Some("DsfExperiment") {
             return Err(Error::Binding("module belongs to DsfExperiment"));
         }
-        let invocation = Invocation::parse(&ctx.entity_id, &ctx.entity_state)?;
+        let invocation = Invocation::parse(&ctx.entity_id, &ctx.entity_state, phase)?;
         captured = Some(invocation);
         let invocation = captured
             .as_ref()

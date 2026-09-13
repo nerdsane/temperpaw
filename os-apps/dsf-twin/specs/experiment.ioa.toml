@@ -131,6 +131,11 @@ name = "operation_sequence"
 type = "counter"
 initial = "0"
 
+[[state]]
+name = "selection_sequence"
+type = "counter"
+initial = "0"
+
 [[action]]
 name = "Configure"
 kind = "input"
@@ -712,7 +717,7 @@ kind = "input"
 from = ["Compared"]
 to = "Selecting"
 params = [{ name = "selection_ask_id", type = "string" }, { name = "delivery_effort_id", type = "string" }]
-effect = [{ type = "increment", var = "operation_sequence" }, { type = "trigger", name = "dsf_experiment_select" }]
+effect = [{ type = "increment", var = "selection_sequence" }, { type = "trigger", name = "dsf_experiment_select" }]
 
 [[action.constraints]]
 kind = "param_nonempty"
@@ -753,7 +758,7 @@ params = [{ name = "expected_sequence", type = "counter" }, { name = "selection_
 [[action.constraints]]
 kind = "param_equals_field"
 param = "expected_sequence"
-field = "operation_sequence"
+field = "selection_sequence"
 
 [[action.constraints]]
 kind = "param_nonempty"
@@ -769,7 +774,7 @@ params = [{ name = "expected_sequence", type = "counter" }, { name = "error_mess
 [[action.constraints]]
 kind = "param_equals_field"
 param = "expected_sequence"
-field = "operation_sequence"
+field = "selection_sequence"
 
 [[action]]
 name = "SelectionUncertain"
@@ -781,7 +786,7 @@ params = [{ name = "expected_sequence", type = "counter" }, { name = "error_mess
 [[action.constraints]]
 kind = "param_equals_field"
 param = "expected_sequence"
-field = "operation_sequence"
+field = "selection_sequence"
 
 [[action]]
 name = "SelectionTimedOut"

@@ -15,7 +15,7 @@ fn fixture() -> (Invocation, Value, String) {
     state["operation_sequence"] = json!(1);
     state["status"] = json!("ValidationPreparing");
     (
-        Invocation::parse("variant-a", &state).unwrap(),
+        Invocation::parse("variant-a", &state, Phase::Validate).unwrap(),
         manifest,
         raw,
     )
@@ -36,7 +36,7 @@ fn exact_manifest_and_production_binding_checks() {
     ] {
         let mut changed = manifest.clone();
         changed[name] = json!("another");
-        let mut bound = Invocation::parse(&inv.id, &inv.state).unwrap();
+        let mut bound = Invocation::parse(&inv.id, &inv.state, Phase::Validate).unwrap();
         let raw = changed.to_string();
         bound.state["manifest_sha256"] = json!(digest(raw.as_bytes()));
         assert!(validate_manifest(&bound, &raw).is_err(), "{name}");
@@ -173,6 +173,34 @@ fn resume_reads_existing_execution_and_deadline_becomes_uncertain() {
     );
     assert!(matches!(result, Err(Error::Pending(_))));
 }
+#[test]
+fn the_selection_phase_is_fenced_by_its_own_counter() {
+    let (inv, _, _) = fixture();
+    let mut state = inv.state.clone();
+    state["status"] = json!("Selecting");
+    state["selection_ask_id"] = json!("ask-1");
+    state["delivery_effort_id"] = json!("delivery-1");
+    // operation_sequence is 1 from the fixture; the Exec phases already spent it.
+    state["selection_sequence"] = json!(3);
+    let selecting = Invocation::parse("variant-a", &state, Phase::Select).unwrap();
+    assert_eq!(selecting.sequence, 3);
+    assert_eq!(
+        selecting.callback("SelectionSucceeded", json!({})).params["expected_sequence"],
+        json!(3)
+    );
+    // The Exec phases keep reading the shared counter.
+    assert_eq!(
+        Invocation::parse("variant-a", &state, Phase::Run)
+            .unwrap()
+            .sequence,
+        1
+    );
+    // A selection that has not started yet carries no fence and cannot bind.
+    let mut unstarted = state.clone();
+    unstarted["selection_sequence"] = json!(0);
+    assert!(Invocation::parse("variant-a", &unstarted, Phase::Select).is_err());
+}
+
 #[test]
 fn selection_requires_answered_same_effort_choice_and_accepted_delivery() {
     let (mut inv, _, _) = fixture();
