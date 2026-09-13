@@ -204,7 +204,6 @@ jobs:
           before_image="$(jq -r '.source.image // empty' <<<"${node}")"
           before_deployment="$(jq -r '.latestDeployment.id // empty' <<<"${node}")"
           echo "before: image=${before_image:-none} deployment=${before_deployment:-none}"
-          echo "image=${before_image}" >> "${GITHUB_OUTPUT}"
           echo "deployment_id=${before_deployment}" >> "${GITHUB_OUTPUT}"
 
       - name: Set the service image
@@ -266,6 +265,9 @@ jobs:
 
           target="ghcr.io/nerdsane/temperpaw:${IMAGE_TAG}"
 
+          # A transient API failure here must not abort the run: the source is
+          # already set and the deployment already started, so a failed poll
+          # is "not known yet", and it consumes one attempt like any other.
           lookup() {
             jq -n --arg serviceId "${RAILWAY_SERVICE_ID}" \
               '{
@@ -277,11 +279,17 @@ jobs:
                 --data @- \
                 "${RAILWAY_GRAPHQL_URL}" \
               | jq -c --arg env "${RAILWAY_ENVIRONMENT_ID}" \
-                  '.data.service.serviceInstances.edges[].node | select(.environmentId == $env)'
+                  '.data.service.serviceInstances.edges[].node | select(.environmentId == $env)' \
+              2>/dev/null || true
           }
 
           for attempt in $(seq 1 "${POLL_ATTEMPTS}"); do
             node="$(lookup)"
+            if [ -z "${node}" ]; then
+              echo "Attempt ${attempt}: Railway API did not answer; will retry"
+              sleep "${POLL_SECONDS}"
+              continue
+            fi
             image="$(jq -r '.source.image // empty' <<<"${node}")"
             dep="$(jq -r '.latestDeployment.id // empty' <<<"${node}")"
             status="$(jq -r '.latestDeployment.status // empty' <<<"${node}")"
@@ -329,11 +337,10 @@ jobs:
             sleep "${POLL_SECONDS}"
           done
 
-          if readyz="$(curl -sS "${BASE_URL%/}/readyz")"; then
-            echo "/readyz: ${readyz}"
-          fi
-          if ! curl -fsS "${BASE_URL%/}/readyz" >/dev/null; then
-            echo "::warning::/readyz is not 200 - an integration is degraded; the deploy itself succeeded"
+          readyz_code="$(curl -sS -o /tmp/readyz.body -w '%{http_code}' "${BASE_URL%/}/readyz" || echo 000)"
+          echo "/readyz ${readyz_code}: $(cat /tmp/readyz.body 2>/dev/null || echo '(no body)')"
+          if [ "${readyz_code}" != "200" ]; then
+            echo "::warning::/readyz is ${readyz_code} - an integration is degraded; the deploy itself succeeded"
           fi
 
           if [ -n "${EXPECTED_SHA}" ]; then
