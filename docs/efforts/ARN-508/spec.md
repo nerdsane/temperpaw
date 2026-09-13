@@ -2,8 +2,9 @@
 
 1. Record the live deployment before touching anything.
 2. Set the service instance's `source.image` to the requested tag
-   (`serviceInstanceUpdate`). Railway starts a deployment on a source change;
-   if none appears within six polls, start one explicitly, once.
+   (`serviceInstanceUpdate`), then start the deployment explicitly
+   (`serviceInstanceDeployV2`). Railway stages a source change; it does not
+   deploy on its own - the first live run of this workflow proved that.
 3. Gate on Railway's own record: a deployment newer than the recorded one,
    of the requested image, in status `SUCCESS`. A `FAILED`/`CRASHED`
    deployment fails the run immediately.

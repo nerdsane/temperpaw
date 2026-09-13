@@ -215,6 +215,8 @@ jobs:
           # previous deployment replays whatever image it was built from and
           # never consults IMAGE_TAG, which is how this workflow spent two days
           # reporting one tag while production ran another. Set the source.
+          # Railway stages this change; it does not deploy on its own. The
+          # next step starts the deployment explicitly.
           target="ghcr.io/nerdsane/temperpaw:${IMAGE_TAG}"
 
           response="$(jq -n \
@@ -236,6 +238,26 @@ jobs:
           fi
           echo "service source set to ${target}"
 
+      - name: Start the deployment
+        run: |
+          set -euo pipefail
+
+          # Verified on the first live run of this workflow: after
+          # serviceInstanceUpdate the instance sat for six polls with no new
+          # deployment and a null status until this call was made.
+          response="$(jq -n \
+            --arg serviceId "${RAILWAY_SERVICE_ID}" \
+            --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
+            '{ query: "mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId) }",
+               variables: { serviceId: $serviceId, environmentId: $environmentId } }' \
+            | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}")"
+
+          if jq -e '.errors' >/dev/null <<<"${response}"; then
+            jq -r '.errors[0].message // "Railway serviceInstanceDeployV2 failed"' <<<"${response}" >&2
+            exit 1
+          fi
+          echo "deployment started: $(jq -r '.data.serviceInstanceDeployV2 // "ok"' <<<"${response}")"
+
       - name: Wait for a new deployment of that image to succeed
         env:
           BEFORE_DEPLOYMENT: ${{ steps.before.outputs.deployment_id }}
@@ -243,7 +265,6 @@ jobs:
           set -euo pipefail
 
           target="ghcr.io/nerdsane/temperpaw:${IMAGE_TAG}"
-          triggered=0
 
           lookup() {
             jq -n --arg serviceId "${RAILWAY_SERVICE_ID}" \
@@ -278,17 +299,6 @@ jobs:
                 fi
                 ;;
             esac
-
-            # Setting the source normally starts a deployment on its own. If
-            # none has appeared after a few polls, start one explicitly - once.
-            if [ "${attempt}" -ge 6 ] && [ "${dep}" = "${BEFORE_DEPLOYMENT}" ] && [ "${triggered}" -eq 0 ]; then
-              jq -n --arg serviceId "${RAILWAY_SERVICE_ID}" --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
-                '{ query: "mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId) }",
-                   variables: { serviceId: $serviceId, environmentId: $environmentId } }' \
-              | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}" >/dev/null
-              triggered=1
-              echo "no new deployment after ${attempt} polls; triggered one explicitly"
-            fi
 
             echo "Attempt ${attempt}: image=${image:-none} deployment=${dep:-none} status=${status:-none}"
             sleep "${POLL_SECONDS}"

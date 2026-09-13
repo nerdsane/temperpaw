@@ -35,3 +35,15 @@
 **Chose warn-on-empty because:** The image assertion already proves which build is running, so the version check is corroboration. An empty answer is a defect in the endpoint (filed on ARN-508), not evidence of a wrong deploy; a wrong answer is.
 
 **Where:** same file, "Verify the process serves".
+
+## D4: Deploy explicitly after setting the source; no wait-then-fallback
+
+**Decision:** Call `serviceInstanceDeployV2` immediately after `serviceInstanceUpdate`. The earlier "wait six polls, then trigger once" fallback is removed.
+
+**Came up because:** The first live run of the rewritten workflow showed the instance sitting for six polls after the source update with no new deployment and a null `latestDeployment.status`, until the fallback fired. Railway stages a source change; it does not deploy it.
+
+**Options:** Keep the fallback (works, wastes a minute, and its comment claimed the opposite of what happens); always deploy explicitly.
+
+**Chose the explicit call because:** It is the only path that deploys, so calling it a fallback was a false description of the mechanism, and the workflow should not carry a comment its own first run contradicted. The poll loop still asserts a deployment newer than the recorded one, of the requested image, in `SUCCESS`, so a double deploy would be harmless and a missing one still fails closed.
+
+**Where:** .github/workflows/railway-redeploy.yml, "Start the deployment"; run 34759013602 is the evidence.
