@@ -531,7 +531,14 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
         "TEMPERPAW_BASE_URL",
         "VariableUpsertInput",
         "skipDeploys: true",
-        "deploymentRedeploy",
+        // The deploy sets the service's image and asserts the running one.
+        // deploymentRedeploy replays the previous image and is exactly the
+        // mechanism that left production on a stale tag for two days.
+        "serviceInstanceUpdate",
+        "source: { image: $image }",
+        "serviceInstanceDeployV2",
+        "latestDeployment { id status }",
+        "\"${status}\" = \"SUCCESS\"",
         "TEMPER_API_KEY",
         "/paw/version",
         "expected_sha",
@@ -554,6 +561,10 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
     assert!(
         workflow.contains("edge|latest|sha-[0-9a-f]*"),
         "Railway redeploy workflow must restrict deployable tags"
+    );
+    assert!(
+        !workflow.contains("deploymentRedeploy"),
+        "Railway redeploy workflow must not redeploy the previous deployment: that replays its image and ignores the requested tag"
     );
 }
 
