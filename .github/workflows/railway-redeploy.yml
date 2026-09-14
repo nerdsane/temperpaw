@@ -8,7 +8,7 @@ on:
         required: true
         default: edge
       expected_sha:
-        description: "Optional full commit SHA expected from /paw/version"
+        description: "Optional full commit SHA the sha-* tag must name (refused for edge/latest)"
         required: false
         default: ""
       base_url:
@@ -16,7 +16,7 @@ on:
         required: false
         default: ""
       poll_attempts:
-        description: "Number of readiness/version polling attempts"
+        description: "Number of deployment-status and health polling attempts"
         required: true
         default: "60"
       poll_seconds:
@@ -24,7 +24,7 @@ on:
         required: true
         default: "10"
       run_artifact_batch_e2e:
-        description: "Run PawFS ArtifactBatch production E2E after readiness/version proof"
+        description: "Run PawFS ArtifactBatch production E2E after the deployment proof"
         required: true
         default: "false"
 
@@ -107,10 +107,6 @@ jobs:
           esac
           echo "BASE_URL=${base_url%/}" >> "${GITHUB_ENV}"
 
-          if [ -n "${EXPECTED_SHA}" ] && [ -z "${TEMPER_API_KEY}" ]; then
-            echo "TEMPER_API_KEY secret is required when expected_sha is provided" >&2
-            exit 65
-          fi
           if [ -n "${EXPECTED_SHA}" ] && ! [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "expected_sha must be a full 40-character lowercase git SHA" >&2
             exit 64
@@ -183,12 +179,22 @@ jobs:
           # Build identity always follows THIS deploy. Left alone, BUILD_SHA and
           # BUILD_VERSION from an earlier run would persist and the new process
           # would report itself as the previous build.
+          delete_var() {
+            # Remove a variable so the value the image bakes in applies. A
+            # missing variable is not an error here.
+            jq -n --arg projectId "${RAILWAY_PROJECT_ID}" --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
+                  --arg serviceId "${RAILWAY_SERVICE_ID}" --arg name "$1" \
+              '{ query: "mutation($input: VariableDeleteInput!) { variableDelete(input: $input) }",
+                 variables: { input: { projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, name: $name } } }' \
+            | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}" >/dev/null || true
+          }
           if [ -n "${EXPECTED_SHA}" ]; then
             build_version="sha-${EXPECTED_SHA:0:8}"
             upsert_var BUILD_SHA "${EXPECTED_SHA}"
           else
+            # The image bakes in its own commit sha; a variable would shadow it.
             build_version="${IMAGE_TAG}"
-            upsert_var BUILD_SHA ""
+            delete_var BUILD_SHA
           fi
           upsert_var BUILD_VERSION "${build_version}"
           upsert_var DD_VERSION "${build_version}"
@@ -274,7 +280,8 @@ jobs:
             [ "${attempt}" -eq "${POLL_ATTEMPTS}" ] && { echo "/healthz never returned 200 (last ${code:-000})" >&2; exit 1; }
             sleep "${POLL_SECONDS}"
           done
-          echo "/readyz $(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL%/}/readyz" || echo 000) (informational)"
+          readyz="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL%/}/readyz" || true)"
+          echo "/readyz ${readyz:-000} (informational)"
 
       - name: Check out repository for ArtifactBatch E2E
         if: ${{ inputs.run_artifact_batch_e2e == 'true' }}
