@@ -169,15 +169,19 @@ jobs:
           }
 
           upsert_var IMAGE_TAG "${IMAGE_TAG}"
+          # Build identity always follows THIS deploy. Left alone, BUILD_SHA and
+          # BUILD_VERSION from an earlier run would persist and the new process
+          # would report itself as the previous build.
           if [ -n "${EXPECTED_SHA}" ]; then
             build_version="sha-${EXPECTED_SHA:0:8}"
             upsert_var BUILD_SHA "${EXPECTED_SHA}"
-            upsert_var BUILD_VERSION "${build_version}"
-            upsert_var DD_VERSION "${build_version}"
-            upsert_var OTEL_RESOURCE_ATTRIBUTES "service.name=temperpaw,service.version=${build_version},deployment.environment=prod,dd_llmobs_enabled=false"
           else
-            upsert_var OTEL_RESOURCE_ATTRIBUTES "service.name=temperpaw,deployment.environment=prod,dd_llmobs_enabled=false"
+            build_version="${IMAGE_TAG}"
+            upsert_var BUILD_SHA ""
           fi
+          upsert_var BUILD_VERSION "${build_version}"
+          upsert_var DD_VERSION "${build_version}"
+          upsert_var OTEL_RESOURCE_ATTRIBUTES "service.name=temperpaw,service.version=${build_version},deployment.environment=prod,dd_llmobs_enabled=false"
 
       - name: Record the deployment that is live before the swap
         id: before
@@ -244,6 +248,7 @@ jobs:
           echo "service source set to ${target}"
 
       - name: Start the deployment
+        id: started
         run: |
           set -euo pipefail
 
@@ -261,11 +266,18 @@ jobs:
             jq -r '.errors[0].message // "Railway serviceInstanceDeployV2 failed"' <<<"${response}" >&2
             exit 1
           fi
-          echo "deployment started: $(jq -r '.data.serviceInstanceDeployV2 // "ok"' <<<"${response}")"
+          started="$(jq -r '.data.serviceInstanceDeployV2 // empty' <<<"${response}")"
+          if ! [[ "${started}" =~ ^[0-9a-f-]{36}$ ]]; then
+            echo "serviceInstanceDeployV2 returned no deployment id: ${response}" >&2
+            exit 1
+          fi
+          echo "deployment started: ${started}"
+          echo "deployment_id=${started}" >> "${GITHUB_OUTPUT}"
 
       - name: Wait for a new deployment of that image to succeed
         env:
           BEFORE_DEPLOYMENT: ${{ steps.before.outputs.deployment_id }}
+          STARTED_DEPLOYMENT: ${{ steps.started.outputs.deployment_id }}
         run: |
           set -euo pipefail
 
@@ -300,14 +312,20 @@ jobs:
             dep="$(jq -r '.latestDeployment.id // empty' <<<"${node}")"
             status="$(jq -r '.latestDeployment.status // empty' <<<"${node}")"
 
-            if [ "${image}" = "${target}" ] && [ -n "${dep}" ] && [ "${dep}" != "${BEFORE_DEPLOYMENT}" ] && [ "${status}" = "SUCCESS" ]; then
+            # The assertion is bound to the deployment this run started, not
+            # to whichever deployment happens to be latest.
+            if [ "${image}" = "${target}" ] && [ "${dep}" = "${STARTED_DEPLOYMENT}" ] && [ "${status}" = "SUCCESS" ]; then
               echo "deployment ${dep} of ${image} is SUCCESS"
               exit 0
+            fi
+            if [ -n "${dep}" ] && [ "${dep}" != "${STARTED_DEPLOYMENT}" ] && [ "${dep}" != "${BEFORE_DEPLOYMENT}" ]; then
+              echo "a different deployment ${dep} superseded the one this run started (${STARTED_DEPLOYMENT})" >&2
+              exit 1
             fi
 
             case "${status}" in
               FAILED|CRASHED|REMOVED)
-                if [ "${dep}" != "${BEFORE_DEPLOYMENT}" ]; then
+                if [ "${dep}" = "${STARTED_DEPLOYMENT}" ]; then
                   echo "deployment ${dep} ended ${status}" >&2
                   exit 1
                 fi
