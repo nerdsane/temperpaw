@@ -40,6 +40,7 @@ jobs:
             echo "::error::cannot reach arni-labs/stack"; exit 1; }
       - name: Ask Temper for ReviewRuns on this head
         env:
+          SDLC_MIN_MODEL_REVIEWERS: ${{ vars.SDLC_MIN_MODEL_REVIEWERS }}
           TEMPER_API_KEY: ${{ secrets.TEMPER_API_KEY }}
           TEMPER_URL: ${{ vars.TEMPER_URL || 'https://openpaw-production.up.railway.app' }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -90,8 +91,17 @@ jobs:
                   extra=[]
               if isinstance(extra,list):
                   ran.update(str(x) for x in extra)
-          if len(ran & models) < 2:
-              print(f"::error::no Temper ReviewRuns for head {head[:10]} with a panel (ran={sorted(ran)}). Write Recorded ReviewRuns; this gate does not read PR comments.")
+          # The floor is the model majority (2 of 3) unless the repo variable
+          # SDLC_MIN_MODEL_REVIEWERS lowers it - never below 1, never above 2 -
+          # for records written from the shared computer, where not every
+          # reviewer CLI can be logged in (arni-labs/stack#24).
+          floor_raw=(os.environ.get("SDLC_MIN_MODEL_REVIEWERS") or "").strip()
+          try:
+              floor=min(2,max(1,int(floor_raw))) if floor_raw else 2
+          except ValueError:
+              print(f"::error::SDLC_MIN_MODEL_REVIEWERS is not an integer: {floor_raw!r}"); sys.exit(1)
+          if len(ran & models) < floor:
+              print(f"::error::no Temper ReviewRuns for head {head[:10]} with a panel (ran={sorted(ran)}, floor {floor}). Write Recorded ReviewRuns; this gate does not read PR comments.")
               sys.exit(1)
           os.makedirs(".review",exist_ok=True)
           rec={"effort":"temper","repo":os.environ.get("GITHUB_REPOSITORY",""),"commit":head,
