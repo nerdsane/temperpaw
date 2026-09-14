@@ -59,3 +59,15 @@
 **Chose subtraction because:** The runs proved four things matter - the image is set, a deployment is started and that specific one succeeds, and the process serves - and nothing else in the file was ever load-bearing. The "before" snapshot only fed the superseded-deployment branch, which binding to the started id makes unnecessary. Every `/paw/version` branch was reasoning about an endpoint that returns 503 and cannot corroborate anything today; refusing `expected_sha` for mutable tags up front says the same thing in one place. Round six's deferred findings on the version check and the pre-snapshot variable write disappear with the code they were about; the digest-resolution idea stays filed on ARN-508. What is given up: a version corroboration path that did not work, and a superseded-deployment message that a timeout now covers. 298 lines.
 
 **Where:** .github/workflows/railway-redeploy.yml; crates/temperpaw/tests/temperpaw_identity_contract.rs (pins the tag-sha check, no longer the dead endpoint); docs/efforts/ARN-508/spec.md rewritten to describe this version.
+
+## D6: The workflow does not write build identity the image already carries
+
+**Decision:** `BUILD_SHA` and `BUILD_VERSION` are never written by the workflow; `DD_VERSION` (and the OTEL `service.version`) are written from the expected sha when given, else the tag. The variable-delete helper is gone.
+
+**Came up because:** After the subtraction (D5) the fix-it rubric kept failing on rounds seven to nine, and the arbiter (ASSESS-REVIEW-SPIRAL, run after four consecutive failures) traced every failure since round six to the build-identity block, which the intent never asked for. Its one question was whether anything downstream depends on the workflow writing those variables. Checked: `Dockerfile:66-67` bake `BUILD_VERSION` and `BUILD_SHA` as ENV from `docker.yml`; `DD_VERSION` is not baked and nothing else sets it, and Datadog reads it.
+
+**Options:** Keep patching the block; delete all three variables and bake `DD_VERSION` into the image later; delete the two the image carries and keep `DD_VERSION`.
+
+**Chose the last because:** Rita chose it. The two baked values can only be shadowed by a variable, never improved, so the workflow leaves them alone and the delete machinery that existed only to un-shadow them disappears with it. `DD_VERSION` has no other source, so dropping it would silently blank Datadog's version tag on every deploy. The contract test now forbids writing the two baked variables and requires `DD_VERSION`. What is given up: nothing that worked; on `main` the block wrote all three, and only when `expected_sha` was given.
+
+**Where:** .github/workflows/railway-redeploy.yml ("Set Railway deployment variables"); crates/temperpaw/tests/temperpaw_identity_contract.rs; /tmp/assess-515.md (arbiter brief, fable).

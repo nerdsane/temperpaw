@@ -544,8 +544,8 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
         "does not match expected_sha",
         "expected_sha cannot be verified for",
         "expected_sha",
-        "BUILD_SHA",
-        "BUILD_VERSION",
+        // BUILD_SHA and BUILD_VERSION are baked into the image; the workflow
+        // must not write them. DD_VERSION is not baked, so it must.
         "DD_VERSION",
         "OTEL_RESOURCE_ATTRIBUTES",
         "dd_llmobs_enabled=false",
@@ -563,6 +563,11 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
     assert!(
         workflow.contains("^(edge|latest|sha-[0-9a-f]{7,40})$"),
         "Railway redeploy workflow must restrict deployable tags to an exact shape"
+    );
+    assert!(
+        !workflow.contains("upsert_var BUILD_SHA")
+            && !workflow.contains("upsert_var BUILD_VERSION"),
+        "Railway redeploy workflow must not write BUILD_SHA or BUILD_VERSION: the image bakes them and a variable would shadow them"
     );
     assert!(
         !workflow.contains("deploymentRedeploy"),

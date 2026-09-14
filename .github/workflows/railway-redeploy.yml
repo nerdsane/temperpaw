@@ -176,41 +176,15 @@ jobs:
           }
 
           upsert_var IMAGE_TAG "${IMAGE_TAG}"
-          # Build identity always follows THIS deploy. Left alone, BUILD_SHA and
-          # BUILD_VERSION from an earlier run would persist and the new process
-          # would report itself as the previous build.
-          delete_var() {
-            # Remove a variable so the value the image bakes in applies. A
-            # variable that is already absent is fine; any other failure is
-            # not, because a stale value left behind is exactly what this
-            # block exists to prevent.
-            local response
-            response="$(jq -n --arg projectId "${RAILWAY_PROJECT_ID}" --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
-                  --arg serviceId "${RAILWAY_SERVICE_ID}" --arg name "$1" \
-              '{ query: "mutation($input: VariableDeleteInput!) { variableDelete(input: $input) }",
-                 variables: { input: { projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, name: $name } } }' \
-            | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}")"
-            if jq -e '.errors' >/dev/null <<<"${response}"; then
-              local msg; msg="$(jq -r '.errors[0].message // "variableDelete failed"' <<<"${response}")"
-              case "${msg}" in
-                *[Nn]ot\ [Ff]ound*|*does\ not\ exist*) echo "variable $1 already absent" ;;
-                *) echo "variableDelete $1 failed: ${msg}" >&2; exit 1 ;;
-              esac
-            else
-              echo "variable $1 removed"
-            fi
-          }
-          if [ -n "${EXPECTED_SHA}" ]; then
-            build_version="sha-${EXPECTED_SHA:0:8}"
-            upsert_var BUILD_SHA "${EXPECTED_SHA}"
-          else
-            # The image bakes in its own commit sha; a variable would shadow it.
-            build_version="${IMAGE_TAG}"
-            delete_var BUILD_SHA
-          fi
-          upsert_var BUILD_VERSION "${build_version}"
-          upsert_var DD_VERSION "${build_version}"
-          upsert_var OTEL_RESOURCE_ATTRIBUTES "service.name=temperpaw,service.version=${build_version},deployment.environment=prod,dd_llmobs_enabled=false"
+          # BUILD_SHA and BUILD_VERSION are baked into the image (Dockerfile
+          # ENV, set by docker.yml at build time); this workflow does not
+          # touch them, so nothing can shadow the image's own identity.
+          # DD_VERSION is not baked and nothing else sets it, so Datadog's
+          # version tag is written here: the expected sha when given, else
+          # the tag.
+          if [ -n "${EXPECTED_SHA}" ]; then version="sha-${EXPECTED_SHA:0:8}"; else version="${IMAGE_TAG}"; fi
+          upsert_var DD_VERSION "${version}"
+          upsert_var OTEL_RESOURCE_ATTRIBUTES "service.name=temperpaw,service.version=${version},deployment.environment=prod,dd_llmobs_enabled=false"
 
       - name: Set the service image
         run: |
