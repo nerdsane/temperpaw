@@ -544,12 +544,9 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
         "does not match expected_sha",
         "expected_sha cannot be verified for",
         "expected_sha",
-        // BUILD_SHA and BUILD_VERSION are baked into the image; the workflow
-        // must not write them. DD_VERSION is not baked, so it must.
-        "DD_VERSION",
-        "OTEL_RESOURCE_ATTRIBUTES",
-        "dd_llmobs_enabled=false",
-        "sha-${EXPECTED_SHA:0:8}",
+        // Build identity is the image's: BUILD_SHA/BUILD_VERSION are baked and
+        // the entrypoint derives DD_VERSION and the OTEL attributes. The
+        // workflow writes none of them (asserted below).
         "run_artifact_batch_e2e",
         "scripts/production_artifact_batch_e2e.sh",
         "PACKAGED_WASM_PATH",
@@ -564,11 +561,17 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
         workflow.contains("^(edge|latest|sha-[0-9a-f]{7,40})$"),
         "Railway redeploy workflow must restrict deployable tags to an exact shape"
     );
-    assert!(
-        !workflow.contains("upsert_var BUILD_SHA")
-            && !workflow.contains("upsert_var BUILD_VERSION"),
-        "Railway redeploy workflow must not write BUILD_SHA or BUILD_VERSION: the image bakes them and a variable would shadow them"
-    );
+    for shadowing in [
+        "upsert_var BUILD_SHA",
+        "upsert_var BUILD_VERSION",
+        "upsert_var DD_VERSION",
+        "upsert_var OTEL_RESOURCE_ATTRIBUTES",
+    ] {
+        assert!(
+            !workflow.contains(shadowing),
+            "Railway redeploy workflow must not write build identity ({shadowing}): the image bakes it and the entrypoint derives the rest; a variable would shadow a per-build value"
+        );
+    }
     assert!(
         !workflow.contains("deploymentRedeploy"),
         "Railway redeploy workflow must not redeploy the previous deployment: that replays its image and ignores the requested tag"

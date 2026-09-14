@@ -175,16 +175,11 @@ jobs:
             fi
           }
 
+          # Build identity lives in the image: BUILD_SHA and BUILD_VERSION are
+          # baked (Dockerfile), and the entrypoint derives DD_VERSION and the
+          # OTEL attributes from them. This workflow writes none of them; a
+          # variable here could only shadow a per-build value with a constant.
           upsert_var IMAGE_TAG "${IMAGE_TAG}"
-          # BUILD_SHA and BUILD_VERSION are baked into the image (Dockerfile
-          # ENV, set by docker.yml at build time); this workflow does not
-          # touch them, so nothing can shadow the image's own identity.
-          # DD_VERSION is not baked and nothing else sets it, so Datadog's
-          # version tag is written here: the expected sha when given, else
-          # the tag.
-          if [ -n "${EXPECTED_SHA}" ]; then version="sha-${EXPECTED_SHA:0:8}"; else version="${IMAGE_TAG}"; fi
-          upsert_var DD_VERSION "${version}"
-          upsert_var OTEL_RESOURCE_ATTRIBUTES "service.name=temperpaw,service.version=${version},deployment.environment=prod,dd_llmobs_enabled=false"
 
       - name: Set the service image
         run: |

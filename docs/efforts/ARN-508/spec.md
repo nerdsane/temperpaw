@@ -6,8 +6,9 @@
    of it; `/paw/version`, which would corroborate a sha, returns 503 today
    (ARN-508), and a mutable tag proves nothing about the build it resolved
    to, so for `edge`/`latest` there is no proof to offer and the run refuses.
-2. Write the build-identity variables for this deploy, every time, so a
-   previous run's values never describe the new process.
+2. Write only `IMAGE_TAG`. Build identity is the image's: `BUILD_SHA` and
+   `BUILD_VERSION` are baked, and the entrypoint derives `DD_VERSION` and
+   the OTEL attributes from them. The workflow writes none of those.
 3. Set the service instance's `source.image` to the requested tag
    (`serviceInstanceUpdate`), then start the deployment
    (`serviceInstanceDeployV2`) and keep the deployment id it returns. Railway

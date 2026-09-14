@@ -60,7 +60,7 @@
 
 **Where:** .github/workflows/railway-redeploy.yml; crates/temperpaw/tests/temperpaw_identity_contract.rs (pins the tag-sha check, no longer the dead endpoint); docs/efforts/ARN-508/spec.md rewritten to describe this version.
 
-## D6: The workflow does not write build identity the image already carries
+## D6 (corrected by D7): keep DD_VERSION - built on a false premise
 
 **Decision:** `BUILD_SHA` and `BUILD_VERSION` are never written by the workflow; `DD_VERSION` (and the OTEL `service.version`) are written from the expected sha when given, else the tag. The variable-delete helper is gone.
 
@@ -71,3 +71,16 @@
 **Chose the last because:** Rita chose it. The two baked values can only be shadowed by a variable, never improved, so the workflow leaves them alone and the delete machinery that existed only to un-shadow them disappears with it. `DD_VERSION` has no other source, so dropping it would silently blank Datadog's version tag on every deploy. The contract test now forbids writing the two baked variables and requires `DD_VERSION`. What is given up: nothing that worked; on `main` the block wrote all three, and only when `expected_sha` was given.
 
 **Where:** .github/workflows/railway-redeploy.yml ("Set Railway deployment variables"); crates/temperpaw/tests/temperpaw_identity_contract.rs; /tmp/assess-515.md (arbiter brief, fable).
+
+
+## D7: The workflow writes no build identity at all; the image and its entrypoint own it
+
+**Decision:** The workflow upserts only `IMAGE_TAG`. `BUILD_SHA` and `BUILD_VERSION` are baked into the image; `scripts/temperpaw-entrypoint.sh` already derived `DD_VERSION` from the baked `BUILD_SHA` and now derives `OTEL_RESOURCE_ATTRIBUTES` the same way when unset. `BUILD_VERSION` and `DD_VERSION` were deleted from the openpaw service once by hand (variableDelete, 2026-09-14). `OTEL_RESOURCE_ATTRIBUTES` stays on the service until an image with the new entrypoint is deployed; deleting it first would leave the running image with no service name in its telemetry.
+
+**Came up because:** D6 stated that nothing else sets `DD_VERSION`. That was false: the entrypoint's line 6 sets it from `BUILD_SHA`, so the workflow's write replaced a per-build value with a tag. Fable found it in round ten. The check that missed it grepped the crates and the Dockerfiles and not `scripts/`.
+
+**Options:** Keep writing `DD_VERSION` from the tag; write it from the expected sha only; write nothing and let the entrypoint own it.
+
+**Chose nothing because:** It is the arbiter's literal recommendation, and the premise that made the alternative attractive was wrong. Identity that lives in the image cannot go stale and cannot be shadowed by a workflow that never writes it. The one gap - the OTEL attributes had no image-side source - is closed in the entrypoint with the same fallback shape as `DD_VERSION`. The contract test forbids all four identity writes. What is given up: a variable-level override of the version, which nothing needed.
+
+**Where:** .github/workflows/railway-redeploy.yml ("Set Railway deployment variables"); scripts/temperpaw-entrypoint.sh:7; crates/temperpaw/tests/temperpaw_identity_contract.rs; the openpaw service's variables.
