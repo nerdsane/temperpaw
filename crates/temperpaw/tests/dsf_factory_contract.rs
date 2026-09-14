@@ -840,8 +840,8 @@ fn explicit_resume_restores_only_the_exhausted_read_budget() {
 
 #[test]
 fn generated_csdl_and_module_manifest_are_current() {
-    let generator = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../os-apps/dsf-twin/specs/generate.py");
+    let generator =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin/specs/generate.py");
     let result = std::process::Command::new("python3")
         .arg(generator)
         .arg("--check")
@@ -943,8 +943,7 @@ fn every_provider_action_validates_and_verifies_its_exact_configuration_or_revis
 
 #[test]
 fn agent_action_manifest_matches_ioa_and_has_no_retired_resource_routes() {
-    let directory =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin/specs");
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/dsf-twin/specs");
     let manifest: Value =
         serde_json::from_str(&fs::read_to_string(directory.join("module-contracts.json")).unwrap())
             .unwrap();
