@@ -360,30 +360,35 @@ jobs:
             # image assertion above is the proof. A rejected call is not a
             # missing sha - it is a failed check, and fails.
             version_code="$(curl -sS -o /tmp/version.body -w '%{http_code}' -H "Authorization: Bearer ${TEMPER_API_KEY}" "${BASE_URL%/}/paw/version" || true)"
-            if [ "${version_code:-000}" != "200" ]; then
-              echo "/paw/version returned ${version_code:-000}; cannot corroborate ${EXPECTED_SHA}" >&2
-              exit 1
+            live_sha=""
+            if [ "${version_code:-000}" = "200" ]; then
+              live_sha="$(jq -r '.sha // empty' /tmp/version.body 2>/dev/null || true)"
             fi
-            live_sha="$(jq -r '.sha // empty' /tmp/version.body 2>/dev/null || true)"
-            if [ "${live_sha}" = "${EXPECTED_SHA}" ]; then
+            if [ -n "${live_sha}" ] && [ "${live_sha}" != "${EXPECTED_SHA}" ]; then
+              # An answer that names a different build is the one outcome that
+              # is evidence against the deploy, whatever the tag.
+              echo "live version ${live_sha} does not match expected ${EXPECTED_SHA}" >&2
+              exit 1
+            elif [ -n "${live_sha}" ]; then
               echo "version matches ${EXPECTED_SHA}"
-            elif [ -z "${live_sha}" ]; then
+            else
+              # No usable answer: the endpoint returned non-200 (it is 503
+              # today, ARN-508) or a 200 without a sha.
               case "${IMAGE_TAG}" in
                 sha-*)
-                  # An immutable tag names the build; the image assertion is
-                  # the proof and the missing sha is the endpoint's known gap.
-                  echo "::warning::/paw/version is 200 but carries no sha; cannot confirm ${EXPECTED_SHA} that way - the sha-* image assertion above is the proof"
+                  # The tag's hex was checked against expected_sha up front and
+                  # Railway has confirmed that exact image is what deployed, so
+                  # the proof already exists; the version endpoint would only
+                  # have corroborated it.
+                  echo "::warning::/paw/version gave no usable sha (HTTP ${version_code:-000}); ${IMAGE_TAG} matches ${EXPECTED_SHA} and the image assertion above is the proof"
                   ;;
                 *)
                   # edge/latest are mutable: the tag proves nothing about the
                   # build it resolved to, so with no sha there is no proof.
-                  echo "/paw/version carries no sha and ${IMAGE_TAG} is a mutable tag; cannot prove ${EXPECTED_SHA} is what deployed" >&2
+                  echo "/paw/version gave no usable sha (HTTP ${version_code:-000}) and ${IMAGE_TAG} is a mutable tag; cannot prove ${EXPECTED_SHA} is what deployed" >&2
                   exit 1
                   ;;
               esac
-            else
-              echo "live version ${live_sha} does not match expected ${EXPECTED_SHA}" >&2
-              exit 1
             fi
           fi
 

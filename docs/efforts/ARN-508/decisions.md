@@ -26,7 +26,7 @@
 
 ## D3: A missing version sha warns only for an immutable tag; a wrong one fails
 
-**Decision:** When `expected_sha` is given: a rejected `/paw/version` call fails; a 200 with no sha warns for a `sha-*` tag (the tag names the build and the image assertion is the proof) and fails for `edge`/`latest` (a mutable tag proves nothing about the build it resolved to); a mismatching sha fails. Revised in round four: the original D3 warned unconditionally.
+**Decision:** When `expected_sha` is given: a sha that names a different build fails, whatever the tag. No usable answer - a non-200 (the endpoint is 503 today, ARN-508) or a 200 without a sha - warns for a `sha-*` tag, because the tag's hex is checked against `expected_sha` up front and Railway has confirmed that exact image deployed, so the proof already exists; it fails for `edge`/`latest`, because a mutable tag proves nothing about the build it resolved to. Revised twice: round three made a rejected call fail unconditionally, and the first live run with `expected_sha` then failed a successful deploy on a 503 from the version endpoint.
 
 **Came up because:** `/paw/version` currently returns an empty body, so a required version match could never pass.
 
