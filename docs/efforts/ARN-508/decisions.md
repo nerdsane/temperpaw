@@ -22,9 +22,9 @@
 
 **Chose the last because:** Railway's record answers the question the workflow exists to answer, "is the requested image running", and `/healthz` proves the process behind it serves. Whether a degraded Discord connection should make the service not-ready is an application decision, not a deploy gate's; the warning keeps it visible. Keeping `/readyz` as a gate was rejected because it makes the workflow report failure for reasons unrelated to the deploy.
 
-**Where:** same file, "Wait for a new deployment" and "Verify the process serves".
+**Where:** originally "Wait for a new deployment" and "Verify the process serves"; after D5 the steps are "Wait for that deployment to succeed" and "Verify the process answers".
 
-## D3: A missing version sha warns only for an immutable tag; a wrong one fails
+## D3 (superseded by D5): the version-endpoint policy, no longer in the workflow
 
 **Decision:** When `expected_sha` is given: a sha that names a different build fails, whatever the tag. No usable answer - a non-200 (the endpoint is 503 today, ARN-508) or a 200 without a sha - warns for a `sha-*` tag, because the tag's hex is checked against `expected_sha` up front and Railway has confirmed that exact image deployed, so the proof already exists; it fails for `edge`/`latest`, because a mutable tag proves nothing about the build it resolved to. Revised twice: round three made a rejected call fail unconditionally, and the first live run with `expected_sha` then failed a successful deploy on a 503 from the version endpoint.
 

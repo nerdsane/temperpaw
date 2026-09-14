@@ -181,12 +181,24 @@ jobs:
           # would report itself as the previous build.
           delete_var() {
             # Remove a variable so the value the image bakes in applies. A
-            # missing variable is not an error here.
-            jq -n --arg projectId "${RAILWAY_PROJECT_ID}" --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
+            # variable that is already absent is fine; any other failure is
+            # not, because a stale value left behind is exactly what this
+            # block exists to prevent.
+            local response
+            response="$(jq -n --arg projectId "${RAILWAY_PROJECT_ID}" --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
                   --arg serviceId "${RAILWAY_SERVICE_ID}" --arg name "$1" \
               '{ query: "mutation($input: VariableDeleteInput!) { variableDelete(input: $input) }",
                  variables: { input: { projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, name: $name } } }' \
-            | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}" >/dev/null || true
+            | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}")"
+            if jq -e '.errors' >/dev/null <<<"${response}"; then
+              local msg; msg="$(jq -r '.errors[0].message // "variableDelete failed"' <<<"${response}")"
+              case "${msg}" in
+                *[Nn]ot\ [Ff]ound*|*does\ not\ exist*) echo "variable $1 already absent" ;;
+                *) echo "variableDelete $1 failed: ${msg}" >&2; exit 1 ;;
+              esac
+            else
+              echo "variable $1 removed"
+            fi
           }
           if [ -n "${EXPECTED_SHA}" ]; then
             build_version="sha-${EXPECTED_SHA:0:8}"
@@ -251,9 +263,14 @@ jobs:
                  variables: { serviceId: $serviceId } }' \
               | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}" \
               | jq -c --arg env "${RAILWAY_ENVIRONMENT_ID}" '.data.service.serviceInstances.edges[].node | select(.environmentId == $env)' 2>/dev/null || true)"
-            image="$(jq -r '.source.image // empty' <<<"${node:-{\}}")"
-            dep="$(jq -r '.latestDeployment.id // empty' <<<"${node:-{\}}")"
-            status="$(jq -r '.latestDeployment.status // empty' <<<"${node:-{\}}")"
+            if [ -z "${node}" ]; then
+              echo "Attempt ${attempt}: Railway API did not answer; will retry"
+              sleep "${POLL_SECONDS}"
+              continue
+            fi
+            image="$(jq -r '.source.image // empty' <<<"${node}")"
+            dep="$(jq -r '.latestDeployment.id // empty' <<<"${node}")"
+            status="$(jq -r '.latestDeployment.status // empty' <<<"${node}")"
             # The assertion is bound to the deployment this run started.
             if [ "${dep}" = "${STARTED}" ] && [ "${image}" = "${target}" ] && [ "${status}" = "SUCCESS" ]; then
               echo "deployment ${dep} of ${image} is SUCCESS"; exit 0
