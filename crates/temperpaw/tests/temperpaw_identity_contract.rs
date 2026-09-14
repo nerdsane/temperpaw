@@ -539,8 +539,10 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
         "serviceInstanceDeployV2",
         "latestDeployment { id status }",
         "\"${status}\" = \"SUCCESS\"",
-        "TEMPER_API_KEY",
-        "/paw/version",
+        // expected_sha is proven by the tag naming that build; the version
+        // endpoint is not consulted while it returns 503 (ARN-508).
+        "does not match expected_sha",
+        "expected_sha cannot be verified for",
         "expected_sha",
         "BUILD_SHA",
         "BUILD_VERSION",

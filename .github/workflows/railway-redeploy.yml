@@ -64,13 +64,24 @@ jobs:
             echo "image_tag must be edge, latest, or sha-<7..40 hex>" >&2
             exit 64
           fi
-          # A sha-* tag and an expected sha must name the same build.
-          if [ -n "${EXPECTED_SHA}" ] && [[ "${IMAGE_TAG}" == sha-* ]]; then
-            short="${IMAGE_TAG#sha-}"
-            if [ "${EXPECTED_SHA:0:${#short}}" != "${short}" ]; then
-              echo "image_tag ${IMAGE_TAG} does not match expected_sha ${EXPECTED_SHA}" >&2
-              exit 64
-            fi
+          # expected_sha is proven one way today: a sha-* tag must name that
+          # build. /paw/version, which would corroborate it, returns 503
+          # (ARN-508), and a mutable tag proves nothing about the build it
+          # resolved to - so with edge/latest there is no proof to offer.
+          if [ -n "${EXPECTED_SHA}" ]; then
+            case "${IMAGE_TAG}" in
+              sha-*)
+                short="${IMAGE_TAG#sha-}"
+                if [ "${EXPECTED_SHA:0:${#short}}" != "${short}" ]; then
+                  echo "image_tag ${IMAGE_TAG} does not match expected_sha ${EXPECTED_SHA}" >&2
+                  exit 64
+                fi
+                ;;
+              *)
+                echo "expected_sha cannot be verified for ${IMAGE_TAG}: use a sha-* tag (ARN-508)" >&2
+                exit 64
+                ;;
+            esac
           fi
 
           if [ -z "${RAILWAY_TOKEN}" ]; then
@@ -183,232 +194,87 @@ jobs:
           upsert_var DD_VERSION "${build_version}"
           upsert_var OTEL_RESOURCE_ATTRIBUTES "service.name=temperpaw,service.version=${build_version},deployment.environment=prod,dd_llmobs_enabled=false"
 
-      - name: Record the deployment that is live before the swap
-        id: before
-        run: |
-          set -euo pipefail
-
-          response="$(jq -n \
-            --arg serviceId "${RAILWAY_SERVICE_ID}" \
-            '{
-              query: "query($serviceId: String!) { service(id: $serviceId) { serviceInstances { edges { node { environmentId source { image } latestDeployment { id status } } } } } }",
-              variables: { serviceId: $serviceId }
-            }' | curl -fsS \
-              -H "Authorization: Bearer ${RAILWAY_TOKEN}" \
-              -H "Content-Type: application/json" \
-              --data @- \
-              "${RAILWAY_GRAPHQL_URL}")"
-
-          if jq -e '.errors' >/dev/null <<<"${response}"; then
-            jq -r '.errors[0].message // "Railway service lookup failed"' <<<"${response}" >&2
-            exit 1
-          fi
-
-          node="$(jq -c --arg env "${RAILWAY_ENVIRONMENT_ID}" \
-            '.data.service.serviceInstances.edges[].node | select(.environmentId == $env)' <<<"${response}")"
-          if [ -z "${node}" ]; then
-            echo "No service instance for environment ${RAILWAY_ENVIRONMENT_ID}" >&2
-            exit 1
-          fi
-
-          before_image="$(jq -r '.source.image // empty' <<<"${node}")"
-          before_deployment="$(jq -r '.latestDeployment.id // empty' <<<"${node}")"
-          echo "before: image=${before_image:-none} deployment=${before_deployment:-none}"
-          echo "deployment_id=${before_deployment}" >> "${GITHUB_OUTPUT}"
-
       - name: Set the service image
         run: |
           set -euo pipefail
-
           # The service source is a literal image reference. Redeploying the
           # previous deployment replays whatever image it was built from and
           # never consults IMAGE_TAG, which is how this workflow spent two days
-          # reporting one tag while production ran another. Set the source.
-          # Railway stages this change; it does not deploy on its own. The
-          # next step starts the deployment explicitly.
-          target="ghcr.io/nerdsane/temperpaw:${IMAGE_TAG}"
-
+          # reporting one tag while production ran another. Railway stages
+          # this change; the next step starts the deployment.
           response="$(jq -n \
             --arg serviceId "${RAILWAY_SERVICE_ID}" \
             --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
-            --arg image "${target}" \
+            --arg image "ghcr.io/nerdsane/temperpaw:${IMAGE_TAG}" \
             '{
               query: "mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }",
               variables: { serviceId: $serviceId, environmentId: $environmentId, input: { source: { image: $image } } }
-            }' | curl -fsS \
-              -H "Authorization: Bearer ${RAILWAY_TOKEN}" \
-              -H "Content-Type: application/json" \
-              --data @- \
-              "${RAILWAY_GRAPHQL_URL}")"
-
+            }' | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}")"
           if jq -e '.errors' >/dev/null <<<"${response}"; then
-            jq -r '.errors[0].message // "Railway serviceInstanceUpdate failed"' <<<"${response}" >&2
-            exit 1
+            jq -r '.errors[0].message' <<<"${response}" >&2; exit 1
           fi
-          echo "service source set to ${target}"
+          echo "service source set to ghcr.io/nerdsane/temperpaw:${IMAGE_TAG}"
 
       - name: Start the deployment
         id: started
         run: |
           set -euo pipefail
-
-          # Verified on the first live run of this workflow: after
-          # serviceInstanceUpdate the instance sat for six polls with no new
-          # deployment and a null status until this call was made.
           response="$(jq -n \
             --arg serviceId "${RAILWAY_SERVICE_ID}" \
             --arg environmentId "${RAILWAY_ENVIRONMENT_ID}" \
             '{ query: "mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId) }",
                variables: { serviceId: $serviceId, environmentId: $environmentId } }' \
             | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}")"
-
-          if jq -e '.errors' >/dev/null <<<"${response}"; then
-            jq -r '.errors[0].message // "Railway serviceInstanceDeployV2 failed"' <<<"${response}" >&2
-            exit 1
-          fi
           started="$(jq -r '.data.serviceInstanceDeployV2 // empty' <<<"${response}")"
           if ! [[ "${started}" =~ ^[0-9a-f-]{36}$ ]]; then
-            echo "serviceInstanceDeployV2 returned no deployment id: ${response}" >&2
-            exit 1
+            echo "serviceInstanceDeployV2 returned no deployment id: ${response}" >&2; exit 1
           fi
           echo "deployment started: ${started}"
           echo "deployment_id=${started}" >> "${GITHUB_OUTPUT}"
 
-      - name: Wait for a new deployment of that image to succeed
+      - name: Wait for that deployment to succeed
         env:
-          BEFORE_DEPLOYMENT: ${{ steps.before.outputs.deployment_id }}
-          STARTED_DEPLOYMENT: ${{ steps.started.outputs.deployment_id }}
+          STARTED: ${{ steps.started.outputs.deployment_id }}
         run: |
           set -euo pipefail
-
           target="ghcr.io/nerdsane/temperpaw:${IMAGE_TAG}"
-
-          # A transient API failure here must not abort the run: the source is
-          # already set and the deployment already started, so a failed poll
-          # is "not known yet", and it consumes one attempt like any other.
-          lookup() {
-            jq -n --arg serviceId "${RAILWAY_SERVICE_ID}" \
-              '{
-                query: "query($serviceId: String!) { service(id: $serviceId) { serviceInstances { edges { node { environmentId source { image } latestDeployment { id status } } } } } }",
-                variables: { serviceId: $serviceId }
-              }' | curl -fsS \
-                -H "Authorization: Bearer ${RAILWAY_TOKEN}" \
-                -H "Content-Type: application/json" \
-                --data @- \
-                "${RAILWAY_GRAPHQL_URL}" \
-              | jq -c --arg env "${RAILWAY_ENVIRONMENT_ID}" \
-                  '.data.service.serviceInstances.edges[].node | select(.environmentId == $env)' \
-              2>/dev/null || true
-          }
-
           for attempt in $(seq 1 "${POLL_ATTEMPTS}"); do
-            node="$(lookup)"
-            if [ -z "${node}" ]; then
-              echo "Attempt ${attempt}: Railway API did not answer; will retry"
-              sleep "${POLL_SECONDS}"
-              continue
+            # A poll that does not answer is "not known yet" and costs one attempt.
+            node="$(jq -n --arg serviceId "${RAILWAY_SERVICE_ID}" \
+              '{ query: "query($serviceId: String!) { service(id: $serviceId) { serviceInstances { edges { node { environmentId source { image } latestDeployment { id status } } } } } }",
+                 variables: { serviceId: $serviceId } }' \
+              | curl -fsS -H "Authorization: Bearer ${RAILWAY_TOKEN}" -H "Content-Type: application/json" --data @- "${RAILWAY_GRAPHQL_URL}" \
+              | jq -c --arg env "${RAILWAY_ENVIRONMENT_ID}" '.data.service.serviceInstances.edges[].node | select(.environmentId == $env)' 2>/dev/null || true)"
+            image="$(jq -r '.source.image // empty' <<<"${node:-{\}}")"
+            dep="$(jq -r '.latestDeployment.id // empty' <<<"${node:-{\}}")"
+            status="$(jq -r '.latestDeployment.status // empty' <<<"${node:-{\}}")"
+            # The assertion is bound to the deployment this run started.
+            if [ "${dep}" = "${STARTED}" ] && [ "${image}" = "${target}" ] && [ "${status}" = "SUCCESS" ]; then
+              echo "deployment ${dep} of ${image} is SUCCESS"; exit 0
             fi
-            image="$(jq -r '.source.image // empty' <<<"${node}")"
-            dep="$(jq -r '.latestDeployment.id // empty' <<<"${node}")"
-            status="$(jq -r '.latestDeployment.status // empty' <<<"${node}")"
-
-            # The assertion is bound to the deployment this run started, not
-            # to whichever deployment happens to be latest.
-            if [ "${image}" = "${target}" ] && [ "${dep}" = "${STARTED_DEPLOYMENT}" ] && [ "${status}" = "SUCCESS" ]; then
-              echo "deployment ${dep} of ${image} is SUCCESS"
-              exit 0
-            fi
-            if [ -n "${dep}" ] && [ "${dep}" != "${STARTED_DEPLOYMENT}" ] && [ "${dep}" != "${BEFORE_DEPLOYMENT}" ]; then
-              echo "a different deployment ${dep} superseded the one this run started (${STARTED_DEPLOYMENT})" >&2
-              exit 1
-            fi
-
-            case "${status}" in
-              FAILED|CRASHED|REMOVED)
-                if [ "${dep}" = "${STARTED_DEPLOYMENT}" ]; then
-                  echo "deployment ${dep} ended ${status}" >&2
-                  exit 1
-                fi
-                ;;
+            case "${status}" in FAILED|CRASHED|REMOVED)
+              [ "${dep}" = "${STARTED}" ] && { echo "deployment ${dep} ended ${status}" >&2; exit 1; } ;;
             esac
-
-            echo "Attempt ${attempt}: image=${image:-none} deployment=${dep:-none} status=${status:-none}"
+            echo "Attempt ${attempt}: deployment=${dep:-none} status=${status:-none}"
             sleep "${POLL_SECONDS}"
           done
-
-          echo "no successful deployment of ${target} within ${POLL_ATTEMPTS} attempts" >&2
+          echo "deployment ${STARTED} of ${target} did not reach SUCCESS within ${POLL_ATTEMPTS} attempts" >&2
           exit 1
 
-      - name: Verify the process serves, report readiness, check version if asked
+      - name: Verify the process answers
         run: |
           set -euo pipefail
-
-          # The deploy is proven by the previous step: Railway reports a new
-          # deployment of the requested image as SUCCESS. This step proves the
-          # process behind it answers. /healthz is the gate. /readyz is
-          # reported but does not gate: it folds optional integrations into
-          # the answer (a Discord credential expiring made it 503 for days and
-          # failed every run of this workflow while deploys were fine).
+          # Railway has confirmed the requested image is what deployed. This
+          # proves the process behind it serves: exactly 200 from /healthz.
+          # /readyz is printed for the log; it folds optional integrations
+          # (Discord today) into its answer and does not gate a deploy.
           for attempt in $(seq 1 "${POLL_ATTEMPTS}"); do
-            # Exactly 200. curl -f only fails at 400 and above, so a redirect
-            # or other sub-400 answer would otherwise pass as healthy.
-            health_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL%/}/healthz" || true)"
-            if [ "${health_code:-000}" = "200" ]; then
-              echo "/healthz 200 after ${attempt} attempt(s)"
-              break
-            fi
-            echo "Attempt ${attempt}: /healthz ${health_code:-000}"
-            if [ "${attempt}" -eq "${POLL_ATTEMPTS}" ]; then
-              echo "/healthz never returned 200" >&2
-              exit 1
-            fi
+            code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL%/}/healthz" || true)"
+            [ "${code:-000}" = "200" ] && { echo "/healthz 200 after ${attempt} attempt(s)"; break; }
+            [ "${attempt}" -eq "${POLL_ATTEMPTS}" ] && { echo "/healthz never returned 200 (last ${code:-000})" >&2; exit 1; }
             sleep "${POLL_SECONDS}"
           done
-
-          # -w prints 000 itself on a transport failure; no second fallback.
-          readyz_code="$(curl -sS -o /tmp/readyz.body -w '%{http_code}' "${BASE_URL%/}/readyz" || true)"
-          readyz_code="${readyz_code:-000}"
-          echo "/readyz ${readyz_code}: $(cat /tmp/readyz.body 2>/dev/null || echo '(no body)')"
-          if [ "${readyz_code}" != "200" ]; then
-            echo "::warning::/readyz is ${readyz_code} - an integration is degraded; the deploy itself succeeded"
-          fi
-
-          if [ -n "${EXPECTED_SHA}" ]; then
-            # A 200 with no sha is the endpoint's known gap and warns; the
-            # image assertion above is the proof. A rejected call is not a
-            # missing sha - it is a failed check, and fails.
-            version_code="$(curl -sS -o /tmp/version.body -w '%{http_code}' -H "Authorization: Bearer ${TEMPER_API_KEY}" "${BASE_URL%/}/paw/version" || true)"
-            live_sha=""
-            if [ "${version_code:-000}" = "200" ]; then
-              live_sha="$(jq -r '.sha // empty' /tmp/version.body 2>/dev/null || true)"
-            fi
-            if [ -n "${live_sha}" ] && [ "${live_sha}" != "${EXPECTED_SHA}" ]; then
-              # An answer that names a different build is the one outcome that
-              # is evidence against the deploy, whatever the tag.
-              echo "live version ${live_sha} does not match expected ${EXPECTED_SHA}" >&2
-              exit 1
-            elif [ -n "${live_sha}" ]; then
-              echo "version matches ${EXPECTED_SHA}"
-            else
-              # No usable answer: the endpoint returned non-200 (it is 503
-              # today, ARN-508) or a 200 without a sha.
-              case "${IMAGE_TAG}" in
-                sha-*)
-                  # The tag's hex was checked against expected_sha up front and
-                  # Railway has confirmed that exact image is what deployed, so
-                  # the proof already exists; the version endpoint would only
-                  # have corroborated it.
-                  echo "::warning::/paw/version gave no usable sha (HTTP ${version_code:-000}); ${IMAGE_TAG} matches ${EXPECTED_SHA} and the image assertion above is the proof"
-                  ;;
-                *)
-                  # edge/latest are mutable: the tag proves nothing about the
-                  # build it resolved to, so with no sha there is no proof.
-                  echo "/paw/version gave no usable sha (HTTP ${version_code:-000}) and ${IMAGE_TAG} is a mutable tag; cannot prove ${EXPECTED_SHA} is what deployed" >&2
-                  exit 1
-                  ;;
-              esac
-            fi
-          fi
+          echo "/readyz $(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL%/}/readyz" || echo 000) (informational)"
 
       - name: Check out repository for ArtifactBatch E2E
         if: ${{ inputs.run_artifact_batch_e2e == 'true' }}

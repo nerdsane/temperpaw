@@ -47,3 +47,15 @@
 **Chose the explicit call because:** It is the only path that deploys, so calling it a fallback was a false description of the mechanism, and the workflow should not carry a comment its own first run contradicted. The poll loop still asserts a deployment newer than the recorded one, of the requested image, in `SUCCESS`, so a double deploy would be harmless and a missing one still fails closed.
 
 **Where:** .github/workflows/railway-redeploy.yml, "Start the deployment"; run 34759013602 is the evidence.
+
+## D5: Subtraction after six rounds - keep what the live runs needed
+
+**Decision:** The deploy steps are cut back to four: set the image, start the deployment and keep its id, wait for that id to reach `SUCCESS`, require exactly 200 from `/healthz`. The "before" snapshot, the superseded-deployment branch, and every `/paw/version` branch are removed. `expected_sha` is resolved at input time: accepted only with a `sha-*` tag whose hex it starts with, refused for `edge`/`latest`.
+
+**Came up because:** Six panel rounds each found something real in the previous round's additions, and by round six the file had grown from 276 to 432 lines and codex's fix-it rubric failed it as over-engineered. Rita chose a subtraction pass over the arbiter or lifting the gate.
+
+**Options:** Keep applying findings (rejected: the spiral); run the arbiter; lift the required check for one merge; strip back to what the seven live runs exercised.
+
+**Chose subtraction because:** The runs proved four things matter - the image is set, a deployment is started and that specific one succeeds, and the process serves - and nothing else in the file was ever load-bearing. The "before" snapshot only fed the superseded-deployment branch, which binding to the started id makes unnecessary. Every `/paw/version` branch was reasoning about an endpoint that returns 503 and cannot corroborate anything today; refusing `expected_sha` for mutable tags up front says the same thing in one place. Round six's deferred findings on the version check and the pre-snapshot variable write disappear with the code they were about; the digest-resolution idea stays filed on ARN-508. What is given up: a version corroboration path that did not work, and a superseded-deployment message that a timeout now covers. 298 lines.
+
+**Where:** .github/workflows/railway-redeploy.yml; crates/temperpaw/tests/temperpaw_identity_contract.rs (pins the tag-sha check, no longer the dead endpoint); docs/efforts/ARN-508/spec.md rewritten to describe this version.
