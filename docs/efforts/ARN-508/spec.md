@@ -11,8 +11,9 @@
 4. Then prove the process answers: `/healthz` 200 gates. `/readyz` is reported
    and warns if not 200 but does not gate, because it folds optional
    integrations into the answer. `/paw/version` is checked only when an
-   expected sha is given, and a missing sha warns rather than fails, since
-   the image assertion is the proof.
+   expected sha is given: a rejected call fails; a missing sha warns for a
+   `sha-*` tag, since the image assertion is the proof, and fails for
+   `edge`/`latest`, since a mutable tag proves nothing about the build.
 
 Out of scope: rotating the Discord credential; deciding whether a degraded
 optional integration should make `/readyz` 503; making `/paw/version`

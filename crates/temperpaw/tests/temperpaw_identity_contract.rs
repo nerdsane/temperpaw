@@ -559,8 +559,8 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
     }
 
     assert!(
-        workflow.contains("edge|latest|sha-[0-9a-f]*"),
-        "Railway redeploy workflow must restrict deployable tags"
+        workflow.contains("^(edge|latest|sha-[0-9a-f]{7,40})$"),
+        "Railway redeploy workflow must restrict deployable tags to an exact shape"
     );
     assert!(
         !workflow.contains("deploymentRedeploy"),

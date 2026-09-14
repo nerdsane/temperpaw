@@ -24,9 +24,9 @@
 
 **Where:** same file, "Wait for a new deployment" and "Verify the process serves".
 
-## D3: A missing version sha warns; a wrong one fails
+## D3: A missing version sha warns only for an immutable tag; a wrong one fails
 
-**Decision:** When `expected_sha` is given, an empty `/paw/version` warns; a mismatching sha fails.
+**Decision:** When `expected_sha` is given: a rejected `/paw/version` call fails; a 200 with no sha warns for a `sha-*` tag (the tag names the build and the image assertion is the proof) and fails for `edge`/`latest` (a mutable tag proves nothing about the build it resolved to); a mismatching sha fails. Revised in round four: the original D3 warned unconditionally.
 
 **Came up because:** `/paw/version` currently returns an empty body, so a required version match could never pass.
 

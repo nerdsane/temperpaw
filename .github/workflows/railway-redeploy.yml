@@ -58,14 +58,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          case "${IMAGE_TAG}" in
-            edge|latest|sha-[0-9a-f]*)
-              ;;
-            *)
-              echo "image_tag must be edge, latest, or sha-*" >&2
+          # This value becomes a production source write, so the shape is
+          # exact: edge, latest, or sha- followed by 7 to 40 lowercase hex.
+          if ! [[ "${IMAGE_TAG}" =~ ^(edge|latest|sha-[0-9a-f]{7,40})$ ]]; then
+            echo "image_tag must be edge, latest, or sha-<7..40 hex>" >&2
+            exit 64
+          fi
+          # A sha-* tag and an expected sha must name the same build.
+          if [ -n "${EXPECTED_SHA}" ] && [[ "${IMAGE_TAG}" == sha-* ]]; then
+            short="${IMAGE_TAG#sha-}"
+            if [ "${EXPECTED_SHA:0:${#short}}" != "${short}" ]; then
+              echo "image_tag ${IMAGE_TAG} does not match expected_sha ${EXPECTED_SHA}" >&2
               exit 64
-              ;;
-          esac
+            fi
+          fi
 
           if [ -z "${RAILWAY_TOKEN}" ]; then
             echo "RAILWAY_TOKEN secret is required" >&2
