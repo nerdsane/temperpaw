@@ -37,9 +37,8 @@ fn context(entity: &str, module: &str, state: Value) -> WasmInvocationContext {
 }
 
 fn bytes(module: &str) -> Vec<u8> {
-    std::fs::read(app().join(format!("wasm/{module}/{module}.wasm"))).unwrap_or_else(|error| {
-        panic!("Build dsf-twin WASMs before this proof: {module}: {error}")
-    })
+    std::fs::read(app().join(format!("wasm/{module}/{module}.wasm")))
+        .unwrap_or_else(|error| panic!("Build dsf-twin WASMs before this proof: {module}: {error}"))
 }
 
 fn row(phase: &str, digest: &str) -> Value {
