@@ -71,3 +71,15 @@
 **Chose the declared set because:** It preserves every original acceptance case, includes newly added modules inside patrol, and fails when an expected builder disappears. It avoids claiming coverage of a different build pipeline.
 
 **Where:** scripts/test-wasm-build-artifacts.sh.
+
+### Verify packaging behavior from the Rust contract suite
+
+**Decision:** Run the existing artifact regression from the corridor packaging contract and keep the media test focused on module inclusion.
+
+**Came up because:** Post-merge Cargo tests exposed two remaining literal-output-filename assertions after the successful real WASM build. The shared shell loop constructs those filenames dynamically.
+
+**Options:** Restore redundant filename strings, delete packaging coverage, or execute the existing byte-comparison regression from the contract suite.
+
+**Chose executable coverage because:** Cargo tests now fail on incorrect packaged bytes or missing outputs without depending on how the builder spells a path. The regression covers both corridor and media builders, and existing module-inclusion checks remain. The follow-up PR is necessary because PR #509 already merged; Rita authorized the narrow regression correction.
+
+**Where:** crates/temperpaw/tests/corridor_engine_contract.rs and crates/temperpaw/tests/paw_media_image_generation.rs.
