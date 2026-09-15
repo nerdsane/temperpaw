@@ -146,19 +146,19 @@ fn experiment_cannot_use_production_database_or_media_bucket() {
     step(
         &mut sim,
         "SelectionSucceeded",
-        json!({"expected_sequence":3,"selection_evidence_ref":"ask-1-accepted-delivery"}),
+        json!({"expected_sequence":1,"selection_evidence_ref":"ask-1-accepted-delivery"}),
     );
     assert!(sim.step("subject", "Deploy", "{}").is_err());
     step(&mut sim, "Cleanup", json!({}));
     step(
         &mut sim,
         "CleanupPrepared",
-        json!({"expected_sequence":4,"exec_id":"exec-cleanup","command":"runner cleanup","phase_deadline_ms":"300000"}),
+        json!({"expected_sequence":3,"exec_id":"exec-cleanup","command":"runner cleanup","phase_deadline_ms":"300000"}),
     );
     step(
         &mut sim,
         "CleanupSucceeded",
-        json!({"cleanup_evidence_ref":"cleanup-1", "expected_sequence":4}),
+        json!({"cleanup_evidence_ref":"cleanup-1", "expected_sequence":3}),
     );
     sim.assert_status("subject", "Cleaned");
     assert!(!sim.has_violations());

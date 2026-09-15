@@ -39,6 +39,15 @@ impl Phase {
             Self::Select => "Selecting",
         }
     }
+    /// The counter this phase's callbacks are fenced against. Selection runs
+    /// after the Exec phases have already advanced `operation_sequence`, so it
+    /// carries its own fence instead of a third step of the shared one.
+    pub fn sequence_field(self) -> &'static str {
+        match self {
+            Self::Validate | Self::Run | Self::Cleanup => "operation_sequence",
+            Self::Select => "selection_sequence",
+        }
+    }
 }
 
 pub struct Invocation {
@@ -47,9 +56,9 @@ pub struct Invocation {
     pub state: Value,
 }
 impl Invocation {
-    pub fn parse(id: &str, state: &Value) -> Result<Self, Error> {
+    pub fn parse(id: &str, state: &Value, phase: Phase) -> Result<Self, Error> {
         identifier(id)?;
-        let sequence = field(state, "operation_sequence")
+        let sequence = field(state, phase.sequence_field())
             .and_then(Value::as_u64)
             .filter(|n| *n > 0)
             .ok_or(Error::Binding("missing experiment sequence"))?;
@@ -165,6 +174,7 @@ pub fn execute(
         // Field equality is sufficient; read timestamps and representation may differ.
         for name in [
             "operation_sequence",
+            "selection_sequence",
             "manifest_ref",
             "manifest_sha256",
             "status",

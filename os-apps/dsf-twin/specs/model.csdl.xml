@@ -3248,6 +3248,7 @@
         <Property Name="PhaseDeadlineMs" Type="Edm.String" />
         <Property Name="Isolated" Type="Edm.Boolean" />
         <Property Name="OperationSequence" Type="Edm.Int64" />
+        <Property Name="SelectionSequence" Type="Edm.Int64" />
         <Annotation Term="Temper.Provider" String="temper" />
         <Annotation Term="Temper.Role" String="experiment" />
       </EntityType>
