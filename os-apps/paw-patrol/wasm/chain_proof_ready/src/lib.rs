@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use temper_wasm_sdk::prelude::*;
 
+#[cfg(all(target_arch = "wasm32", not(feature = "library")))]
 #[unsafe(no_mangle)]
 pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
     let result = (|| -> Result<(), String> {
@@ -20,8 +21,14 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         let headers = odata_headers(&ctx);
         let packet = get_entity(&ctx, &base_url, &headers, "ProofPackets", &id)?;
         proof_packet_holds(&packet, None)?;
-        ctx.log("info", &format!("chain_proof_ready: ProofPacket {id} holds"));
-        set_success_result("", &json!({ "status": "proof_ready", "proof_packet_id": id }));
+        ctx.log(
+            "info",
+            &format!("chain_proof_ready: ProofPacket {id} holds"),
+        );
+        set_success_result(
+            "",
+            &json!({ "status": "proof_ready", "proof_packet_id": id }),
+        );
         Ok(())
     })();
     if let Err(error) = result {
@@ -121,7 +128,10 @@ fn validate_proof(r: &Value) -> Result<(), String> {
 }
 
 fn is_full_sha(commit: &str) -> bool {
-    commit.len() == 40 && commit.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn json_field(fields: &Value, name: &str) -> Result<Value, String> {
@@ -167,6 +177,7 @@ fn str_field(fields: &Value, name: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+#[cfg(all(target_arch = "wasm32", not(feature = "library")))]
 fn str_of(ctx: &Context, fields: &Value, name: &str) -> Option<String> {
     ctx.trigger_params
         .get(name)
@@ -199,6 +210,7 @@ fn pascal(field: &str) -> String {
         .collect()
 }
 
+#[cfg(all(target_arch = "wasm32", not(feature = "library")))]
 fn resolve_api_url(ctx: &Context) -> String {
     ctx.config
         .get("temper_api_url")
@@ -207,6 +219,7 @@ fn resolve_api_url(ctx: &Context) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:3000".to_string())
 }
 
+#[cfg(all(target_arch = "wasm32", not(feature = "library")))]
 fn odata_headers(ctx: &Context) -> Vec<(String, String)> {
     vec![
         ("content-type".to_string(), "application/json".to_string()),
@@ -217,6 +230,7 @@ fn odata_headers(ctx: &Context) -> Vec<(String, String)> {
     ]
 }
 
+#[cfg(all(target_arch = "wasm32", not(feature = "library")))]
 fn get_entity(
     ctx: &Context,
     base_url: &str,

@@ -45,8 +45,27 @@ WASM
 chmod +x "$TMP/bin/cargo" "$TMP/bin/wasm-tools"
 export PATH="$TMP/bin:$PATH"
 export TEST_ARTIFACT_LOG="$TMP/artifacts"
-builders=()
-while IFS= read -r file; do builders+=("$file"); done < <(find "$TMP/repo/os-apps" -name build.sh -type f | sort)
+# Exercise the shell builders migrated to temperpaw_build_wasm. dsf-twin has
+# its own generator and explicit Cargo output directory, outside this fixture.
+builders=(
+    paw-agent/wasm/build.sh
+    paw-channels/wasm/build.sh
+    paw-compute/wasm/build.sh
+    paw-foresight/wasm/build.sh
+    paw-fs/wasm/artifact_batch_apply/build.sh
+    paw-fs/wasm/blob_adapter/build.sh
+    paw-fs/wasm/workspace_fs/build.sh
+    paw-ingest/wasm/build.sh
+    paw-managed-agents/wasm/build.sh
+    paw-media/wasm/build.sh
+    paw-patrol/wasm/build.sh
+    paw-research/wasm/build.sh
+    paw-skills/wasm/build.sh
+)
+for index in "${!builders[@]}"; do
+    builders[$index]="$TMP/repo/os-apps/${builders[$index]}"
+    test -f "${builders[$index]}"
+done
 for mode in default absolute relative missing fail; do
     for builder in "${builders[@]}"; do
         find "$TMP/repo" -name '*.wasm' -delete

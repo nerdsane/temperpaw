@@ -153,6 +153,30 @@ startup_loading = "lazy"
 provenance = "bundled-artifact"
 import_class = "temper-host"
 
+[[wasm_modules]]
+name = "effort_resource_delivery_validate"
+target = "wasm32-unknown-unknown"
+criticality = "app-required"
+startup_loading = "lazy"
+provenance = "bundled-artifact"
+import_class = "temper-host"
+
+[[wasm_modules]]
+name = "effort_resource_delivery_merge"
+target = "wasm32-unknown-unknown"
+criticality = "app-required"
+startup_loading = "lazy"
+provenance = "bundled-artifact"
+import_class = "temper-host"
+
+[[wasm_modules]]
+name = "effort_resource_delivery_verify"
+target = "wasm32-unknown-unknown"
+criticality = "app-required"
+startup_loading = "lazy"
+provenance = "bundled-artifact"
+import_class = "temper-host"
+
 # Stage 3 S0 shadow bridge (ARN-430): parses b64 comment records into entity
 # fields. Temporary - retired at S3.
 [[wasm_modules]]

@@ -5,9 +5,9 @@
 //! entity field → config → error. No dynamic dispatch (`dyn Trait`),
 //! WASM-compatible throughout.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
-use temper_wasm_sdk::context::Context;
+use temper_wasm_sdk::context::{Context, HttpResponse};
 
 use crate::entity_field_str;
 
@@ -21,6 +21,32 @@ pub struct SandboxHandle {
     pub sandbox_url: String,
     pub sandbox_id: String,
     pub provider: String,
+}
+
+/// A new child may submit one named copy; recovery may only look it up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyMode {
+    Start,
+    Reconcile,
+}
+
+/// Preserve both native identifiers. Unsupported names fail before provider I/O.
+pub fn sandbox_copy_name(child_id: &str, source_id: &str) -> Result<String, String> {
+    let name = format!("copy-{child_id}-{source_id}");
+    if !valid_copy_identifier(child_id) || !valid_copy_identifier(source_id) || name.len() > 63 {
+        return Err("Computer copy requires complete child and source IDs that fit the provider's 63-character name limit".into());
+    }
+    Ok(name)
+}
+
+fn valid_copy_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && !value.starts_with('-')
+        && !value.ends_with('-')
 }
 
 /// Resources requested when creating a sandbox.
@@ -354,18 +380,28 @@ pub fn sandbox_copy(
     ctx: &Context,
     provider: &str,
     source_sandbox_id: &str,
-    ready_timeout_secs: u64,
+    child_id: &str,
+    mode: CopyMode,
 ) -> Result<SandboxHandle, String> {
+    let name = sandbox_copy_name(child_id, source_sandbox_id)?;
     let api_key = resolve_sandbox_api_key(ctx, provider)?;
     let result = match provider {
-        "tensorlake" => tensorlake_copy(ctx, &api_key, source_sandbox_id, ready_timeout_secs),
+        "tensorlake" => {
+            tensorlake_copy_request(source_sandbox_id, &name, mode, |method, url, body| {
+                ctx.http_call(method, url, &bearer_headers(&api_key), body)
+            })
+        }
         other => Err(format!("sandbox_copy unsupported for provider: {other}")),
+    };
+    let operation = match mode {
+        CopyMode::Start => "copy",
+        CopyMode::Reconcile => "copy_reconcile",
     };
     match &result {
         Ok(h) => log_sandbox_observability(
             ctx,
             provider,
-            "copy",
+            operation,
             "success",
             &h.sandbox_id,
             None,
@@ -375,7 +411,7 @@ pub fn sandbox_copy(
         Err(_) => log_sandbox_observability(
             ctx,
             provider,
-            "copy",
+            operation,
             "error",
             "",
             None,
@@ -1085,64 +1121,133 @@ fn tensorlake_create(
     })
 }
 
-fn tensorlake_copy(
-    ctx: &Context,
-    api_key: &str,
-    source_sandbox_id: &str,
-    ready_timeout_secs: u64,
+/// The name is a correlation key for the persisted child/source request. GET
+/// does not expose source lineage; only a received POST response can prove that.
+fn tensorlake_copy_request(
+    source_id: &str,
+    name: &str,
+    mode: CopyMode,
+    mut request: impl FnMut(&str, &str, &str) -> Result<HttpResponse, String>,
 ) -> Result<SandboxHandle, String> {
-    // Server live-copy API: POST /sandboxes/{source}/copy.
-    let copy_url = format!("https://api.tensorlake.ai/sandboxes/{source_sandbox_id}/copy");
-    let headers = bearer_headers_json(api_key);
-    let body = json!({ "times": 1, "timeout_seconds": ready_timeout_secs });
-    let resp = ctx.http_call("POST", &copy_url, &headers, &body.to_string())?;
-    if resp.status < 200 || resp.status >= 300 {
+    if !valid_copy_identifier(source_id) || !valid_copy_identifier(name) {
+        return Err("invalid Tensorlake copy identifiers".into());
+    }
+    let source_url = format!("https://api.tensorlake.ai/sandboxes/{source_id}");
+    let source = copy_metadata_response(request("GET", &source_url, "")?)?;
+    if copy_metadata_id(&source) != Some(source_id) {
+        return Err("Tensorlake copy source ID did not match its recorded binding".into());
+    }
+    let namespace = source
+        .get("namespace")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or("Tensorlake copy source has no project namespace")?;
+    let lookup_url = format!("https://api.tensorlake.ai/sandboxes/{name}");
+    let lookup = request("GET", &lookup_url, "")?;
+    if lookup.status != 404 || mode == CopyMode::Reconcile {
+        let metadata = copy_metadata_response(lookup)?;
+        return copied_handle(&metadata, source_id, name, namespace, None);
+    }
+
+    // Copy accepts query parameters, not JSON. The provider may return after the
+    // host deadline; an error preserves CopyUnknown and never resubmits this POST.
+    let copy_url =
+        format!("https://api.tensorlake.ai/sandboxes/{source_id}/copy?times=1&name={name}");
+    let response = request("POST", &copy_url, "")?;
+    if !matches!(response.status, 200 | 422 | 504) {
         return Err(format!(
-            "Tensorlake sandbox copy of {source_sandbox_id} failed (HTTP {}): {}",
-            resp.status,
-            &resp.body[..resp.body.len().min(500)]
+            "Tensorlake copy result is uncertain (HTTP {}); reconcile the recorded name",
+            response.status
         ));
     }
-    let parsed: Value = serde_json::from_str(&resp.body)
-        .map_err(|e| format!("failed to parse Tensorlake copy response: {e}"))?;
-    let sandbox_id = extract_copied_sandbox_id(&parsed).ok_or_else(|| {
-        format!(
-            "Tensorlake copy returned no sandbox id: {}",
-            &resp.body[..resp.body.len().min(300)]
-        )
-    })?;
-    Ok(SandboxHandle {
-        sandbox_url: format!("https://{sandbox_id}.sandbox.tensorlake.ai"),
-        sandbox_id,
-        provider: "tensorlake".to_string(),
-    })
+    let result: Value = serde_json::from_str(&response.body)
+        .map_err(|error| format!("invalid Tensorlake copy response: {error}"))?;
+    if result.get("source_sandbox_id").and_then(Value::as_str) != Some(source_id) {
+        return Err("Tensorlake copy response source does not match the recorded source".into());
+    }
+    let destinations = result
+        .get("sandboxes")
+        .and_then(Value::as_array)
+        .filter(|items| items.len() == 1)
+        .ok_or("Tensorlake copy response must identify exactly one destination")?;
+    let destination_id = destinations[0]
+        .get("sandbox_id")
+        .and_then(Value::as_str)
+        .filter(|id| valid_copy_identifier(id) && *id != source_id)
+        .ok_or("Tensorlake copy response has no distinct destination ID")?;
+    let metadata = copy_metadata_response(request("GET", &lookup_url, "")?)?;
+    copied_handle(&metadata, source_id, name, namespace, Some(destination_id))
 }
 
-/// Pull the new sandbox id out of a copy response, tolerating shapes: a bare
-/// `{sandbox_id|id}`, or `{sandboxes:[{sandbox_id|id}|"<id>", ...]}` (the batch
-/// form). Returns the first id found.
-fn extract_copied_sandbox_id(parsed: &Value) -> Option<String> {
-    if let Some(s) = parsed.get("sandbox_id").and_then(|v| v.as_str()) {
-        return Some(s.to_string());
+fn copy_metadata_response(response: HttpResponse) -> Result<Value, String> {
+    if response.status != 200 {
+        return Err(format!(
+            "Tensorlake named copy remains unresolved (HTTP {})",
+            response.status
+        ));
     }
-    if let Some(s) = parsed.get("id").and_then(|v| v.as_str()) {
-        return Some(s.to_string());
+    serde_json::from_str(&response.body)
+        .map_err(|error| format!("invalid Tensorlake sandbox metadata: {error}"))
+}
+
+// The documented metadata field is `id`; the deployed SDK also records
+// `sandbox_id` responses. Accept that known representation without accepting
+// contradictory identities or the old bare/batch copy-response shortcuts.
+fn copy_metadata_id(metadata: &Value) -> Option<&str> {
+    match (
+        metadata.get("id").and_then(Value::as_str),
+        metadata.get("sandbox_id").and_then(Value::as_str),
+    ) {
+        (Some(id), Some(alias)) if id == alias => Some(id),
+        (Some(id), None) | (None, Some(id)) => Some(id),
+        _ => None,
     }
-    if let Some(arr) = parsed.get("sandboxes").and_then(|v| v.as_array()) {
-        for e in arr {
-            if let Some(s) = e
-                .get("sandbox_id")
-                .or_else(|| e.get("id"))
-                .and_then(|v| v.as_str())
-            {
-                return Some(s.to_string());
-            }
-            if let Some(s) = e.as_str() {
-                return Some(s.to_string());
-            }
-        }
+}
+
+fn copied_handle(
+    metadata: &Value,
+    source_id: &str,
+    expected_name: &str,
+    expected_namespace: &str,
+    response_id: Option<&str>,
+) -> Result<SandboxHandle, String> {
+    let id = copy_metadata_id(metadata)
+        .filter(|id| valid_copy_identifier(id) && *id != source_id)
+        .ok_or("Tensorlake lookup did not identify a distinct destination")?;
+    if metadata.get("name").and_then(Value::as_str) != Some(expected_name)
+        || metadata.get("namespace").and_then(Value::as_str) != Some(expected_namespace)
+        || response_id.is_some_and(|expected| expected != id)
+    {
+        return Err(
+            "Tensorlake copy lookup did not match its recorded name, project or response ID".into(),
+        );
     }
-    None
+    if !matches!(
+        metadata.get("status").and_then(Value::as_str),
+        Some("pending" | "running" | "suspended")
+    ) {
+        return Err("Tensorlake copy is not pending, running or suspended".into());
+    }
+    // Use the current placement's management URL. Do not invent a URL or forward
+    // the provider credential to a hostname outside Tensorlake.
+    let url = metadata
+        .get("sandbox_url")
+        .and_then(Value::as_str)
+        .ok_or("Tensorlake copy has no management URL yet; reconcile again")?;
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split('/').next())
+        .filter(|host| {
+            host.ends_with(".tensorlake.ai")
+                && host
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
+        })
+        .ok_or("Tensorlake copy returned an invalid management URL")?;
+    Ok(SandboxHandle {
+        sandbox_url: url.trim_end_matches('/').into(),
+        sandbox_id: id.into(),
+        provider: "tensorlake".into(),
+    })
 }
 
 fn tensorlake_control(
@@ -2071,24 +2176,334 @@ mod tests {
         }
     }
     #[test]
-    fn extract_copied_sandbox_id_tolerates_shapes() {
-        use serde_json::json;
-        assert_eq!(
-            extract_copied_sandbox_id(&json!({"sandbox_id":"a1"})).as_deref(),
-            Some("a1")
+    fn tensorlake_copy_uses_query_parameters_and_verifies_the_destination() {
+        let mut calls = Vec::new();
+        let handle = tensorlake_copy_request("source", "copy-child-source", CopyMode::Start, |method, url, body| {
+            calls.push((method.to_owned(), url.to_owned(), body.to_owned()));
+            Ok(match calls.len() {
+                1 => copy_source_response(),
+                2 => copy_response(404, json!({})),
+                3 => copy_response(200, json!({"source_sandbox_id":"source", "sandboxes":[{"sandbox_id":"child", "status":"running"}]})),
+                4 => copy_response(200, copy_metadata()),
+                _ => panic!("unexpected request"),
+            })
+        }).unwrap();
+        assert_eq!(handle.sandbox_id, "child");
+        assert_eq!(handle.sandbox_url, "https://child.sandbox.tensorlake.ai");
+        assert_eq!(calls, vec![
+            ("GET".into(), "https://api.tensorlake.ai/sandboxes/source".into(), "".into()),
+            ("GET".into(), "https://api.tensorlake.ai/sandboxes/copy-child-source".into(), "".into()),
+            ("POST".into(), "https://api.tensorlake.ai/sandboxes/source/copy?times=1&name=copy-child-source".into(), "".into()),
+            ("GET".into(), "https://api.tensorlake.ai/sandboxes/copy-child-source".into(), "".into()),
+        ]);
+    }
+
+    fn copy_response(status: u16, body: Value) -> temper_wasm_sdk::context::HttpResponse {
+        temper_wasm_sdk::context::HttpResponse {
+            status,
+            body: body.to_string(),
+        }
+    }
+
+    fn copy_source_response() -> HttpResponse {
+        copy_response(200, json!({"id":"source", "namespace":"test-project"}))
+    }
+
+    fn copy_metadata() -> Value {
+        json!({"id":"child", "name":"copy-child-source", "namespace":"test-project", "status":"running", "sandbox_url":"https://child.sandbox.tensorlake.ai"})
+    }
+
+    #[test]
+    fn tensorlake_copy_reconciliation_never_posts_even_when_not_found() {
+        for mode in [CopyMode::Start, CopyMode::Reconcile] {
+            let mut calls = 0;
+            let handle = tensorlake_copy_request(
+                "source",
+                "copy-child-source",
+                mode,
+                |method, url, body| {
+                    if url.ends_with("/source") {
+                        assert_eq!(method, "GET");
+                        return Ok(copy_source_response());
+                    }
+                    calls += 1;
+                    assert_eq!(method, "GET");
+                    assert_eq!(body, "");
+                    Ok(copy_response(200, copy_metadata()))
+                },
+            )
+            .unwrap();
+            assert_eq!(handle.sandbox_id, "child");
+            assert_eq!(calls, 1);
+        }
+        for status in [404, 403, 500] {
+            let mut calls = 0;
+            assert!(
+                tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Reconcile,
+                    |method, url, _| {
+                        if url.ends_with("/source") {
+                            assert_eq!(method, "GET");
+                            return Ok(copy_source_response());
+                        }
+                        calls += 1;
+                        assert_eq!(method, "GET");
+                        Ok(copy_response(status, json!({})))
+                    }
+                )
+                .is_err()
+            );
+            assert_eq!(calls, 1);
+        }
+    }
+
+    #[test]
+    fn tensorlake_copy_accepts_partial_results_only_with_matching_source_and_destination() {
+        for status in [200, 422, 504] {
+            for (source, destination, accepted) in [
+                ("source", "child", true),
+                ("other", "child", false),
+                ("source", "source", false),
+                ("source", "unrelated", false),
+            ] {
+                let mut calls = 0;
+                let result = tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Start,
+                    |method, url, _| {
+                        if url.ends_with("/source") {
+                            assert_eq!(method, "GET");
+                            return Ok(copy_source_response());
+                        }
+                        calls += 1;
+                        Ok(match calls {
+                            1 => copy_response(404, json!({})),
+                            2 => copy_response(
+                                status,
+                                json!({"source_sandbox_id":source, "sandboxes":[{"sandbox_id":destination, "status":"pending"}]}),
+                            ),
+                            3 => copy_response(200, copy_metadata()),
+                            _ => panic!("unexpected retry"),
+                        })
+                    },
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    accepted,
+                    "status={status} source={source} destination={destination}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tensorlake_copy_refuses_ambiguous_shapes_and_untrusted_names_or_urls() {
+        for mut metadata in [
+            json!({"id":"source", "name":"copy-child-source", "status":"running", "sandbox_url":"https://source.sandbox.tensorlake.ai"}),
+            json!({"id":"child", "name":"unrelated", "status":"running", "sandbox_url":"https://child.sandbox.tensorlake.ai"}),
+            json!({"id":"child", "name":"copy-child-source", "status":"terminated", "sandbox_url":"https://child.sandbox.tensorlake.ai"}),
+            json!({"id":"child", "name":"copy-child-source", "status":"pending"}),
+            json!({"id":"child", "name":"copy-child-source", "status":"running", "sandbox_url":"https://attacker.example"}),
+        ] {
+            metadata["namespace"] = json!("test-project");
+            assert!(
+                tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Reconcile,
+                    |method, url, _| {
+                        if url.ends_with("/source") {
+                            assert_eq!(method, "GET");
+                            return Ok(copy_source_response());
+                        }
+                        assert_eq!(method, "GET");
+                        Ok(copy_response(200, metadata.clone()))
+                    }
+                )
+                .is_err()
+            );
+        }
+        for body in [
+            json!({"id":"child"}),
+            json!({"source_sandbox_id":"source", "sandboxes":[]}),
+            json!({"source_sandbox_id":"source", "sandboxes":["child"]}),
+            json!({"source_sandbox_id":"source", "sandboxes":[{"sandbox_id":"child"},{"sandbox_id":"other"}]}),
+        ] {
+            let mut calls = 0;
+            assert!(
+                tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Start,
+                    |method, url, _| {
+                        if url.ends_with("/source") {
+                            assert_eq!(method, "GET");
+                            return Ok(copy_source_response());
+                        }
+                        calls += 1;
+                        Ok(if calls == 1 {
+                            copy_response(404, json!({}))
+                        } else {
+                            copy_response(422, body.clone())
+                        })
+                    }
+                )
+                .is_err()
+            );
+            assert_eq!(calls, 2);
+        }
+        for (source, name) in [
+            ("../source", "copy-child-source"),
+            ("source", "copy/child"),
+            ("", "copy-child-source"),
+        ] {
+            assert!(
+                tensorlake_copy_request(source, name, CopyMode::Start, |_, _, _| panic!(
+                    "invalid identifiers reached HTTP"
+                ))
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn tensorlake_copy_lost_post_response_does_not_retry_or_post_during_recovery() {
+        let mut methods = Vec::new();
+        assert!(
+            tensorlake_copy_request(
+                "source",
+                "copy-child-source",
+                CopyMode::Start,
+                |method, url, _| {
+                    if url.ends_with("/source") {
+                        assert_eq!(method, "GET");
+                        return Ok(copy_source_response());
+                    }
+                    methods.push(method.to_owned());
+                    if method == "GET" {
+                        Ok(copy_response(404, json!({})))
+                    } else {
+                        Err("connection lost".into())
+                    }
+                }
+            )
+            .is_err()
         );
-        assert_eq!(
-            extract_copied_sandbox_id(&json!({"id":"b2"})).as_deref(),
-            Some("b2")
+        assert_eq!(methods, ["GET", "POST"]);
+        methods.clear();
+        assert!(
+            tensorlake_copy_request(
+                "source",
+                "copy-child-source",
+                CopyMode::Reconcile,
+                |method, url, _| {
+                    if url.ends_with("/source") {
+                        assert_eq!(method, "GET");
+                        return Ok(copy_source_response());
+                    }
+                    methods.push(method.to_owned());
+                    Ok(copy_response(200, copy_metadata()))
+                }
+            )
+            .is_ok()
         );
-        assert_eq!(
-            extract_copied_sandbox_id(&json!({"sandboxes":[{"sandbox_id":"c3"}]})).as_deref(),
-            Some("c3")
-        );
-        assert_eq!(
-            extract_copied_sandbox_id(&json!({"sandboxes":["d4"]})).as_deref(),
-            Some("d4")
-        );
-        assert_eq!(extract_copied_sandbox_id(&json!({"nope":1})), None);
+        assert_eq!(methods, ["GET"]);
+    }
+
+    #[test]
+    fn tensorlake_copy_requires_the_exact_source_and_project() {
+        for source in [
+            json!({"id":"other", "namespace":"test-project"}),
+            json!({"id":"source"}),
+        ] {
+            let mut requests = 0;
+            assert!(
+                tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Start,
+                    |method, url, _| {
+                        requests += 1;
+                        assert_eq!(method, "GET");
+                        assert_eq!(url, "https://api.tensorlake.ai/sandboxes/source");
+                        Ok(copy_response(200, source.clone()))
+                    }
+                )
+                .is_err()
+            );
+            assert_eq!(requests, 1);
+        }
+        for namespace in [json!(null), json!("another-project")] {
+            let mut metadata = copy_metadata();
+            metadata["namespace"] = namespace;
+            assert!(
+                tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Reconcile,
+                    |method, url, _| {
+                        assert_eq!(method, "GET");
+                        Ok(if url.ends_with("/source") {
+                            copy_source_response()
+                        } else {
+                            copy_response(200, metadata.clone())
+                        })
+                    }
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn tensorlake_copy_accepts_known_metadata_id_fields_without_conflicts() {
+        for alias in ["id", "sandbox_id"] {
+            let mut source = json!({"namespace":"test-project"});
+            source[alias] = json!("source");
+            let mut destination = copy_metadata();
+            destination.as_object_mut().unwrap().remove("id");
+            destination[alias] = json!("child");
+            assert!(
+                tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Reconcile,
+                    |_, url, _| {
+                        Ok(copy_response(
+                            200,
+                            if url.ends_with("/source") {
+                                source.clone()
+                            } else {
+                                destination.clone()
+                            },
+                        ))
+                    }
+                )
+                .is_ok()
+            );
+            destination["id"] = json!("child");
+            destination["sandbox_id"] = json!("source");
+            assert!(
+                tensorlake_copy_request(
+                    "source",
+                    "copy-child-source",
+                    CopyMode::Reconcile,
+                    |_, url, _| {
+                        Ok(copy_response(
+                            200,
+                            if url.ends_with("/source") {
+                                source.clone()
+                            } else {
+                                destination.clone()
+                            },
+                        ))
+                    }
+                )
+                .is_err()
+            );
+        }
     }
 }

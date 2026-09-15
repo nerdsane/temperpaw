@@ -8,9 +8,10 @@
 name = "Effort"
 states = [
   "Intended", "Specified", "Planned", "Building", "InReview", "Proving",
-  "Merged", "Deploying", "Verified", "Stalled", "Abandoned"
+  "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"
 ]
 initial = "Intended"
+strict_action_params = true
 
 # Pre-attachment states (Intended/Specified/Planned) have no owner, so no lease -
 # an intent legitimately sits until someone picks it up (the Intent entity's own
@@ -360,7 +361,7 @@ hint = "Enter Planned only when plan.md is on GitHub."
 [[action]]
 name = "AttachDecisions"
 kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying"]
+from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying"]
 params = ["decisions_ref"]
 effect = "set decisions_file_ready true"
 hint = "Name the git path docs/efforts/<issue>/decisions.md. chain_github_ready retracts if it is not on GitHub."
@@ -382,14 +383,14 @@ github_app_private_key = "{secret:github_app_private_key}"
 [[action]]
 name = "RetractDecisionsFile"
 kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying"]
+from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying"]
 effect = "set decisions_file_ready false"
 hint = "Callback: decisions.md is not on GitHub at repo/branch/path."
 
 [[action]]
 name = "LinkPmIssue"
 kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "Verified", "Stalled"]
+from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled"]
 params = ["pm_issue_id"]
 hint = "Record the Linear (paw-pm) issue that mirrors this Effort."
 
@@ -445,7 +446,7 @@ hint = "Record targeted live or end-to-end verification evidence."
 [[action]]
 name = "AttachAsk"
 kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "Stalled"]
+from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Stalled"]
 params = ["ask_id", "ask_ids"]
 effect = [{ type = "list_append", var = "ask_ids" }]
 hint = "Hang an Ask on this Effort. Self-loop. Does not Stall."
@@ -486,7 +487,6 @@ module = "chain_review_ready"
 on_failure = "RetractReviewPassed"
 
 [action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "RetractReviewPassed"
@@ -546,7 +546,6 @@ module = "chain_proof_ready"
 on_failure = "RetractProofAttached"
 
 [action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "RetractProofAttached"
@@ -567,7 +566,7 @@ name = "ConfigureDeploy"
 kind = "input"
 from = ["Building", "InReview", "Proving", "Merged"]
 params = ["computer_id", "image_tag", "deploy_max_checks", "probe_id"]
-effect = "set deploy_configured true"
+effect = [{ type = "set_bool", var = "deploy_configured", value = true }, { type = "set_bool", var = "resource_delivery_configured", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }, { type = "set_bool", var = "deploy_verified", value = false }, { type = "increment", var = "delivery_sequence" }]
 hint = "Name the GHCR tag, expected computer, and probe that Merge will ship through TemperDeploy. For a kernel pin, set image_tag to the TemperPaw image that carries the new kernel."
 
 [[action]]
@@ -594,7 +593,6 @@ module = "chain_merge_ready"
 on_failure = "RetractMerge"
 
 [action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
 
 # Same shape as WorkCycle.Complete → ReleaseRun.Request. to_state Deploying
 # so a retract does not spawn a ship.
@@ -623,6 +621,7 @@ type = "create"
 [[action]]
 name = "RetractMerge"
 kind = "input"
+guard = "is_true deploy_configured"
 from = ["Deploying", "Merged"]
 to = "Proving"
 effect = [
@@ -665,6 +664,7 @@ type = "create"
 [[action]]
 name = "MarkDeployVerified"
 kind = "input"
+guard = "is_true deploy_configured"
 from = ["Deploying"]
 to = "Verified"
 effect = "set deploy_verified true"
@@ -673,6 +673,7 @@ hint = "Callback from the project deploy tool when it is Healthy."
 [[action]]
 name = "MarkDeployRolledBack"
 kind = "input"
+guard = "is_true deploy_configured"
 from = ["Deploying"]
 to = "Merged"
 hint = "Callback: the project deploy tool rolled production back. Retry Deploy with a new child."
@@ -688,7 +689,7 @@ hint = "Rita answered the merge do Ask. Sets merge_risk_clear so Merge can proce
 [[action]]
 name = "Stall"
 kind = "input"
-from = ["Building", "InReview", "Proving", "Deploying"]
+from = ["Building", "InReview", "Proving", "Deploying", "ResourceMergeChecking", "ResourceVerifying"]
 to = "Stalled"
 params = ["error_message"]
 hint = "The agent has nothing left it can do. Attach the stall Ask first or right after. Not 'want to continue'."
@@ -714,7 +715,285 @@ hint = "Rita answered the stall Ask. ask_id is that Ask. Clears the same review 
 [[action]]
 name = "Abandon"
 kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "Stalled"]
+from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Stalled"]
 to = "Abandoned"
 params = ["error_message"]
 hint = "Abandon the effort - the explicit give-up terminal (distinct from recoverable Stalled)."
+
+# Resource delivery records the expected operations; resource actions perform writes.
+
+[[state]]
+name = "resource_delivery_plan"
+type = "string"
+initial = ""
+
+[[state]]
+name = "resource_delivery_head"
+type = "string"
+initial = ""
+
+[[state]]
+name = "resource_delivery_evidence"
+type = "string"
+initial = ""
+
+[[state]]
+name = "delivery_sequence"
+type = "counter"
+initial = "0"
+
+[[state]]
+name = "resource_delivery_configured"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "resource_delivery_merged"
+type = "bool"
+initial = "false"
+
+[[action]]
+name = "ConfigureResourceDelivery"
+kind = "input"
+from = ["Building", "InReview", "Proving", "Merged"]
+params = [{ name = "resource_delivery_plan", type = "string" }, { name = "resource_delivery_head", type = "string" }]
+effect = [{ type = "increment", var = "delivery_sequence" }, { type = "set_bool", var = "deploy_configured", value = false }, { type = "set_bool", var = "resource_delivery_configured", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }, { type = "set_bool", var = "deploy_verified", value = false }]
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "resource_delivery_plan"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "resource_delivery_head"
+
+[[action.triggers]]
+name = "effort_resource_delivery_validate"
+kind = "wasm"
+module = "effort_resource_delivery_validate"
+
+[action.triggers.config]
+timeout_secs = "120"
+
+[[action]]
+name = "ResourceDeliveryConfigured"
+kind = "input"
+from = ["Building", "InReview", "Proving", "Merged"]
+params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }]
+effect = [{ type = "set_bool", var = "resource_delivery_configured", value = true }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_plan"
+field = "resource_delivery_plan"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_head"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_sequence"
+field = "delivery_sequence"
+
+[[action]]
+name = "ResourceDeliveryRejected"
+kind = "input"
+from = ["Building", "InReview", "Proving", "Merged"]
+params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "error_message", type = "string" }]
+effect = [{ type = "set_bool", var = "resource_delivery_configured", value = false }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_plan"
+field = "resource_delivery_plan"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_head"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_sequence"
+field = "delivery_sequence"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "error_message"
+
+[[action]]
+name = "MergeResourceDelivery"
+kind = "input"
+from = ["Proving"]
+params = [{ name = "pr_number", type = "string" }, { name = "head_sha", type = "string" }]
+to = "ResourceMergeChecking"
+effect = [{ type = "increment", var = "delivery_sequence" }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
+guard = [{ type = "is_true", var = "review_passed" }, { type = "is_true", var = "evaluation_passed" }, { type = "is_true", var = "proof_attached" }, { type = "is_true", var = "e2e_ok" }, { type = "is_true", var = "decisions_file_ready" }, { type = "is_true", var = "merge_risk_clear" }, { type = "is_true", var = "resource_delivery_configured" }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "head_sha"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "pr_number"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "head_sha"
+
+[[action.triggers]]
+name = "effort_resource_delivery_merge"
+kind = "wasm"
+module = "effort_resource_delivery_merge"
+
+[action.triggers.config]
+timeout_secs = "120"
+
+[[action]]
+name = "ResourceDeliveryMerged"
+kind = "input"
+from = ["ResourceMergeChecking"]
+params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }]
+to = "Deploying"
+effect = [{ type = "set_bool", var = "resource_delivery_merged", value = true }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_plan"
+field = "resource_delivery_plan"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_head"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_sequence"
+field = "delivery_sequence"
+
+[[action]]
+name = "ResourceDeliveryMergeRejected"
+kind = "input"
+from = ["ResourceMergeChecking"]
+params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "error_message", type = "string" }]
+to = "Proving"
+effect = [{ type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_plan"
+field = "resource_delivery_plan"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_head"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_sequence"
+field = "delivery_sequence"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "error_message"
+
+[[action]]
+name = "VerifyResourceDelivery"
+kind = "input"
+from = ["Deploying"]
+params = []
+to = "ResourceVerifying"
+effect = [{ type = "increment", var = "delivery_sequence" }]
+guard = [{ type = "is_true", var = "resource_delivery_merged" }]
+
+[[action.triggers]]
+name = "effort_resource_delivery_verify"
+kind = "wasm"
+module = "effort_resource_delivery_verify"
+
+[action.triggers.config]
+timeout_secs = "120"
+
+[[action]]
+name = "ResourceDeliveryVerified"
+kind = "input"
+from = ["ResourceVerifying"]
+params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "resource_delivery_evidence", type = "string" }]
+to = "Verified"
+effect = [{ type = "set_bool", var = "deploy_verified", value = true }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_plan"
+field = "resource_delivery_plan"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_head"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_sequence"
+field = "delivery_sequence"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "resource_delivery_evidence"
+
+[[action]]
+name = "ResourceDeliveryPending"
+kind = "input"
+from = ["ResourceVerifying"]
+params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "error_message", type = "string" }]
+to = "Deploying"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_plan"
+field = "resource_delivery_plan"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_head"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_delivery_sequence"
+field = "delivery_sequence"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "error_message"
+
+[[action]]
+name = "ResourceMergeTimedOut"
+kind = "input"
+from = ["ResourceMergeChecking"]
+params = []
+to = "Proving"
+effect = [{ type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
+
+[[action]]
+name = "ResourceVerificationTimedOut"
+kind = "input"
+from = ["ResourceVerifying"]
+params = []
+to = "Deploying"
+
+[[state_timeout]]
+state = "ResourceMergeChecking"
+after_seconds = 300
+on_timeout = "ResourceMergeTimedOut"
+
+[[state_timeout]]
+state = "ResourceVerifying"
+after_seconds = 300
+on_timeout = "ResourceVerificationTimedOut"

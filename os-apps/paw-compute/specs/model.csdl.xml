@@ -107,6 +107,10 @@
           <Parameter Name="description" Type="Edm.String" />
         </Action>
 
+        <Action Name="ReconcileCopy" IsBound="true">
+          <Parameter Name="bindingParameter" Type="Paw.Compute.Computer" />
+        </Action>
+
         <Action Name="CopyStarted" IsBound="true">
           <Parameter Name="bindingParameter" Type="Paw.Compute.Computer" />
           <Parameter Name="machine_id" Type="Edm.String" />

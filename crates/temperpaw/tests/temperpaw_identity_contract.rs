@@ -531,16 +531,22 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
         "TEMPERPAW_BASE_URL",
         "VariableUpsertInput",
         "skipDeploys: true",
-        "deploymentRedeploy",
-        "TEMPER_API_KEY",
-        "/paw/version",
+        // The deploy sets the service's image and asserts the running one.
+        // deploymentRedeploy replays the previous image and is exactly the
+        // mechanism that left production on a stale tag for two days.
+        "serviceInstanceUpdate",
+        "source: { image: $image }",
+        "serviceInstanceDeployV2",
+        "latestDeployment { id status }",
+        "\"${status}\" = \"SUCCESS\"",
+        // expected_sha is proven by the tag naming that build; the version
+        // endpoint is not consulted while it returns 503 (ARN-508).
+        "does not match expected_sha",
+        "expected_sha cannot be verified for",
         "expected_sha",
-        "BUILD_SHA",
-        "BUILD_VERSION",
-        "DD_VERSION",
-        "OTEL_RESOURCE_ATTRIBUTES",
-        "dd_llmobs_enabled=false",
-        "sha-${EXPECTED_SHA:0:8}",
+        // Build identity is the image's: BUILD_SHA/BUILD_VERSION are baked and
+        // the entrypoint derives DD_VERSION and the OTEL attributes. The
+        // workflow writes none of them (asserted below).
         "run_artifact_batch_e2e",
         "scripts/production_artifact_batch_e2e.sh",
         "PACKAGED_WASM_PATH",
@@ -552,8 +558,23 @@ fn manual_railway_redeploy_workflow_is_secret_backed_and_version_proven() {
     }
 
     assert!(
-        workflow.contains("edge|latest|sha-[0-9a-f]*"),
-        "Railway redeploy workflow must restrict deployable tags"
+        workflow.contains("^(edge|latest|sha-[0-9a-f]{7,40})$"),
+        "Railway redeploy workflow must restrict deployable tags to an exact shape"
+    );
+    for shadowing in [
+        "upsert_var BUILD_SHA",
+        "upsert_var BUILD_VERSION",
+        "upsert_var DD_VERSION",
+        "upsert_var OTEL_RESOURCE_ATTRIBUTES",
+    ] {
+        assert!(
+            !workflow.contains(shadowing),
+            "Railway redeploy workflow must not write build identity ({shadowing}): the image bakes it and the entrypoint derives the rest; a variable would shadow a per-build value"
+        );
+    }
+    assert!(
+        !workflow.contains("deploymentRedeploy"),
+        "Railway redeploy workflow must not redeploy the previous deployment: that replays its image and ignores the requested tag"
     );
 }
 

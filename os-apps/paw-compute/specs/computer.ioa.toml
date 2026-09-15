@@ -18,12 +18,12 @@ name = "Computer"
 # live-gate accepts Ready, Leased, and Sleeping (Sleeping resumes first).
 # ARN-466: Ready is not indefinite — 180s idle → Sleep, which actually
 # suspends Tensorlake. Sleeping is indefinite (suspended, not billing).
-states = ["Created", "Provisioning", "Copying", "Ready", "Checkpointing", "Sleeping", "Leased", "Terminating", "Destroyed"]
+states = ["Created", "Provisioning", "CopyUnknown", "Copying", "Ready", "Checkpointing", "Sleeping", "Leased", "Terminating", "Destroyed"]
 initial = "Created"
 
 # ADR-0050 migration TODO: Created / Provisioning / Checkpointing still need
 # a timeout or a tighter justification. Ready is no longer on this list.
-allow_indefinite_states = ["Created", "Provisioning", "Checkpointing", "Sleeping"]
+allow_indefinite_states = ["Created", "Provisioning", "CopyUnknown", "Checkpointing", "Sleeping"]
 
 # -- State variables ----------------------------------------------------------
 
@@ -257,14 +257,14 @@ reset_on = ["Heartbeat", "Wake", "Copy"]
 # Destroy → Terminating fires computer_terminate to actually tear the sandbox
 # down; the module reports TerminateComplete → Destroyed.
 #
-# PRODUCTION-SAFETY GUARD — Provisioning is deliberately NOT a Destroy `from`
-# state: while a child copy is provisioning, its machine_id field still holds the
+# PRODUCTION-SAFETY GUARD — Provisioning and CopyUnknown are NOT Destroy `from`
+# states: while a child copy is unresolved, its machine_id field still holds the
 # SOURCE's machine (carried in by the Copy spawn's copy_fields; computer_copy_start
 # only overwrites it with the copy's machine at CopyStarted). If Destroy were
 # allowed from Provisioning, computer_terminate would run on that source machine
 # id and terminate the SOURCE's sandbox — e.g. destroying a provisioning copy of
-# arni-big would kill arni-big itself. A stuck START is instead torn down via
-# CopyFailed (which does NOT terminate). Once past CopyStarted (Copying/Leased)
+# arni-big would kill arni-big itself. A failed START remains in CopyUnknown for
+# GET-only reconciliation; CopyFailed does not terminate. After CopyStarted,
 # machine_id is the copy's own, so Destroy / CopyExpired / the lease timeout tear
 # down the COPY. The e2e asserts a Provisioning child refuses Destroy.
 [[action]]
@@ -304,7 +304,7 @@ hint = "Callback from computer_terminate — teardown attempted; the row is dest
 # ProvisionFromCopy params. It deliberately does NOT carry `name`: a child must
 # not inherit the source's name, which is an attach/resolution key (a copy named
 # "arni-big" would collide with the source on attach-by-name and in box_resolve).
-# computer_copy_start sets a distinct "…-copy-…" name on the child. Self-loop:
+# computer_copy_start uses the complete child and source IDs as the name. Self-loop:
 # the source stays Ready.
 [[action]]
 name = "Copy"
@@ -316,12 +316,9 @@ effect = [
   { type = "spawn", entity_type = "Computer", entity_id_source = "{uuid}", initial_action = "ProvisionFromCopy", copy_fields = "machine_id,provider,cpu_cores,memory_gb,storage_gb,base_image,project_harness_id,description" },
 ]
 
-# On the CHILD: START the copy (ASYNC). A live-copy of a real box takes MINUTES —
-# far past the ~120s WASM invocation cap — so a single synchronous copy would die
-# mid-invocation every time. computer_copy_start only KICKS OFF the copy (a
-# short-timeout POST that returns the new sandbox id) and reports CopyStarted; a
-# Copying state_timeout then polls readiness across invocations, exactly like the
-# async Exec. machine_id here is the SOURCE's machine (from copy_fields).
+# The child starts one named provider copy. The API may time out after creating
+# it, so failure preserves an uncertain state for GET-only reconciliation. The
+# machine_id remains the source until a verified destination callback lands.
 [[action]]
 name = "ProvisionFromCopy"
 kind = "input"
@@ -342,15 +339,42 @@ tensorlake_api_key = "{secret:tensorlake_api_key}"
 modal_token_id = "{secret:modal_token_id}"
 modal_token_secret = "{secret:modal_token_secret}"
 
+# An uncertain copy never resubmits the provider POST. This action reads the
+# exact deterministic provider name and keeps CopyUnknown when evidence is missing.
+[[action]]
+name = "ReconcileCopy"
+kind = "input"
+from = ["CopyUnknown"]
+to = "CopyUnknown"
+hint = "Read the named copy after an uncertain response; never create a second copy or terminate the source."
+effect = [{ type = "trigger", name = "computer_copy_start" }]
+
+[[action.triggers]]
+name = "computer_copy_start"
+kind = "wasm"
+module = "computer_copy_start"
+on_failure = "CopyFailed"
+
+[action.triggers.config]
+tensorlake_api_key = "{secret:tensorlake_api_key}"
+modal_token_id = "{secret:modal_token_id}"
+modal_token_secret = "{secret:modal_token_secret}"
+
 # computer_copy_start callback: the copy sandbox exists (still booting). machine_id
 # is now the COPY's own; source_machine_id records what it was copied from; name is
 # the child's distinct copy name; copy_deadline_at_ms bounds the readiness poll.
 [[action]]
 name = "CopyStarted"
 kind = "input"
-from = ["Provisioning"]
+from = ["Provisioning", "CopyUnknown"]
 to = "Copying"
 params = ["machine_id", "sandbox_url", "source_machine_id", "name", "copy_deadline_at_ms"]
+constraints = [
+  { kind = "param_nonempty", param = "machine_id" },
+  { kind = "param_nonempty", param = "source_machine_id" },
+  { kind = "param_equals_field", param = "source_machine_id", field = "machine_id" },
+  { kind = "param_not_equals_field", param = "machine_id", field = "machine_id" },
+]
 hint = "Callback from computer_copy_start — the copy sandbox was created; poll it to readiness from Copying."
 
 # The copy poll loop: while Copying, fire CopyPoll every 10s until the copy is
@@ -390,16 +414,15 @@ from = ["Copying"]
 to = "Leased"
 hint = "Callback from computer_copy_poll — the copy is ready; the child is live and leased."
 
-# CopyFailed: the START failed (still Provisioning) — machine_id is still the
-# SOURCE's, so go straight to Destroyed with NO computer_terminate (terminating
-# would kill the SOURCE's sandbox). A leaked copy is caught by the panel's reaper.
+# A failed/unknown provider response does not prove that no copy was created.
+# Keep the source untouched and require explicit read-only reconciliation.
 [[action]]
 name = "CopyFailed"
 kind = "input"
-from = ["Provisioning"]
-to = "Destroyed"
+from = ["Provisioning", "CopyUnknown"]
+to = "CopyUnknown"
 params = ["error_message"]
-hint = "Callback from computer_copy_start — the copy could not be started. Straight to Destroyed with NO terminate (machine_id is still the source's here)."
+hint = "The copy result is uncertain. Reconcile the exact named destination; do not resubmit Copy or terminate the stored source machine."
 
 # CopyExpired: the copy started but never became ready by its deadline, OR the
 # poll module failed (on_failure). machine_id is the COPY's here, so tear the

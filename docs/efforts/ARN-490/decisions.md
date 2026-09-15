@@ -47,3 +47,27 @@
 **Chose a clean inherited checkout because:** It delivers these repository build scripts to the actual agent workflow while preserving active work. The change introduces no runtime module logic or app-spec change requiring a Genesis version switch. Existing sessions/checkouts must explicitly refresh; new copies inherit the installed checkout.
 
 **Where:** /home/tl-user/work/temperpaw-build-verified on arni-1; final Foundry session evidence on PR #509.
+
+### Preserve newly added patrol modules during merge
+
+**Decision:** Keep main's three effort resource delivery modules and build them through the reviewed artifact helper.
+
+**Came up because:** Main added these modules after the reviewed head, causing one build-script merge conflict.
+
+**Options:** Drop the new modules, restore the old artifact copying, or combine the complete module list with the shared helper.
+
+**Chose the combined result because:** It preserves current capabilities and exact-output packaging without changing module logic. The existing review remains attributed to cd08487; the conflict resolution is verified separately under Rita's completion authorization.
+
+**Where:** os-apps/paw-patrol/wasm/build.sh; PR #509.
+
+### Keep the regression scoped to the migrated shell builders
+
+**Decision:** Enumerate the thirteen affected shell builders and fail if any is missing.
+
+**Came up because:** Main introduced dsf-twin builders whose Python generation steps are not represented by the shell fixture. Its generator already supplies an explicit Cargo target directory and copies that output.
+
+**Options:** Expand this fixture into the unrelated generator pipeline, silently filter discovered scripts, or declare the affected builder set.
+
+**Chose the declared set because:** It preserves every original acceptance case, includes newly added modules inside patrol, and fails when an expected builder disappears. It avoids claiming coverage of a different build pipeline.
+
+**Where:** scripts/test-wasm-build-artifacts.sh.

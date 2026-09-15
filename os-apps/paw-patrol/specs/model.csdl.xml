@@ -189,8 +189,14 @@
         <Property Name="ProofAttached" Type="Edm.Boolean"/>
         <Property Name="E2eOk" Type="Edm.Boolean"/>
         <Property Name="DeployVerified" Type="Edm.Boolean"/>
+        <Property Name="ResourceDeliveryPlan" Type="Edm.String"/>
+        <Property Name="ResourceDeliveryHead" Type="Edm.String"/>
+        <Property Name="ResourceDeliveryEvidence" Type="Edm.String"/>
+        <Property Name="DeliverySequence" Type="Edm.Int64"/>
+        <Property Name="ResourceDeliveryConfigured" Type="Edm.Boolean"/>
+        <Property Name="ResourceDeliveryMerged" Type="Edm.Boolean"/>
         <Annotation Term="Paw.Vocab.AuthZ.CedarPolicy" String="policies/patrol.cedar"/>
-        <Annotation Term="Paw.Vocab.Agent.Hint" String="The SDLC execution unit. Ask is the inbox. intent/spec/plan/decisions are git paths. Review and proof are Temper Files. ConfigureDeploy then Merge creates a TemperDeploy."/>
+        <Annotation Term="Paw.Vocab.Agent.Hint" String="The SDLC execution unit. Ask is the inbox. intent/spec/plan/decisions are git paths. Review and proof are Temper Files. ConfigureDeploy then Merge creates a TemperDeploy. ConfigureResourceDelivery records exact resource operations; MergeResourceDelivery checks the same evidence gates; VerifyResourceDelivery checks their durable results."/>
       </EntityType>
 
       <EntityType Name="WorkerRun">
@@ -214,6 +220,9 @@
         <Property Name="Claimed" Type="Edm.Boolean"/>
         <Annotation Term="Paw.Vocab.AuthZ.CedarPolicy" String="policies/patrol.cedar"/>
         <Annotation Term="Paw.Vocab.Agent.Hint" String="One local Codex or manually approved cloud execution attempt."/>
+              <Property Name="PatrolRunId" Type="Edm.String"/>
+        <Property Name="EvidenceJson" Type="Edm.String" />
+        <Property Name="ModelInvestigation" Type="Edm.Boolean"/>
       </EntityType>
 
       <EntityType Name="ReviewRun">
@@ -405,6 +414,15 @@
         <Property Name="Integration" Type="Edm.String"/>
         <Annotation Term="Paw.Vocab.AuthZ.CedarPolicy" String="policies/patrol.cedar"/>
         <Annotation Term="Paw.Vocab.Agent.Hint" String="One active Risk Patrol investigation run."/>
+              <Property Name="InvestigationKey" Type="Edm.String"/>
+        <Property Name="ObservationId" Type="Edm.String"/>
+        <Property Name="SourceEvidence" Type="Edm.String"/>
+        <Property Name="Task" Type="Edm.String"/>
+        <Property Name="BranchName" Type="Edm.String"/>
+        <Property Name="WorktreePath" Type="Edm.String"/>
+        <Property Name="AllowedWorkerId" Type="Edm.String"/>
+        <Property Name="ProviderId" Type="Edm.String"/>
+        <Property Name="RunnerKind" Type="Edm.String"/>
       </EntityType>
 
       <EntityType Name="WorkerProvider">
