@@ -11,3 +11,11 @@ the matching lockfile entries.
 and fails the gates); bump by hand under this effort (chosen).
 
 **Where:** `crates/temperpaw/Cargo.toml`, `crates/paw-codex-worker/Cargo.toml`, `Cargo.lock`.
+
+## D2 — second pin, for the edges
+
+**Decision:** pin again at nerdsane/temper#472 (`bd15e892`): targeted `<Annotations>` blocks (the twin's reference edges) survive the kernel.
+
+**Came up because:** with #470 live the page listed the twin as a ring of unrelated nodes.
+
+**Where:** same three files.
