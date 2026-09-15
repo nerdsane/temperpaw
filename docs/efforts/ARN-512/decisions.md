@@ -18,4 +18,8 @@ and fails the gates); bump by hand under this effort (chosen).
 
 **Came up because:** with #470 live the page listed the twin as a ring of unrelated nodes.
 
+**Options:** wait for the daily pin-bump bot (rejected: no design chain, fails the gates); wait and batch with a later kernel change (rejected: the page stays wrong meanwhile); pin by hand now (chosen).
+
+**Chose pinning now over waiting because:** the edges are the visible half of the fix and the pin is a three-file change; given up: one more image build and deploy today.
+
 **Where:** same three files.
