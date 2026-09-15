@@ -554,11 +554,19 @@ fn corridor_wasm_modules_are_packaged_for_core_startup() {
             build_script.contains(module),
             "paw-foresight build.sh should build {module}"
         );
-        assert!(
-            build_script.contains(&format!("{module}.wasm")),
-            "paw-foresight build.sh should publish {module}.wasm outside target/"
-        );
     }
+
+    // Drive packaging: a loop need not spell every output filename literally.
+    let output = std::process::Command::new("bash")
+        .arg(root.join("scripts/test-wasm-build-artifacts.sh"))
+        .output()
+        .expect("WASM artifact regression should run");
+    assert!(
+        output.status.success(),
+        "WASM artifact packaging failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

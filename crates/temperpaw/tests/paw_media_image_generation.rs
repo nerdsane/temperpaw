@@ -218,8 +218,8 @@ fn paw_media_wasm_is_built_into_ci_and_production_images() {
         "identity contract should keep paw-media in the audited WASM build-script set"
     );
     assert!(
-        build_script.contains("openai_codex_image_generate.wasm"),
-        "paw-media build.sh must publish openai_codex_image_generate.wasm outside target/"
+        build_script.contains("openai_codex_image_generate"),
+        "paw-media build.sh must build openai_codex_image_generate; artifact packaging is exercised by the shared regression"
     );
 }
 
