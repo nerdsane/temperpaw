@@ -65,6 +65,7 @@ jobs:
           if not isinstance(rows, list):
               print("::error::Temper ReviewRuns response is not a list"); sys.exit(1)
           models={"grok","codex","fable"}
+          fix_it_rows=[]
           ran=set(); usable=[]
           for row in rows:
               fields=row.get("fields") or row
@@ -73,7 +74,9 @@ jobs:
               if status!="Recorded" or commit!=head:
                   continue
               if fields.get("fix_it_failed") or fields.get("FixItFailed"):
-                  print(f"::error::ReviewRun {fields.get('id') or fields.get('Id')} fix-it failed"); sys.exit(1)
+                  # Carried into the record, not fatal here: an owner ruling
+                  # (RESOLVE: fix-it <reason>) may clear it before the gate.
+                  fix_it_rows.append(str(fields.get("id") or fields.get("Id") or "?"))
               raw=fields.get("findings") or fields.get("Findings") or "[]"
               try:
                   findings=json.loads(raw) if isinstance(raw,str) else raw
@@ -106,7 +109,8 @@ jobs:
           os.makedirs(".review",exist_ok=True)
           rec={"effort":"temper","repo":os.environ.get("GITHUB_REPOSITORY",""),"commit":head,
                "reviewers_ran":sorted(ran),"findings":[],"synthesis_by":"temper-rows",
-               "produced_by":{"tier":"temper"},"risk":"medium"}
+               "produced_by":{"tier":"temper"},"risk":"medium",
+               "fix_it_failed":bool(fix_it_rows),"fix_it_rows":fix_it_rows}
           json.dump(rec, open(".review/review.json","w"))
           print(f"Temper ReviewRuns hold for this head ({len(usable)} rows, {sorted(ran)})")
           PY
@@ -138,17 +142,18 @@ jobs:
           python3 - <<'PY'
           import json, os, re, subprocess
           n=os.environ["PR_NUM"]
+          # A ruling is a comment that BEGINS with RESOLVE: lines, written by the
+          # repo owner or a member - anyone else's RESOLVE: is discussion. A
+          # quoted RESOLVE: mid-comment is never a ruling: the first non-RESOLVE
+          # line ends the rulings.
           raw=subprocess.run(["gh","api",f"repos/{os.environ.get('GITHUB_REPOSITORY','')}/issues/{n}/comments",
-                              "--paginate","-q",".[].body | @base64"],capture_output=True,text=True).stdout
+                              "--paginate","-q",'.[] | select(.author_association=="OWNER" or .author_association=="MEMBER") | .body | @base64'],
+                             capture_output=True,text=True).stdout
           import base64 as _b64
           comments=[_b64.b64decode(l).decode() for l in raw.split() if l]
           resolutions={}
-          # an adjudication comment BEGINS with RESOLVE: (same contract as intake) -
-          # a quoted RESOLVE: mid-comment is discussion, not a ruling
           for c in comments:
               if not c.strip().startswith("RESOLVE:"): continue
-              # rulings are the comment's leading RESOLVE: lines only - the first
-              # other line ends them, so quoted syntax below cannot adjudicate
               for line in c.strip().splitlines():
                   m = re.match(r"RESOLVE:\s*(\S+)\s+(.+)$", line)
                   if not m: break
@@ -159,6 +164,13 @@ jobs:
                   fl=f.get("file_line","")
                   if fl in resolutions and not f.get("resolved"):
                       f["resolved"]=True; f["resolution"]=f"owner adjudication: {resolutions[fl]}"; hit+=1
+              # "RESOLVE: fix-it <reason>" is the owner overruling the fix-it
+              # rubric for this head. After the two-round cap it is how "merge"
+              # becomes executable without forging a record; the reason stays
+              # on the record.
+              if "fix-it" in resolutions and r.get("fix_it_failed"):
+                  r["fix_it_failed"]=False
+                  r["fix_it_overruled"]=f"owner adjudication: {resolutions['fix-it']}"; hit+=1
               json.dump(r,open(".review/review.json","w"),indent=2)
               print(f"adjudications applied: {hit}")
           PY
@@ -170,7 +182,14 @@ jobs:
           # Temper rows already applied the validate.py rules (panel, act-on, commit).
           # Do not re-parse a hidden PR comment.
           test -f .review/review.json
-          python3 -c "import json; r=json.load(open('.review/review.json')); assert r.get('commit')"
+          python3 - <<'PY'
+          import json, sys
+          r=json.load(open(".review/review.json")); assert r.get("commit")
+          if r.get("fix_it_failed"):
+              print(f"::error::fix-it rubric failed on ReviewRun(s) {r.get('fix_it_rows')} and no owner ruling cleared it "
+                    "(an OWNER/MEMBER comment beginning 'RESOLVE: fix-it <reason>' does)"); sys.exit(1)
+          if r.get("fix_it_overruled"): print(f"fix-it overruled: {r['fix_it_overruled']}")
+          PY
           echo "Temper review rows hold for $PR_HEAD"
       - name: Route on the panel's risk judgment
         env:
