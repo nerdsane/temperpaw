@@ -148,9 +148,10 @@ jobs:
           import json, os, re, subprocess
           n=os.environ["PR_NUM"]; head=os.environ["PR_HEAD"]
           # A ruling is a comment that BEGINS with RESOLVE: lines, written by the
-          # repo owner or a member - anyone else's RESOLVE: is discussion. A
-          # quoted RESOLVE: mid-comment is never a ruling: the first non-RESOLVE
-          # line ends the rulings.
+          # repo owner, a member or a collaborator - anyone else's RESOLVE: is
+          # discussion. A quoted RESOLVE: mid-comment is never a ruling: the
+          # first non-RESOLVE line ends the rulings. Every ruling names the head
+          # it is for: RESOLVE: <file:line> @<head-sha> <reason>
           raw=subprocess.run(["gh","api",f"repos/{os.environ.get('GITHUB_REPOSITORY','')}/issues/{n}/comments",
                               "--paginate","-q",'.[] | select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR") | .body | @base64'],
                              capture_output=True,text=True).stdout
@@ -176,10 +177,10 @@ jobs:
                   fl=f.get("file_line","")
                   if fl in resolutions and not f.get("resolved"):
                       f["resolved"]=True; f["resolution"]=f"owner adjudication: {resolutions[fl]}"; hit+=1
-              # "RESOLVE: fix-it <reason>" is the owner overruling the fix-it
-              # rubric for this head. After the two-round cap it is how "merge"
-              # becomes executable without forging a record; the reason stays
-              # on the record.
+              # "RESOLVE: fix-it @<head-sha> <reason>" is the owner overruling
+              # the fix-it rubric for this head only. After the two-round cap it
+              # is how "merge" becomes executable without forging a record; the
+              # reason stays on the record.
               if "fix-it" in resolutions and r.get("fix_it_failed"):
                   r["fix_it_failed"]=False
                   r["fix_it_overruled"]=f"owner adjudication: {resolutions['fix-it']}"; hit+=1
@@ -199,7 +200,7 @@ jobs:
           r=json.load(open(".review/review.json")); assert r.get("commit")
           if r.get("fix_it_failed"):
               print(f"::error::fix-it rubric failed on ReviewRun(s) {r.get('fix_it_rows')} and no owner ruling cleared it "
-                    "(an OWNER/MEMBER comment beginning 'RESOLVE: fix-it <reason>' does)"); sys.exit(1)
+                    "(an owner, member or collaborator comment beginning 'RESOLVE: fix-it @<head-sha> <reason>' does)"); sys.exit(1)
           if r.get("fix_it_overruled"): print(f"fix-it overruled: {r['fix_it_overruled']}")
           PY
           echo "Temper review rows hold for $PR_HEAD"
