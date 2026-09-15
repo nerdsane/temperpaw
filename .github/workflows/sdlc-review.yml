@@ -107,8 +107,12 @@ jobs:
               print(f"::error::no Temper ReviewRuns for head {head[:10]} with a panel (ran={sorted(ran)}, floor {floor}). Write Recorded ReviewRuns; this gate does not read PR comments.")
               sys.exit(1)
           os.makedirs(".review",exist_ok=True)
+          missing=sorted(models-ran)
+          if missing: print(f"::warning::no Recorded ReviewRun for {missing} on head {head[:10]} (floor {floor} met by {sorted(ran & models)})")
           rec={"effort":"temper","repo":os.environ.get("GITHUB_REPOSITORY",""),"commit":head,
-               "reviewers_ran":sorted(ran),"findings":[],"synthesis_by":"temper-rows",
+               "reviewers_ran":sorted(ran),
+               "reviewers_skipped":[{"reviewer":m,"reason":"no Recorded ReviewRun for this head"} for m in missing],
+               "findings":[],"synthesis_by":"temper-rows",
                "produced_by":{"tier":"temper"},"risk":"medium",
                "fix_it_failed":bool(fix_it_rows),"fix_it_rows":fix_it_rows}
           json.dump(rec, open(".review/review.json","w"))
@@ -137,27 +141,35 @@ jobs:
       - name: Apply owner adjudications (RESOLVE comments)
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
           PR_NUM: ${{ github.event.pull_request.number }}
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess
-          n=os.environ["PR_NUM"]
+          n=os.environ["PR_NUM"]; head=os.environ["PR_HEAD"]
           # A ruling is a comment that BEGINS with RESOLVE: lines, written by the
           # repo owner or a member - anyone else's RESOLVE: is discussion. A
           # quoted RESOLVE: mid-comment is never a ruling: the first non-RESOLVE
           # line ends the rulings.
           raw=subprocess.run(["gh","api",f"repos/{os.environ.get('GITHUB_REPOSITORY','')}/issues/{n}/comments",
-                              "--paginate","-q",'.[] | select(.author_association=="OWNER" or .author_association=="MEMBER") | .body | @base64'],
+                              "--paginate","-q",'.[] | select(.author_association=="OWNER" or .author_association=="MEMBER" or .author_association=="COLLABORATOR") | .body | @base64'],
                              capture_output=True,text=True).stdout
           import base64 as _b64
           comments=[_b64.b64decode(l).decode() for l in raw.split() if l]
+          # A ruling is bound to one head: "RESOLVE: <target> @<sha-prefix> <reason>".
+          # Without the @sha it is ignored, so a ruling on one head can never
+          # silently clear a later one - the code after it has not been ruled on.
           resolutions={}
           for c in comments:
               if not c.strip().startswith("RESOLVE:"): continue
               for line in c.strip().splitlines():
-                  m = re.match(r"RESOLVE:\s*(\S+)\s+(.+)$", line)
-                  if not m: break
-                  resolutions[m.group(1)]=m.group(2).strip()
+                  m = re.match(r"RESOLVE:\s*(\S+)\s+@([0-9a-fA-F]{7,40})\s+(.+)$", line)
+                  if not m:
+                      if line.startswith("RESOLVE:"): print(f"ignored ruling without @<head-sha>: {line[:80]}")
+                      break
+                  if not head.lower().startswith(m.group(2).lower()):
+                      print(f"ruling for another head ({m.group(2)}), ignored: {line[:80]}"); continue
+                  resolutions[m.group(1)]=m.group(3).strip()
           if resolutions:
               r=json.load(open(".review/review.json")); hit=0
               for f in r.get("findings",[]):
@@ -223,7 +235,20 @@ jobs:
           fi
       - name: Write the verdict to the job summary
         if: always()
+        env:
+          VALIDATED: ${{ steps.validate.outcome }}
         run: |
+          # The verdict is the validate step's outcome, never a literal: a
+          # record that exists but failed validation is a FAIL.
           if [ -f .review/review.json ]; then
-            python3 -c "import json; r=json.load(open('.review/review.json')); print(f\"### Review PASS\\nPanel: {', '.join(r.get('reviewers_ran',[]))}\\nrisk: {r.get('risk','?')}\")" >> "$GITHUB_STEP_SUMMARY"
+            python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          r=json.load(open(".review/review.json"))
+          verdict="PASS" if os.environ.get("VALIDATED")=="success" else "FAIL"
+          skipped=", ".join(s["reviewer"] for s in r.get("reviewers_skipped",[]))
+          print(f"### Review {verdict}\nPanel: {', '.join(r.get('reviewers_ran',[]))}"
+                + (f" (no row: {skipped})" if skipped else "")
+                + f"\nrisk: {r.get('risk','?')}"
+                + (f"\nfix-it overruled: {r['fix_it_overruled']}" if r.get("fix_it_overruled") else ""))
+          PY
           fi
