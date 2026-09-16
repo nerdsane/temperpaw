@@ -53,7 +53,7 @@ fn verified_operator_can_answer_asks_without_other_factory_powers() {
     assert!(allowed(&engine, &operator, "Ask", "Answer"));
     for (entity, action) in [
         ("Ask", "create"), ("Ask", "RaiseBlocking"), ("Ask", "Withdraw"),
-        ("Ask", "update"), ("Ask", "delete"), ("Effort", "ConfirmMerge"),
+        ("Ask", "update"), ("Ask", "delete"), ("Effort", "MarkDeployVerified"),
     ] {
         assert!(!allowed(&engine, &operator, entity, action), "{entity}.{action}");
     }
