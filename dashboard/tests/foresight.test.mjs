@@ -68,3 +68,10 @@ test('action timestamps are fixed UTC seconds accepted by the backend', () => {
   assert.equal(utcTime('2025-03-01'), '2025-03-01T00:00:00Z');
   assert.throws(() => utcTime('not a date'), /valid UTC/);
 });
+
+test('outcome provenance stays separate from prediction provenance', () => {
+  const forecast = parseForecast({Id:'p', evidence_kind:'observed', outcome_evidence_kind:'proxy-price', outcome:'yes'});
+  assert.equal(forecast.evidence, 'observed');
+  assert.equal(forecast.outcomeEvidence, 'proxy-price');
+  assert.equal(parseForecast({Id:'legacy'}).outcomeEvidence, '');
+});

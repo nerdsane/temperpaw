@@ -56,7 +56,7 @@ export function parseForecast(row: Row) {
     score: probability(field(row, 'brier')), sources: text(row, 'outcome_source_refs'),
     model: text(row, 'model_version') || text(row, 'engine_version'),
     learningRunId: text(row, 'learning_run_id'), previousId: text(row, 'previous_forecast_id'),
-    evidence: text(row, 'evidence_kind'), marketRef: text(row, 'market_ref'),
+    evidence: text(row, 'evidence_kind'), outcomeEvidence: text(row, 'outcome_evidence_kind'), marketRef: text(row, 'market_ref'),
   };
 }
 export type Forecast = ReturnType<typeof parseForecast>;
