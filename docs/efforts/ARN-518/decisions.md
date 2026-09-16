@@ -181,3 +181,15 @@
 **Chose the create-only permission because:** It preserves verified caller identity and makes the normal dashboard flow work without kernel changes or special test setup. It grants no workspace read, update, delete, freeze, or archive access. Rita explicitly approved this permission change after the denial was reported.
 
 **Where:** os-apps/paw-foresight/policies/foresight.cedar; crates/temperpaw/tests/corridor_cedar_matrix.rs; PR #526. The regression failed against 33e74b7 before the permission was added.
+
+## D16 — Authorize the session runtime's transcript operations
+
+**Decision:** Permit only Agent::"service:wasm-runtime" to create, read and list SessionEntry records in the owning paw-agent policy.
+
+**Came up because:** After the approved workspace fix, browser research created its workspace and session, but the callback runtime failed to materialize the first transcript entry with AuthorizationDenied (PD-01a0aaa4-7ad0-75f0-8821-339e0e501e58). Existing permits cover admins and named agent types but omit the authenticated callback runtime.
+
+**Options:** Grant the exact runtime identity its append/read operations; broaden access by agent type; bypass transcript materialization or change kernel identities.
+
+**Chose the exact identity because:** It repairs the existing session pipeline while preserving authentication and denying unrelated identities, transcript updates and deletes. Rita explicitly approved this narrow permission after the reproduced denial. The change belongs to paw-agent and must be published with that dependency before the Foresight app is installed.
+
+**Where:** os-apps/paw-agent/policies/session_entry.cedar; crates/temperpaw/tests/session_entry_runtime_policy.rs; PR #526. The new regression failed on transcript creation before the permission was added.
