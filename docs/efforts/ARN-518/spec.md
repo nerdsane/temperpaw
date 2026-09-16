@@ -27,7 +27,7 @@ A deterministic simulation fixture demonstrates mechanics and is labeled as such
 ## Invariants and model
 
 - Registered prediction contents never change.
-- Each event contributes at most once to a fitting set.
+- Each event contributes at most once across an adopted model's fitting/evaluation lineage. Later runs exclude consumed identities; rejected candidates leave that lineage unchanged.
 - Candidate evaluation examples do not enter that candidate's fitting set.
 - A prediction uses only the adopted model available at registration.
 - A rejected or failed candidate leaves that adopted model unchanged.
@@ -41,3 +41,9 @@ The implementation's entity state model and deterministic tests must express and
 ## Limits
 
 The first trainable component improves bounded event prediction and calibration. Its coefficients establish learned predictive associations, not discovered causal laws. The design must support future improvements to consequence models and research choice without claiming those research ambitions have already been validated.
+
+### Current learning bounds
+
+A run accepts at most 512 examples and one MB of uploaded JSON. A model retains at most 512 consumed event identities across its adopted lineage. A run that would exceed that lineage bound fails visibly without replacing the incumbent or forgetting old identities. Forecast-history queries likewise reject more than 512 rows rather than silently sampling or truncating them. These are explicit limits of this first implementation, not a claim of unlimited lifetime learning.
+
+Observed prediction registration uses the host-recorded triggering event time. Historical and simulated registration require an explicit logical time; invalid time or unavailable inputs return the world to Active with an error so the caller can correct and retry. Legacy hindcast configuration is normalized to historical learning provenance through the trusted registration callbacks. A registration pass retains one model snapshot while concurrent adoption preserves the world's operational state.
