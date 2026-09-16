@@ -176,7 +176,9 @@ pub fn prepare(
     let mut seen = BTreeSet::new();
     let mut valid = Vec::new();
     for example in data {
-        let reason = if conflicts.contains(&example.event_id) {
+        let reason = if incumbent.used_event_ids.contains(&example.event_id) {
+            Some("previously_used_event")
+        } else if conflicts.contains(&example.event_id) {
             Some("conflicting_event_outcomes")
         } else {
             invalid_example(&example, mode, as_of)
@@ -207,7 +209,6 @@ pub fn prepare(
             training.push(example);
         } else if example.registered_at > cutoff
             && example.registered_at > incumbent.evaluated_through
-            && !incumbent.used_event_ids.contains(&example.event_id)
         {
             validation.push(example);
         } else {
@@ -215,6 +216,9 @@ pub fn prepare(
                 .entry("validation_not_prospective".into())
                 .or_insert(0) += 1;
         }
+    }
+    if incumbent.used_event_ids.len() + training.len() + validation.len() > MAX_EXAMPLES {
+        return Err("Cumulative model lineage would exceed 512 events; incumbent retained, no history discarded".into());
     }
     Ok(Prepared {
         training,
@@ -247,11 +251,19 @@ pub fn fit(prepared: &Prepared, incumbent: &Model, version: &str) -> Model {
         .map(|e| e.resolved_at.clone())
         .max()
         .unwrap_or_else(|| incumbent.evaluated_through.clone());
-    candidate.used_event_ids = prepared
-        .training
+    candidate.used_event_ids = incumbent
+        .used_event_ids
         .iter()
-        .chain(&prepared.validation)
-        .map(|e| e.event_id.clone())
+        .cloned()
+        .chain(
+            prepared
+                .training
+                .iter()
+                .chain(&prepared.validation)
+                .map(|e| e.event_id.clone()),
+        )
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect();
     candidate
 }
@@ -381,6 +393,73 @@ mod tests {
                 .all(|e| e.event_id != "event-0")
         );
     }
+    #[test]
+    fn adopted_events_are_never_retrained_and_lineage_accumulates() {
+        let identity = Model::identity("simulated");
+        let first = prepare(fixture(), "simulated", "2025-12-31T00:00:00Z", &identity).unwrap();
+        let incumbent = fit(&first, &identity, "first");
+        let replay = prepare(fixture(), "simulated", "2025-12-31T00:00:00Z", &incumbent).unwrap();
+        assert!(replay.training.is_empty());
+        assert!(replay.validation.is_empty());
+        assert_eq!(
+            replay.skipped_reasons.get("previously_used_event"),
+            Some(&36)
+        );
+        let fresh: Vec<_> = fixture()
+            .into_iter()
+            .map(|mut event| {
+                event.event_id = format!("fresh-{}", event.event_id);
+                event.registered_at = event.registered_at.replace("2025", "2026");
+                event.resolved_at = event.resolved_at.replace("2025", "2026");
+                event
+            })
+            .collect();
+        let mut combined = fixture();
+        combined.extend(fresh);
+        let next = prepare(combined, "simulated", "2026-12-31T00:00:00Z", &incumbent).unwrap();
+        assert_eq!(next.training.len(), 24);
+        assert_eq!(next.validation.len(), 12);
+        let candidate = fit(&next, &incumbent, "next");
+        assert_eq!(candidate.used_event_ids.len(), 72);
+        assert!(
+            incumbent
+                .used_event_ids
+                .iter()
+                .all(|id| candidate.used_event_ids.contains(id))
+        );
+        assert!(candidate.validate().is_ok());
+        let mut third_input: Vec<_> = fixture().into_iter().take(10).collect();
+        third_input.extend(fixture().into_iter().map(|mut e| {
+            e.event_id = format!("third-{}", e.event_id);
+            e.registered_at = e.registered_at.replace("2025", "2027");
+            e.resolved_at = e.resolved_at.replace("2025", "2027");
+            e
+        }));
+        let third = prepare(third_input, "simulated", "2027-12-31T00:00:00Z", &candidate).unwrap();
+        assert_eq!(
+            third.skipped_reasons.get("previously_used_event"),
+            Some(&10)
+        );
+        let third_model = fit(&third, &candidate, "third");
+        assert_eq!(third_model.used_event_ids.len(), 108);
+        assert!(
+            candidate
+                .used_event_ids
+                .iter()
+                .all(|id| third_model.used_event_ids.contains(id))
+        );
+    }
+
+    #[test]
+    fn cumulative_lineage_bound_fails_without_forgetting_history() {
+        let mut incumbent = Model::identity("simulated");
+        incumbent.used_event_ids = (0..MAX_EXAMPLES).map(|i| format!("used-{i}")).collect();
+        let before = incumbent.clone();
+        let result = prepare(fixture(), "simulated", "2025-12-31T00:00:00Z", &incumbent);
+        assert!(result.is_err());
+        assert_eq!(incumbent, before);
+    }
+
     #[test]
     fn actual_fitting_changes_parameters_and_later_prediction() {
         let incumbent = Model::identity("simulated");

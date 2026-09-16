@@ -202,7 +202,7 @@ initial = ""
 name = "Configure"
 kind = "input"
 from = ["Created"]
-params = ["name", "domain", "description", "horizon_months", "target_date", "frontier_date", "corpus_file_id", "driver_config_file_id", "lag_table_file_id", "endpoint_budget", "token_budget_cents", "agent_model", "agent_provider", "hindcast_mode"]
+params = ["name", "domain", "description", "horizon_months", "target_date", "frontier_date", "corpus_file_id", "driver_config_file_id", "lag_table_file_id", "endpoint_budget", "token_budget_cents", "agent_model", "agent_provider", "hindcast_mode", "last_ingest_date"]
 hint = "Configure world parameters. Self-loop on Created."
 
 [[action]]
@@ -336,7 +336,7 @@ effect = [{ type = "trigger", name = "register_forecasts" }]
 name = "register_forecasts"
 kind = "wasm"
 module = "register_forecasts"
-on_failure = "Fail"
+on_failure = "ForecastRegistrationFailed"
 
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
@@ -555,15 +555,14 @@ params = ["last_ingest_date"]
 name = "learning_register_forecasts"
 kind = "wasm"
 module = "register_forecasts"
-on_failure = "Fail"
+on_failure = "ForecastRegistrationFailed"
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "AdoptModel"
 kind = "input"
-from = ["Active"]
-to = "Active"
+from = ["Active", "Updating", "RegisteringForecasts"]
 params = ["expected_model_json","model_json","adopted_learning_run_id","learning_mode"]
 
 [[action.constraints]]
@@ -669,7 +668,7 @@ name = "ForecastPrepared"
 kind = "input"
 from = ["RegisteringForecasts"]
 to = "RegisteringForecasts"
-params = ["forecast_id", "forecast_registration_key", "forecast_world_id", "forecast_event_node_id", "forecast_question", "forecast_probability", "forecast_base_probability", "forecast_model_version", "forecast_learning_run_id", "forecast_previous_forecast_id", "forecast_evidence_kind", "forecast_resolve_by", "forecast_market_ref", "forecast_engine_version", "forecast_registered_at"]
+params = ["forecast_id", "forecast_registration_key", "forecast_world_id", "forecast_event_node_id", "forecast_question", "forecast_probability", "forecast_base_probability", "forecast_model_version", "forecast_learning_run_id", "forecast_previous_forecast_id", "forecast_evidence_kind", "forecast_resolve_by", "forecast_market_ref", "forecast_engine_version", "forecast_registered_at", "registration_model_json", "learning_mode"]
 constraints = [{kind="param_nonempty",param="forecast_id"}]
 
 [[action.triggers]]
@@ -709,7 +708,7 @@ constraints = [{kind="param_equals_field",param="registration_key",field="foreca
 name = "prepare_next_forecast"
 kind = "wasm"
 module = "register_forecasts"
-on_failure = "Fail"
+on_failure = "ForecastRegistrationFailed"
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
 
@@ -718,11 +717,25 @@ name = "ForecastRegistrationComplete"
 kind = "input"
 from = ["RegisteringForecasts"]
 to = "Active"
-params = []
+params = ["error_message", "learning_mode"]
 
 [[state_timeout]]
 state = "RegisteringForecasts"
 after_seconds = 120
-on_timeout = "Fail"
+on_timeout = "ForecastRegistrationFailed"
 reset_on = ["ForecastPrepared", "ForecastRegistered"]
 params = {error_message="Forecast registration did not complete within 120 seconds."}
+
+# Frozen before the first Forecast.Register and retained throughout this batch.
+[[state]]
+name = "registration_model_json"
+type = "string"
+initial = ""
+
+[[action]]
+name = "ForecastRegistrationFailed"
+kind = "input"
+from = ["RegisteringForecasts"]
+to = "Active"
+params = ["error_message"]
+hint = "Registration did not finish; inspect the error, correct the replay clock or retry. Existing revisions are retained."

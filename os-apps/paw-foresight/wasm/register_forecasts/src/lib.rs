@@ -293,6 +293,24 @@ fn registration_time(raw: &str) -> Result<String, String> {
     }
 }
 
+/// Host EntityEvent timestamps are UTC; normalize subsecond precision for the learner.
+fn host_registration_time(state: &Value) -> Result<String, String> {
+    let recorded = state
+        .get("events")
+        .and_then(Value::as_array)
+        .and_then(|events| events.last())
+        .and_then(|event| event.get("timestamp"))
+        .and_then(Value::as_str)
+        .ok_or("Observed registration requires its host-recorded event timestamp")?;
+    if !(recorded.ends_with('Z') || recorded.ends_with("+00:00")) {
+        return Err("Host registration timestamp must be UTC".into());
+    }
+    let seconds = recorded
+        .get(..19)
+        .ok_or("Invalid host registration timestamp")?;
+    registration_time(&format!("{seconds}Z"))
+}
+
 /// Pure selection rule: is this node a registrable forecast?
 ///
 /// Registrable means: still live (Proposed or Confirmed), genuinely
@@ -350,14 +368,37 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
 
         let world_id = ctx.entity_id.clone();
         let frontier = get("frontier_date");
-        // The as-of date of the most recent evidence ingest, if any: WASM has
-        // no clock, so registered_at can only be as fresh as the last ingest.
-        let registered_at = registration_time(&get("last_ingest_date"))?;
-        let mode = match get("learning_mode").as_str() {
+        let mut mode = match get("learning_mode").as_str() {
             "" => "observed".to_string(),
             mode => mode.to_string(),
         };
-        let raw_model = get("model_json");
+        // The existing hindcast flag predates learning_mode. Persist its historical
+        // meaning in the trusted preparation callback before registering a forecast.
+        if get("hindcast_mode") == "true" {
+            if mode == "simulated" {
+                return Err("A hindcast cannot use simulated learning provenance".into());
+            }
+            mode = "historical".into();
+        }
+        let registered_at = if mode == "observed" {
+            host_registration_time(&ctx.entity_state)?
+        } else {
+            registration_time(&get("last_ingest_date"))?
+        };
+        let continuing = ctx.trigger_action == "ForecastRegistered";
+        let raw_model = get(if continuing {
+            "registration_model_json"
+        } else {
+            "model_json"
+        });
+        if continuing && raw_model.is_empty() {
+            return Err("Registration continuation has no frozen model snapshot".into());
+        }
+        let learning_run_id = get(if continuing {
+            "forecast_learning_run_id"
+        } else {
+            "adopted_learning_run_id"
+        });
         let model: Model = if raw_model.is_empty() {
             Model::identity(&mode)
         } else {
@@ -392,12 +433,13 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         if resp.status < 200 || resp.status >= 300 {
             return Err(format!("failed to list EventNodes (HTTP {})", resp.status));
         }
-        let body: Value = serde_json::from_str(&resp.body).unwrap_or(json!({}));
+        let body: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| format!("Invalid EventNode response: {e}"))?;
         let nodes = body
             .get("value")
             .and_then(|v| v.as_array())
             .cloned()
-            .unwrap_or_default();
+            .ok_or("EventNode response missing value array")?;
 
         if nodes.len() > 512 || body.get("@odata.nextLink").is_some() {
             return Err(
@@ -509,10 +551,14 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             if existing_identity.status == 200 {
                 let row: Value =
                     serde_json::from_str(&existing_identity.body).map_err(|e| e.to_string())?;
-                if row_status(&row) != "Created"
-                    && row_str(&row, "RegistrationKey") != registration_key
-                {
-                    return Err("Forecast identity collision or conflicting registration".into());
+                if row_status(&row) != "Created" {
+                    if row_str(&row, "RegistrationKey") != registration_key {
+                        return Err(
+                            "Forecast identity collision or conflicting registration".into()
+                        );
+                    }
+                    // The point read is authoritative even when the list projection lags.
+                    continue;
                 }
             } else if existing_identity.status != 404 {
                 return Err(format!(
@@ -529,7 +575,9 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
                     "forecast_world_id": world_id, "forecast_event_node_id": node_id,
                     "forecast_question": str_of("Statement"), "forecast_probability": probability.to_string(),
                     "forecast_base_probability":base_probability.to_string(),
-                    "forecast_model_version":model.version,"forecast_learning_run_id":get("adopted_learning_run_id"),
+                    "forecast_model_version":model.version,"forecast_learning_run_id":learning_run_id,
+                    "registration_model_json":serde_json::to_string(&model).map_err(|e|e.to_string())?,
+                    "learning_mode":mode,
                     "forecast_previous_forecast_id":previous_id,"forecast_evidence_kind":mode,
                     "forecast_resolve_by": str_of("ResolveBy"), "forecast_market_ref": market_ref,
                     "forecast_engine_version": ENGINE_VERSION, "forecast_registered_at": registered_at,
@@ -548,12 +596,18 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         );
         // A successful run with nothing to dispatch must still set a
         // result: the host treats an empty result as failure.
-        set_success_result("ForecastRegistrationComplete", &json!({}));
+        set_success_result(
+            "ForecastRegistrationComplete",
+            &json!({"error_message":"","learning_mode":mode}),
+        );
         Ok(())
     })();
 
-    if let Err(e) = result {
-        set_error_result(&e);
+    if let Err(error) = result {
+        set_success_result(
+            "ForecastRegistrationFailed",
+            &json!({"error_message":error}),
+        );
     }
     0
 }

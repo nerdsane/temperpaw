@@ -130,6 +130,9 @@ struct ForecastRow {
     event_node_id: String,
     question: String,
     probability: String,
+    base_probability: String,
+    registered_at: String,
+    evidence_kind: String,
     status: String,
 }
 
@@ -141,6 +144,44 @@ fn resolution_params(actual: &Actual, forecast: &ForecastRow, actuals_file_id: &
     json!({"outcome":actual.outcome,"outcome_source_refs":serde_json::to_string(&refs).unwrap_or_default(),
         "resolved_at":actual.resolved_at,"outcome_evidence_kind":if exact {"historical"} else {"unverified_match"}})
 }
+/// Use the same evidence boundary as fitting before scheduling a batch run.
+fn eligible_feedback_time<'a>(
+    actual: &'a Actual,
+    forecast: &ForecastRow,
+    file_id: &str,
+) -> Option<&'a str> {
+    use foresight_learning_core::{Example, Model, prepare};
+    if actual.event_node_id.is_empty()
+        || actual.event_node_id != forecast.event_node_id
+        || forecast.evidence_kind != "historical"
+    {
+        return None;
+    }
+    let mut refs = actual.source_refs.clone();
+    refs.push(format!("file:{file_id}"));
+    let event = Example {
+        event_id: forecast.event_node_id.clone(),
+        base_probability: forecast.base_probability.parse().ok()?,
+        outcome: match actual.outcome.as_str() {
+            "yes" => 1,
+            "no" => 0,
+            _ => return None,
+        },
+        registered_at: forecast.registered_at.clone(),
+        resolved_at: actual.resolved_at.clone(),
+        evidence_kind: "historical".into(),
+        source_refs: refs,
+    };
+    let prepared = prepare(
+        vec![event],
+        "historical",
+        &actual.resolved_at,
+        &Model::identity("historical"),
+    )
+    .ok()?;
+    (prepared.validation.len() == 1).then_some(actual.resolved_at.as_str())
+}
+
 fn matched_revisions<'a>(
     matched: &ForecastRow,
     forecasts: &'a [ForecastRow],
@@ -224,6 +265,9 @@ fn parse_forecast_rows(fbody: &Value) -> Vec<ForecastRow> {
                 event_node_id: row_str(f, "EventNodeId").to_string(),
                 question: row_str(f, "Question").to_string(),
                 probability: row_str(f, "Probability").to_string(),
+                base_probability: row_str(f, "BaseProbability").to_string(),
+                registered_at: row_str(f, "RegisteredAt").to_string(),
+                evidence_kind: row_str(f, "EvidenceKind").to_string(),
                 status: row_status(f).to_string(),
             })
         })
@@ -417,6 +461,7 @@ fn grade(ctx: &Context) -> Result<(), String> {
     let matches = resolve_matches(ctx, &actuals, &forecasts);
     let mut briers: Vec<f64> = Vec::new();
     let mut graded_ids: Vec<String> = Vec::new();
+    let mut learning_as_of = String::new();
     for (ai, actual) in actuals.iter().enumerate() {
         let Some(matched) = matches[ai].map(|idx| &forecasts[idx]) else {
             ctx.log(
@@ -487,7 +532,10 @@ fn grade(ctx: &Context) -> Result<(), String> {
             }
 
             let score = brier(probability, actual.outcome == "yes");
-            let score_url = format!("{api}/tdata/Forecasts('{}')/TemperPaw.Score", forecast.id);
+            let score_url = format!(
+                "{api}/tdata/Forecasts('{}')/TemperPaw.ScoreBatch",
+                forecast.id
+            );
             match ctx.http_call(
                 "POST",
                 &score_url,
@@ -504,6 +552,12 @@ fn grade(ctx: &Context) -> Result<(), String> {
                     );
                     briers.push(score);
                     graded_ids.push(forecast.id.clone());
+                    if let Some(resolved) =
+                        eligible_feedback_time(actual, forecast, &actuals_file_id)
+                        && resolved > learning_as_of.as_str()
+                    {
+                        learning_as_of = resolved.to_string();
+                    }
                 }
                 Ok(r) => ctx.log(
                     "warn",
@@ -524,7 +578,8 @@ fn grade(ctx: &Context) -> Result<(), String> {
     }
 
     // 4. Report the score, honest about coverage.
-    let params = score_complete_params(&briers, forecasts.len(), &actuals_file_id);
+    let mut params = score_complete_params(&briers, forecasts.len(), &actuals_file_id);
+    params["learning_as_of"] = json!(learning_as_of);
     ctx.log(
         "info",
         &format!(
@@ -549,6 +604,9 @@ mod tests {
             event_node_id: node.to_string(),
             question: question.to_string(),
             probability: p.to_string(),
+            base_probability: String::new(),
+            registered_at: String::new(),
+            evidence_kind: String::new(),
             status: status.to_string(),
         }
     }

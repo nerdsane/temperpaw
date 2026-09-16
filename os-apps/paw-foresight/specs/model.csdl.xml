@@ -343,6 +343,7 @@
         <Property Name="ForecastMarketRef" Type="Edm.String"/>
         <Property Name="ForecastEngineVersion" Type="Edm.String"/>
         <Property Name="ForecastRegisteredAt" Type="Edm.String"/>
+        <Property Name="RegistrationModelJson" Type="Edm.String"/>
       </EntityType>
 
       <EntityType Name="EventNode">
@@ -506,6 +507,7 @@
         <Property Name="GradedCount" Type="Edm.String"/>
         <Property Name="CoverageNote" Type="Edm.String"/>
         <Property Name="ErrorMessage" Type="Edm.String"/>
+        <Property Name="LearningAsOf" Type="Edm.String"/>
       </EntityType>
 
       <EntityType Name="Lens">
@@ -534,6 +536,7 @@
         <Parameter Name="agent_model" Type="Edm.String" Nullable="true"/>
         <Parameter Name="agent_provider" Type="Edm.String" Nullable="true"/>
         <Parameter Name="hindcast_mode" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="last_ingest_date" Type="Edm.String" Nullable="true"/>
         <ReturnType Type="TemperPaw.Foresight.World"/>
       </Action>
       <Action Name="Seed" IsBound="true">
@@ -942,6 +945,7 @@
         <Parameter Name="graded_count" Type="Edm.String" Nullable="true"/>
         <Parameter Name="actuals_file_id" Type="Edm.String" Nullable="true"/>
         <Parameter Name="coverage_note" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="learning_as_of" Type="Edm.String"/>
         <ReturnType Type="TemperPaw.Foresight.Hindcast"/>
       </Action>
       <Action Name="Fail" IsBound="true">
@@ -1153,6 +1157,8 @@
         <Parameter Name="forecast_market_ref" Type="Edm.String"/>
         <Parameter Name="forecast_engine_version" Type="Edm.String"/>
         <Parameter Name="forecast_registered_at" Type="Edm.String"/>
+        <Parameter Name="registration_model_json" Type="Edm.String"/>
+              <Parameter Name="learning_mode" Type="Edm.String"/>
       </Action>
       <Action Name="ForecastRegistered" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
@@ -1160,6 +1166,16 @@
       </Action>
       <Action Name="ForecastRegistrationComplete" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="error_message" Type="Edm.String"/>
+              <Parameter Name="learning_mode" Type="Edm.String"/>
+      </Action>
+      <Action Name="ForecastRegistrationFailed" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="error_message" Type="Edm.String"/>
+      </Action>
+      <Action Name="ScoreBatch" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="brier" Type="Edm.String"/>
       </Action>
     </Schema>
   </edmx:DataServices>

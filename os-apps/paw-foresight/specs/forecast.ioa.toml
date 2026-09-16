@@ -124,7 +124,7 @@ principal = "system"
 target_entity = "LearningRun"
 target_action = "Start"
 params = {dataset_json = ""}
-guard = {type = "all_of", guards = [{type = "field_in", field = "evidence_kind", values = ["observed","historical","simulated"]}, {type = "not", guard = {type = "field_equals", field = "resolved_at", value = ""}}]}
+guard = {type = "all_of", guards = [{type = "field_in", field = "evidence_kind", values = ["observed","historical","simulated"]}, {type = "field_in", field = "outcome_evidence_kind", values = ["observed","historical","simulated"]}, {type = "not", guard = {type = "field_equals", field = "resolved_at", value = ""}}]}
 [action.triggers.resolve_target]
 type = "create"
 [action.triggers.params_from]
@@ -303,3 +303,11 @@ params={error_message="Outcome validation did not complete within 120 seconds."}
 name="outcome_evidence_kind"
 type="string"
 initial=""
+
+# Historical grading emits one batch-completion learning trigger after all scores.
+[[action]]
+name = "ScoreBatch"
+kind = "input"
+from = ["Resolved"]
+to = "Scored"
+params = ["brier"]

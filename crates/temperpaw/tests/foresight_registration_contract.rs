@@ -60,3 +60,156 @@ fn strict_forecast_initializes_only_through_declared_register() {
         }
     }
 }
+
+#[test]
+fn recovery_and_adoption_preserve_operational_state() {
+    let table = TransitionTable::from_ioa_source(include_str!(
+        "../../../os-apps/paw-foresight/specs/world.ioa.toml"
+    ));
+    let recovered = table
+        .evaluate("RegisteringForecasts", 0, "ForecastRegistrationFailed")
+        .unwrap();
+    assert!(recovered.success);
+    assert_eq!(recovered.new_state, "Active");
+    for state in ["Active", "Updating", "RegisteringForecasts"] {
+        let adopted = table.evaluate(state, 0, "AdoptModel").unwrap();
+        assert!(adopted.success, "{state}");
+        assert_eq!(adopted.new_state, state);
+    }
+    for state in ["Created", "Archived", "Failed"] {
+        assert!(
+            !table
+                .evaluate(state, 0, "AdoptModel")
+                .is_some_and(|r| r.success)
+        );
+    }
+}
+
+#[test]
+fn hundred_batch_scores_have_one_declared_learning_trigger() {
+    let source = include_str!("../../../os-apps/paw-foresight/specs/forecast.ioa.toml");
+    let table = TransitionTable::from_ioa_source(source);
+    let forecast: toml::Value = toml::from_str(source).unwrap();
+    let action = forecast["action"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"].as_str() == Some("ScoreBatch"))
+        .unwrap();
+    let mut spawned = 0;
+    for _ in 0..100 {
+        let scored = table.evaluate("Resolved", 0, "ScoreBatch").unwrap();
+        assert!(scored.success);
+        assert_eq!(scored.new_state, "Scored");
+        spawned += action
+            .get("triggers")
+            .and_then(toml::Value::as_array)
+            .map_or(0, Vec::len);
+    }
+    assert_eq!(spawned, 0);
+    let hindcast: toml::Value = toml::from_str(include_str!(
+        "../../../os-apps/paw-foresight/specs/hindcast.ioa.toml"
+    ))
+    .unwrap();
+    let done = hindcast["action"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"].as_str() == Some("ScoreComplete"))
+        .unwrap();
+    let triggers = done["triggers"].as_array().unwrap();
+    assert_eq!(triggers.len(), 1);
+    assert_eq!(triggers[0]["target_entity"].as_str(), Some("LearningRun"));
+    assert_eq!(triggers[0]["target_action"].as_str(), Some("Start"));
+    assert!(triggers[0].get("guard").is_some());
+}
+
+#[test]
+fn changed_action_metadata_matches_ioa_and_detects_missing_parameters() {
+    use std::collections::BTreeSet;
+    use temper_spec::{
+        automaton::parse_automaton,
+        csdl::{CsdlDocument, parse_csdl},
+    };
+    let xml = include_str!("../../../os-apps/paw-foresight/specs/model.csdl.xml");
+    let targets = [
+        (
+            "World",
+            include_str!("../../../os-apps/paw-foresight/specs/world.ioa.toml"),
+            &[
+                "Configure",
+                "ForecastPrepared",
+                "ForecastRegistrationComplete",
+                "ForecastRegistrationFailed",
+            ][..],
+        ),
+        (
+            "Forecast",
+            include_str!("../../../os-apps/paw-foresight/specs/forecast.ioa.toml"),
+            &["ScoreBatch"][..],
+        ),
+        (
+            "Hindcast",
+            include_str!("../../../os-apps/paw-foresight/specs/hindcast.ioa.toml"),
+            &["ScoreComplete"][..],
+        ),
+    ];
+    let mut expected = BTreeMap::new();
+    for (entity, source, names) in targets {
+        let ioa = parse_automaton(source).unwrap();
+        for name in names {
+            let action = ioa.actions.iter().find(|a| a.name == *name).unwrap();
+            let params: BTreeSet<String> =
+                action.params.iter().map(|p| p.name().to_string()).collect();
+            expected.insert(
+                (format!("TemperPaw.Foresight.{entity}"), name.to_string()),
+                params,
+            );
+        }
+    }
+    let matches = |document: &CsdlDocument| {
+        expected.iter().all(|((binding, name), params)| {
+            let actions: Vec<_> = document
+                .schemas
+                .iter()
+                .flat_map(|s| &s.actions)
+                .filter(|a| a.name == *name && a.binding_type() == Some(binding.as_str()))
+                .collect();
+            actions.len() == 1
+                && actions[0]
+                    .parameters
+                    .iter()
+                    .skip(1)
+                    .map(|p| p.name.clone())
+                    .collect::<BTreeSet<_>>()
+                    == *params
+        })
+    };
+    assert!(matches(&parse_csdl(xml).unwrap()));
+    // Exercise each changed contract's missing-parameter failure with the real parser.
+    for (entity, name, parameter) in [
+        ("World", "Configure", "last_ingest_date"),
+        ("World", "ForecastPrepared", "registration_model_json"),
+        ("World", "ForecastPrepared", "learning_mode"),
+        ("World", "ForecastRegistrationComplete", "learning_mode"),
+        ("World", "ForecastRegistrationFailed", "error_message"),
+        ("Forecast", "ScoreBatch", "brier"),
+        ("Hindcast", "ScoreComplete", "learning_as_of"),
+    ] {
+        let mut mutant = parse_csdl(xml).unwrap();
+        let binding = format!("TemperPaw.Foresight.{entity}");
+        let action = mutant
+            .schemas
+            .iter_mut()
+            .flat_map(|s| &mut s.actions)
+            .find(|a| a.name == name && a.binding_type() == Some(binding.as_str()))
+            .unwrap();
+        let before = action.parameters.len();
+        action.parameters.retain(|p| p.name != parameter);
+        assert_eq!(action.parameters.len() + 1, before);
+        assert!(
+            !matches(&mutant),
+            "{entity}.{name} missing {parameter} escaped the check"
+        );
+    }
+}
