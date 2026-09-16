@@ -154,7 +154,7 @@ export function parsePath(row: Row) {
 }
 export function parseClaim(row: Row) {
   return { ...identity(row), endpointId: text(row, 'endpoint_id'), statement: text(row, 'current_text') || text(row, 'original_text'),
-    classification: text(row, 'classification'), reason: text(row, 'unreachable_reason') };
+    classification: text(row, 'classification'), reason: text(row, 'unreachable_reason'), error: text(row, 'error_message') };
 }
 export interface LearningReport {
   decision: string; reason: string; mode: string; asOf: string;

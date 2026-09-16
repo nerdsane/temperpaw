@@ -407,3 +407,16 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the guarded queue because:** It preserves later work without introducing an unbounded retry loop. Starting a batch consumes the pending flag, and attempt guards still reject stale callbacks. A second failure without another request stops with the error visible. The same rule applies to explicit failure and the sequence-checked timeout.
 
 **Where:** `os-apps/paw-foresight/specs/world.ioa.toml`, `crates/temperpaw/tests/foresight_registration_contract.rs`; PR #526. All 11 registration contract tests pass; the new regression failed on the original missing trigger.
+
+
+## D34 — Validate existing route attachments before starting workers
+
+**Decision:** Treat an absent or blank initial claim route list as empty, reject malformed nonempty input, and validate the list before creating any path or worker.
+
+**Came up because:** The observed first pass saved three futures and scored nine paths, but all nine claims failed when the new route-retention code parsed an unmaterialized initial `path_ids` value as JSON after creating the workers. The declared IOA default was already `[]`; repeating that declaration would not fix the actual module input.
+
+**Options:** Repeat the state default; parse after creating work; coerce every malformed value to empty; or distinguish an absent initial value from malformed data before side effects.
+
+**Chose validation before side effects because:** It preserves prior route IDs during background exploration and prevents invalid input from leaving unattached workers. Blank initial state is legitimate; malformed existing state must remain an explicit failure. The already failed claims are final by their declared contract. Their scored paths remain preserved as evidence, and verification uses a new normal run instead of adding a test-only resurrection action or patching database state. The dashboard also includes failed claims in its existing failure list so this stage cannot appear healthy while attachment has failed.
+
+**Where:** `os-apps/paw-foresight/wasm/spawn_repairers/src/lib.rs`; actual-WASM regression; `dashboard/src/lib/foresight.ts` and `dashboard/src/routes/foresight/+page.svelte`; PR #526.

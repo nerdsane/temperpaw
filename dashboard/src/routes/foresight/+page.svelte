@@ -69,6 +69,7 @@
     ...(researchProblem ? [researchProblem] : []),
     ...(world?.error ? [world.error] : []),
     ...endpoints.flatMap((item) => item.error ? [item.error] : []),
+    ...claims.flatMap((item) => item.error ? [`Claim ${item.id}: ${item.error}`] : []),
     ...paths.flatMap((item) => item.error ? [item.error] : []),
     ...forecasts.flatMap((item) => item.error ? [item.error] : []),
     ...runs.flatMap((item) => item.error ? [item.error] : []),

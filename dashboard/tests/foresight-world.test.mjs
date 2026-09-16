@@ -4,12 +4,24 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 const source=readFileSync(new URL('../src/lib/foresight.ts',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {parseEndpoint,parsePath,parseEvent,requiredEvents,loadFutureBundle}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+const {parseEndpoint,parsePath,parseClaim,parseEvent,requiredEvents,loadFutureBundle}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
 
 test('future and route references come from their actual saved fields',()=>{
   assert.equal(parseEndpoint({Id:'future',BundleFileId:'file-story'}).bundleFileId,'file-story');
   assert.equal(parseEndpoint({Id:'pending'}).bundleFileId,'');
   assert.equal(parsePath({Id:'route',ClaimId:'claim-1'}).claimId,'claim-1');
+});
+
+test('claim failures preserve the recorded error and identity for Activity',()=>{
+  const error='invalid claim path ids: EOF while parsing a value at line 1 column 0';
+  for (const errorFields of [{error_message:error},{ErrorMessage:error}]) {
+    const claim=parseClaim({Id:'claim-failed',Status:'Failed',endpoint_id:'future-1',...errorFields});
+    assert.equal(claim.id,'claim-failed');
+    assert.equal(claim.status,'Failed');
+    assert.equal(claim.endpointId,'future-1');
+    assert.equal(claim.error,error);
+  }
+  assert.equal(parseClaim({Id:'claim-ok',Status:'Settled'}).error,'');
 });
 
 test('required events preserve recorded order and unresolved references',()=>{

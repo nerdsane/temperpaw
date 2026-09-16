@@ -433,6 +433,7 @@ async fn legacy_hindcast_registers_at_explicit_clock_then_prepares_historical_le
 struct SessionConfigureHost {
     inner: SimWasmHost,
     configure_requests: Arc<Mutex<Vec<Value>>>,
+    http_requests: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 #[async_trait::async_trait]
@@ -444,6 +445,10 @@ impl WasmHost for SessionConfigureHost {
         headers: &[(String, String)],
         body: &str,
     ) -> Result<(u16, String), String> {
+        self.http_requests
+            .lock()
+            .unwrap()
+            .push((method.into(), url.into()));
         if method == "POST" && url.ends_with("/TemperPaw.Configure") {
             self.configure_requests
                 .lock()
@@ -507,6 +512,7 @@ async fn seed_world_records_research_session_from_the_create_response() {
     ctx.entity_state["counters"] = json!({"research_attempt":7});
     let configure_requests = Arc::new(Mutex::new(Vec::new()));
     let host = SessionConfigureHost {
+        http_requests: Arc::default(),
         inner: host,
         configure_requests: Arc::clone(&configure_requests),
     };
@@ -681,6 +687,7 @@ async fn corridor_workers_require_tools_in_outgoing_session_configuration() {
             module,
             ctx,
             SessionConfigureHost {
+                http_requests: Arc::default(),
                 inner: corridor_session_host(),
                 configure_requests: Arc::clone(&requests),
             },
@@ -721,4 +728,97 @@ async fn corridor_workers_require_tools_in_outgoing_session_configuration() {
         missing_tool_requirement.is_empty(),
         "Tool-dependent workers must not finish with a plain-text end turn: {missing_tool_requirement:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repairer_route_ids_attach_when_initial_field_is_missing_or_empty() {
+    for prior in [None, Some(""), Some("[]"), Some("[\"earlier-route\"]")] {
+        let mut fields = json!({"world_id":"world-1","current_text":"A future claim"});
+        let mut expected = Vec::<String>::new();
+        if let Some(prior) = prior {
+            fields["path_ids"] = json!(prior);
+            if !prior.is_empty() {
+                expected = serde_json::from_str(prior).unwrap();
+            }
+        }
+        fields["route_count"] = json!(expected.len().to_string());
+        let mut ctx = context("spawn_repairers", "PrepareBridge", fields);
+        ctx.entity_type = "Claim".into();
+        ctx.entity_id = "claim-1".into();
+        ctx.entity_state["status"] = json!("Bridging");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let result = invoke(
+            "spawn_repairers",
+            ctx,
+            SessionConfigureHost {
+                inner: corridor_session_host(),
+                configure_requests: Arc::default(),
+                http_requests: Arc::clone(&requests),
+            },
+        )
+        .await;
+        assert!(result.success, "initial path_ids {prior:?}: {result:?}");
+        assert_eq!(result.callback_action, "RoutesAttached");
+        expected.push("path-1".into());
+        assert_eq!(
+            result.callback_params["path_ids"],
+            serde_json::to_string(&expected).unwrap()
+        );
+        assert_eq!(
+            result.callback_params["route_count"],
+            expected.len().to_string()
+        );
+        for collection in ["Paths", "Agents", "Sessions"] {
+            assert_eq!(
+                requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(method, url)| method == "POST"
+                        && url == &format!("https://temper.test/tdata/{collection}"))
+                    .count(),
+                1,
+                "exactly one {collection} create"
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repairer_route_ids_reject_malformed_values_before_any_http_effect() {
+    for prior in ["broken", "null", "{}", "[7]"] {
+        let mut ctx = context(
+            "spawn_repairers",
+            "PrepareBridge",
+            json!({
+                "world_id":"world-1", "current_text":"A future claim", "path_ids":prior,
+            }),
+        );
+        ctx.entity_type = "Claim".into();
+        ctx.entity_id = "claim-1".into();
+        ctx.entity_state["status"] = json!("Bridging");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let result = invoke(
+            "spawn_repairers",
+            ctx,
+            SessionConfigureHost {
+                inner: corridor_session_host(),
+                configure_requests: Arc::default(),
+                http_requests: Arc::clone(&requests),
+            },
+        )
+        .await;
+        assert!(!result.success, "malformed path_ids {prior:?}: {result:?}");
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("invalid claim path ids")
+        );
+        assert!(
+            requests.lock().unwrap().is_empty(),
+            "invalid initial route data must not create a worker or route"
+        );
+    }
 }

@@ -607,6 +607,15 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         }
         let revision_brief = get("revision_brief");
         let route_index = get("route_count").trim().parse::<usize>().unwrap_or(0);
+        // Initial string fields can be absent from the invocation snapshot.
+        // Validate retained routes before creating a Path or starting its worker.
+        let prior_path_ids = get("path_ids");
+        let mut path_ids: Vec<String> = if prior_path_ids.trim().is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&prior_path_ids)
+                .map_err(|e| format!("invalid claim path ids: {e}"))?
+        };
 
         let api = ctx
             .config
@@ -789,8 +798,6 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         )?;
 
         // Retain prior routes when background exploration opens another alternative.
-        let mut path_ids: Vec<String> = serde_json::from_str(&get("path_ids"))
-            .map_err(|e| format!("invalid claim path ids: {e}"))?;
         path_ids.push(path_id.clone());
         // 4. Record the attached route on the claim.
         set_success_result(
