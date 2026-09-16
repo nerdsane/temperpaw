@@ -146,3 +146,22 @@ export function utcTime(value: string): string {
   if (!Number.isFinite(parsed.getTime())) throw new Error('Enter a valid UTC date and time.');
   return parsed.toISOString().slice(0, 19) + 'Z';
 }
+
+export interface ForesightLocation { worldId: string; asOf: string; tab: string }
+export function readForesightLocation(href: string): ForesightLocation {
+  const params = new URL(href).searchParams;
+  const at = params.get('at') ?? '';
+  const date = new Date(at + 'Z');
+  const asOf = Number.isFinite(date.getTime()) && date.toISOString().slice(0, 16) === at ? at : '';
+  const view = params.get('view') ?? '';
+  return { worldId: params.get('world') ?? '', asOf,
+    tab: ['world','predictions','learning','activity'].includes(view) ? view : 'world' };
+}
+export function writeForesightLocation(href: string, state: ForesightLocation): string {
+  const url = new URL(href);
+  for (const [key, value] of Object.entries({world:state.worldId, at:state.asOf, view:state.tab})) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+  return url.href;
+}
