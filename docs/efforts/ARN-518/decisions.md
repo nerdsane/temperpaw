@@ -433,3 +433,29 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the immutable base because:** It preserves the compiled server and unrelated packaged applications while allowing the final app closure and UI to be checked byte for byte. The base is `ghcr.io/nerdsane/temperpaw@sha256:5846ef5906e86bb260f411af30c165abdbb8aa243b958886622585a4f328f831`, with OCI revision `681969cc909ea9cfcb82a90d3d64f9eb91c2a775`. This is a packaging choice, not a verification exemption: native build inputs must match, the resulting image must run before deployment, and production must report the pinned application versions. The latest fetched GitHub main is `07cbb1d`, an ancestor of this branch. No shared CI or deployment workflow is changed.
 
 **Where:** The bounded release recipe and receipts under `/private/tmp/arn518-genesis-final-02944f0/`; the final tested 360-file Genesis closure and 73-file dashboard build. Publication and production activation remain separate steps after verification and review.
+
+
+## D36 — Keep Foresight record links usable before unrelated setup is complete
+
+**Decision:** Generate Foresight detail URLs with their OData collection names and permit authenticated access to those seven detail routes before agent setup is complete.
+
+**Came up because:** Live verification followed a published prediction from a canonical path. The singular `/entities/Forecast/<id>` URL returned 404; the correct `/entities/Forecasts/<id>` URL then redirected to Welcome because the setup guard did not exempt Foresight record details.
+
+**Options:** Keep the broken links; broaden the setup exemption to every entity route; or correct the shared Foresight link builder and add an explicit seven-collection detail-route exemption.
+
+**Chose the scoped correction because:** Users can inspect worlds, events, futures, claims, paths, forecasts, and learning runs through the existing generic detail page. Authentication, tenant authorization, collection pages, unrelated entities, and nested routes remain subject to their existing checks. No native or generic detail-page change is required.
+
+**Where:** `dashboard/src/routes/foresight/+page.svelte` recordHref; `dashboard/src/lib/setup-routing.ts` requiresAgentSetup; focused link and setup-route tests. Live failure and verification evidence: `/private/tmp/arn518-record-links/`.
+
+
+## D37 — Keep retrospective prerequisites out of forward predictions
+
+**Decision:** Register a prediction only if its resolution deadline is later than the frozen batch registration clock; retain earlier prerequisites as path context.
+
+**Came up because:** The first complete observed pass produced 42 records, six of which described prerequisites dated before registration. They were legitimately part of backward paths but were incorrectly published as forward predictions. The existing selection checked the world's farthest forecast date, not the lower time boundary.
+
+**Options:** Treat past-dated requirements as forecasts; delete or rewrite already registered records; or enforce the lower boundary before each new registration using the immutable batch clock.
+
+**Chose the temporal boundary because:** The system preserves honest historical context and immutable audit history while preventing newly published predictions about already elapsed deadlines. Observed mode uses the host-recorded snapshot clock; historical and simulated modes use their explicit logical clocks, so replay remains useful without waiting for real time. Date-only deadlines include their UTC day; exact UTC timestamp deadlines must be strictly later than registration. Invalid deadlines fail visibly through the existing recoverable registration callback. Earlier test records remain preserved and disclosed rather than silently rewritten.
+
+**Where:** `os-apps/paw-foresight/wasm/register_forecasts/src/lib.rs`; actual-WASM clock-boundary tests in `crates/temperpaw/tests/foresight_learning_wasm.rs`; the observed first-pass receipt and its six retrospective records in `/private/tmp/arn518-visible-proof/fresh-background-state.json`.

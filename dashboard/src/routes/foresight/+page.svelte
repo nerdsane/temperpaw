@@ -86,7 +86,7 @@
     if (href !== window.location.href) replaceState(href, $page.state);
   });
 
-  function recordHref(set: string, id: string): string { return `${base}/entities/${set}/${encodeURIComponent(id)}`; }
+  function recordHref(type: string, id: string): string { return `${base}/entities/${type}s/${encodeURIComponent(id)}`; }
   function date(value: string): string { return value ? value.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace(/Z$/, ' UTC') : 'Not recorded'; }
   function escape(value: string): string { return value.replaceAll("'", "''"); }
   async function loadWorlds() {

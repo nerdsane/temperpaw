@@ -822,3 +822,74 @@ async fn repairer_route_ids_reject_malformed_values_before_any_http_effect() {
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn registration_excludes_past_requirements_at_the_frozen_clock() {
+    for (deadline, expected) in [
+        ("2025-10-23", "ForecastRegistrationComplete"),
+        ("2026-09-15", "ForecastRegistrationComplete"),
+        ("2026-09-16T04:00:01Z", "ForecastRegistrationComplete"),
+        ("2026-09-16T04:00:02Z", "ForecastPrepared"),
+        ("2026-09-16", "ForecastPrepared"),
+        ("2026-09-17", "ForecastPrepared"),
+    ] {
+        let host = registration_host().with_response(
+            "https://temper.test/tdata/EventNodes?$filter=world_id eq 'world-1'&$top=513",
+            200,
+            &json!({"value":[{"Id":"node-1","AuthorAgentId":"dashboard","Status":"Proposed",
+                "Probability":"0.55","Provenance":"authored","ResolveBy":deadline,
+                "Statement":"Dated requirement"}]})
+            .to_string(),
+        );
+        let result = invoke(
+            "register_forecasts",
+            context(
+                "register_forecasts",
+                "StartForecastRegistration",
+                world("observed"),
+            ),
+            host,
+        )
+        .await;
+        assert!(result.success, "{deadline}: {result:?}");
+        assert_eq!(result.callback_action, expected, "{deadline}: {result:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn registration_cutoff_preserves_replay_and_uses_persisted_continuation_time() {
+    for mode in ["observed", "historical", "simulated"] {
+        for (deadline, expected) in [
+            ("2025-01-01", "ForecastRegistrationComplete"),
+            ("2025-01-02", "ForecastPrepared"),
+        ] {
+            let mut fields = world(mode);
+            fields["forecast_registered_at"] = json!("2025-01-01T23:59:59Z");
+            fields["last_ingest_date"] = json!("2000-01-01T00:00:00Z");
+            let snapshot = invoke("register_forecasts", context("register_forecasts", "StartForecastRegistration", world(mode)), registration_host().with_response(
+                "https://temper.test/tdata/EventNodes?$filter=world_id eq 'world-1'&$top=513", 200,
+                &json!({"value":[{"Id":"node-1","AuthorAgentId":"dashboard","Status":"Proposed","Probability":"0.55","Provenance":"authored","ResolveBy":"2027-06-01","Statement":"Identity snapshot"}]}).to_string())).await;
+            assert_eq!(snapshot.callback_action, "ForecastPrepared", "{snapshot:?}");
+            fields["registration_model_json"] =
+                snapshot.callback_params["registration_model_json"].clone();
+            fields["registration_nodes_json"] = json!(json!([{"Id":"node-1","Probability":"0.55", "ResolveBy":deadline,"Statement":"Replay requirement"}]).to_string());
+            let result = invoke(
+                "register_forecasts",
+                context("register_forecasts", "ForecastRegistered", fields),
+                registration_host(),
+            )
+            .await;
+            assert!(result.success, "{mode}/{deadline}: {result:?}");
+            assert_eq!(
+                result.callback_action, expected,
+                "{mode}/{deadline}: {result:?}"
+            );
+            if expected == "ForecastPrepared" {
+                assert_eq!(
+                    result.callback_params["forecast_registered_at"],
+                    "2025-01-01T23:59:59Z"
+                );
+            }
+        }
+    }
+}

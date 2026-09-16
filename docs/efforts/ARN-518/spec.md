@@ -29,7 +29,7 @@ A deterministic simulation fixture demonstrates mechanics and is labeled as such
 - Registered prediction contents never change.
 - Each event contributes at most once across an adopted model's fitting/evaluation lineage. Later runs exclude consumed identities; rejected candidates leave that lineage unchanged.
 - Candidate evaluation examples do not enter that candidate's fitting set.
-- A prediction uses only the adopted model available at registration.
+- A prediction uses only the adopted model available at registration. Its resolution deadline must be later than the frozen registration clock; earlier path prerequisites remain context. Date-only deadlines include their UTC day, while UTC timestamps are exact.
 - A rejected or failed candidate leaves that adopted model unchanged.
 - A stale completion cannot overwrite a newer adopted model.
 - Simulated feedback never counts as observed evidence.

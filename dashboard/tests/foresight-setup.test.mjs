@@ -28,3 +28,20 @@ test('cold authenticated users can inspect a linked session without opening othe
     assert.equal(requiresAgentSetup(path,empty),true,path);
   }
 });
+
+test('cold authenticated users can inspect Foresight records without unrelated setup',()=>{
+  for (const set of ['Worlds','EventNodes','Endpoints','Claims','Paths','Forecasts','LearningRuns']) {
+    for (const suffix of ['','/']) {
+      const path=`/entities/${set}/record-123${suffix}`;
+      assert.equal(requiresAgentSetup(path,empty),false,path);
+    }
+  }
+});
+
+test('Foresight detail access does not exempt collections, unrelated entities, or nested routes',()=>{
+  for (const path of ['/entities/Forecasts','/entities/Forecasts/','/entities/Forecasts/id/tools',
+    '/entities/Forecasts/id%2Fother','/entities/Forecast/id','/entities/Secrets/id',
+    '/entities/Agents/id','/entities-other/Forecasts/id']) {
+    assert.equal(requiresAgentSetup(path,empty),true,path);
+  }
+});

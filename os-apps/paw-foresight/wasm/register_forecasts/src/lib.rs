@@ -294,6 +294,20 @@ fn registration_time(raw: &str) -> Result<String, String> {
     }
 }
 
+/// Date-only deadlines include that UTC day; timestamp deadlines are exact.
+/// Use the committed batch clock, never a caller-supplied observed clock.
+fn resolves_after_registration(resolve_by: &str, registered_at: &str) -> Result<bool, String> {
+    let deadline = if resolve_by.len() == 10 {
+        format!("{resolve_by}T23:59:59Z")
+    } else {
+        resolve_by.to_string()
+    };
+    if !foresight_learning_core::valid_time(&deadline) {
+        return Err("Forecast resolution requires a valid UTC date or timestamp".into());
+    }
+    Ok(deadline.as_str() > registered_at)
+}
+
 /// Host EntityEvent timestamps are UTC; normalize subsecond precision for the learner.
 fn host_registration_time(state: &Value) -> Result<String, String> {
     let recorded = state
@@ -603,6 +617,11 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         for node in &nodes {
             let str_of = |k: &str| row_str(node, k);
             let node_id = row_id(node).to_string();
+            // Historical prerequisites remain in the path, but are not new
+            // forward predictions. Recheck after the snapshot clock is frozen.
+            if !resolves_after_registration(str_of("ResolveBy"), &registered_at)? {
+                continue;
+            }
 
             // Each input/model pair has one immutable identity, including concurrent retries.
             let existing_url =
@@ -744,6 +763,18 @@ mod tests {
     use super::*;
 
     const FRONTIER: &str = "2026-09-30";
+
+    #[test]
+    fn resolution_deadlines_use_valid_dates_and_the_frozen_clock() {
+        let clock = "2026-09-16T04:00:01Z";
+        for date in ["", "2026-02-30", "not-a-date", "2026-09-17T04:00:00+01:00"] {
+            assert!(resolves_after_registration(date, clock).is_err(), "{date}");
+        }
+        assert!(!resolves_after_registration("2026-09-15", clock).unwrap());
+        assert!(!resolves_after_registration(clock, clock).unwrap());
+        assert!(resolves_after_registration("2026-09-16", clock).unwrap());
+        assert!(resolves_after_registration("2026-09-16T04:00:02Z", clock).unwrap());
+    }
 
     #[test]
     fn only_evaluated_paths_release_their_own_required_events() {
