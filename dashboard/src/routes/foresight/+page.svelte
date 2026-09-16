@@ -5,7 +5,7 @@
   import { createEntity, postEntityAction, queryEntities } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    forecastGroups, sourceLinks, parseDataset, percent, measure, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
@@ -62,11 +62,6 @@
   function recordHref(set: string, id: string): string { return `${base}/entities/${set}/${encodeURIComponent(id)}`; }
   function date(value: string): string { return value ? value.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace(/Z$/, ' UTC') : 'Not recorded'; }
   function escape(value: string): string { return value.replaceAll("'", "''"); }
-  function utc(value: string): string {
-    const parsed = new Date(value.endsWith('Z') ? value : value + 'Z');
-    if (!Number.isFinite(parsed.getTime())) throw new Error('Enter a valid UTC date and time.');
-    return parsed.toISOString();
-  }
   async function loadWorlds() {
     const rows = await queryEntities('Worlds', undefined, 'Id desc', 101);
     if (disposed) return;
@@ -119,12 +114,12 @@
       await postEntityAction('Worlds', id, 'ConfigureLearning', { learning_mode: newMode });
       await postEntityAction('Worlds', id, 'Configure', {
         name:newName.trim(), domain:newDomain.trim(), description:newDescription.trim(),
-        target_date:newTarget, frontier_date:newTarget, horizon_months:'12', endpoint_budget:'3',
+        target_date:utcTime(newTarget), frontier_date:utcTime(newTarget), horizon_months:'12', endpoint_budget:'3',
         token_budget_cents:String(newBudget), hindcast_mode:newMode === 'historical' ? 'true' : 'false',
       });
       if (newMode !== 'observed') {
         await postEntityAction('Worlds', id, 'OpenReplay', {
-          learning_mode:newMode, domain:newDomain.trim(), frontier_date:newTarget, last_ingest_date:utc(asOf),
+          learning_mode:newMode, domain:newDomain.trim(), frontier_date:utcTime(newTarget), last_ingest_date:utcTime(asOf),
         });
       }
       message = newMode === 'observed' ? 'World configured. Start research when you are ready.' : 'Replay world opened. Add dated experiences in “What it learned”.';
@@ -134,7 +129,7 @@
   }
   async function worldAction(action: string) {
     await perform(async () => {
-      await postEntityAction('Worlds', selectedId, action, action === 'RegisterForecasts' ? {last_ingest_date:world?.mode === 'observed' ? new Date().toISOString() : utc(asOf)} : {});
+      await postEntityAction('Worlds', selectedId, action, action === 'RegisterForecasts' ? {last_ingest_date:world?.mode === 'observed' ? utcTime(new Date().toISOString()) : utcTime(asOf)} : {});
       message = action === 'RegisterForecasts' ? 'Prediction registration requested.' : 'World research started.';
     });
   }
@@ -147,7 +142,7 @@
       const run = await createEntity('LearningRuns');
       const id = String(run.Id ?? run._entity_id ?? '');
       if (!id) throw new Error('The learning run has no identifier.');
-      await postEntityAction('LearningRuns', id, 'Start', { world_id:selectedId, mode:world.mode, as_of:utc(asOf), dataset_json:prepared });
+      await postEntityAction('LearningRuns', id, 'Start', { world_id:selectedId, mode:world.mode, as_of:utcTime(asOf), dataset_json:prepared });
       message = 'Learning requested. Its progress and evaluation will appear below.';
     });
   }
@@ -157,8 +152,8 @@
       if (!Number.isFinite(questionProbability) || questionProbability < 0 || questionProbability > 100) throw new Error('Probability must be between 0 and 100.');
       const refs = questionSources.split('\n').map((value) => value.trim()).filter(Boolean);
       if (!refs.length) throw new Error('Include the evidence or fixture supporting this question.');
-      const registeredAt = world?.mode === 'observed' ? new Date().toISOString() : utc(asOf);
-      const deadline = utc(questionDeadline);
+      const registeredAt = world?.mode === 'observed' ? utcTime(new Date().toISOString()) : utcTime(asOf);
+      const deadline = utcTime(questionDeadline);
       if (deadline <= registeredAt) throw new Error('The question must resolve after the prediction time.');
       await createEntity('EventNodes', {
         world_id:selectedId, statement:questionText.trim(), probability:String(questionProbability / 100),
@@ -175,7 +170,7 @@
       const refs = outcomeSources.split('\n').map((source) => source.trim()).filter(Boolean);
       if (!refs.length) throw new Error('Include at least one outcome source.');
       await postEntityAction('Forecasts', outcomeForecast, 'RecordOutcome', {
-        outcome, outcome_source_refs:JSON.stringify(refs), resolved_at:utc(outcomeTime),
+        outcome, outcome_source_refs:JSON.stringify(refs), resolved_at:utcTime(outcomeTime),
       });
       message = 'Outcome submitted for scoring and learning.';
       outcomeForecast = '';

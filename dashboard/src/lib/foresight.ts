@@ -139,3 +139,10 @@ export function parseDataset(value: string): string {
 }
 export function percent(value: number | null): string { return value === null ? 'Unmeasured' : `${(value * 100).toFixed(1)}%`; }
 export function measure(value: number | null): string { return value === null ? '—' : value.toFixed(4); }
+
+/** Convert UI date inputs to the backend's fixed UTC-second action format. */
+export function utcTime(value: string): string {
+  const parsed = new Date(value.endsWith('Z') ? value : value + 'Z');
+  if (!Number.isFinite(parsed.getTime())) throw new Error('Enter a valid UTC date and time.');
+  return parsed.toISOString().slice(0, 19) + 'Z';
+}
