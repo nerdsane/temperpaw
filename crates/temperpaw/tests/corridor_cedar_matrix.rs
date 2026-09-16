@@ -567,13 +567,7 @@ fn dashboard_admin_cannot_forge_learning_or_prediction_callbacks() {
             }
             // Entity-trigger callbacks must continue to work. World registration
             // preparation/completion are exclusively WASM-service callbacks.
-            if ![
-                "ForecastPrepared",
-                "ForecastRegistrationComplete",
-                "ForecastRegistrationFailed",
-            ]
-            .contains(action)
-            {
+            if !["ForecastPrepared", "ForecastRegistrationComplete"].contains(action) {
                 assert!(
                     engine.authorize(&system, action, entity, &a).is_allowed(),
                     "declared system transition must reach {entity}.{action}"

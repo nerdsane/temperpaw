@@ -548,7 +548,7 @@ permit(principal == Agent::"service:wasm-runtime",
 // Registration crosses entities through declared system triggers only.
 permit(principal, action == Action::"Register", resource is Forecast)
 when { principal.agent_type == "system" };
-permit(principal, action == Action::"ForecastRegistered", resource is World)
+permit(principal, action in [Action::"ForecastRegistered", Action::"ForecastRegistrationFailed"], resource is World)
 when { principal.agent_type == "system" };
 permit(principal == Agent::"service:wasm-runtime",
   action in [Action::"ForecastPrepared", Action::"ForecastRegistrationComplete"], resource is World);
