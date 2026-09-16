@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, RwLock},
 };
 use temper_wasm::{
-    SimWasmHost, StreamRegistry, WasmEngine, WasmInvocationContext, WasmInvocationResult,
+    SimWasmHost, StreamRegistry, WasmEngine, WasmHost, WasmInvocationContext, WasmInvocationResult,
     WasmResourceLimits,
 };
 
@@ -60,7 +60,7 @@ fn context(module: &str, trigger: &str, fields: Value) -> WasmInvocationContext 
 async fn invoke(
     module: &str,
     ctx: WasmInvocationContext,
-    host: SimWasmHost,
+    host: impl WasmHost + 'static,
 ) -> WasmInvocationResult {
     let engine = WasmEngine::new().unwrap();
     let hash = engine.compile_and_cache(&module_bytes(module)).unwrap();
@@ -325,6 +325,50 @@ async fn legacy_hindcast_registers_at_explicit_clock_then_prepares_historical_le
     assert_eq!(report["training"].as_array().unwrap().len(), 0);
 }
 
+struct SessionConfigureHost {
+    inner: SimWasmHost,
+    configure_requests: Arc<Mutex<Vec<Value>>>,
+}
+
+#[async_trait::async_trait]
+impl WasmHost for SessionConfigureHost {
+    async fn http_call(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &str,
+    ) -> Result<(u16, String), String> {
+        if method == "POST" && url.ends_with("/TemperPaw.Configure") {
+            self.configure_requests
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(body).expect("Session.Configure body must be JSON"));
+        }
+        self.inner.http_call(method, url, headers, body).await
+    }
+
+    async fn http_call_binary(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<(u16, Vec<u8>), String> {
+        self.inner
+            .http_call_binary(method, url, headers, body)
+            .await
+    }
+
+    fn get_secret(&self, key: &str) -> Result<String, String> {
+        self.inner.get_secret(key)
+    }
+
+    fn log(&self, level: &str, message: &str) {
+        self.inner.log(level, message);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn seed_world_records_research_session_from_the_create_response() {
     let host = SimWasmHost::new()
@@ -356,7 +400,22 @@ async fn seed_world_records_research_session_from_the_create_response() {
     );
     ctx.entity_state["status"] = json!("Seeding");
     ctx.entity_state["counters"] = json!({"research_attempt":7});
+    let configure_requests = Arc::new(Mutex::new(Vec::new()));
+    let host = SessionConfigureHost {
+        inner: host,
+        configure_requests: Arc::clone(&configure_requests),
+    };
     let result = invoke("seed_world", ctx, host).await;
+    let requests = configure_requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "seed must configure its research session"
+    );
+    assert_eq!(
+        requests[0]["tool_choice"], "required",
+        "research must use explicit tool completion instead of a plain-text end turn"
+    );
     assert!(result.success, "{result:?}");
     assert_eq!(
         result.callback_action, "ResearchSessionStarted",

@@ -2,7 +2,7 @@ name = "paw-foresight"
 description = "Corridor world engine — scored worlds: skeleton forward, endpoints backward, adversarial repair, reality-graded forecasts"
 version = "0.3.0"
 startup_install = "core"
-dependencies = ["paw-agent"]
+dependencies = ["temperpaw/paw-agent@801e2fdf7e626dd0d0285b370f626f6b94e80609"]
 
 # Corridor engine modules (ADR-002). The legacy 0.1 projection surface was
 # removed in the ADR-003 retirement commit; its specs persist in installed

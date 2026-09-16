@@ -230,3 +230,31 @@
 **Chose the published package because:** Genesis publication is the installed application contract. A wholesale source replacement would regress working provider behavior; merging independent provider changes is outside this delivery. Publication must retain the divergent Git main and use a separate source branch if supported. The old production manifests also float dependencies, so rollback preparation must pin the complete captured package closure rather than assume that reinstalling old root refs restores old dependencies.
 
 **Where:** Genesis paw-agent release preparation for ARN-518; dedicated Foresight installed metadata captured in tenant_installed_apps; app PR526 and kernel PR473. Candidate packages remain unpublished until their exact bytes pass isolated verification.
+
+
+## D20 — Reconstruct published package trees without inventing Git ancestry
+
+**Decision:** Prepare independent Genesis release branches from exact published bundle bytes, recording their source version in a reconstruction baseline commit before applying the intended delta.
+
+**Came up because:** The supported Genesis Git server refuses fetches for unadvertised historical objects, including the currently published agent version. The supported bundle API exposes the exact published file bytes but no commit ancestry. The divergent main branch must remain intact.
+
+**Options:** Overwrite main; pretend the unavailable object is a verified Git parent; reconstruct the published tree on a new branch with explicit provenance.
+
+**Chose explicit reconstruction because:** It preserves published source and WASM bytes and retains the real two-file release delta without claiming unavailable history or bypassing the Git server restriction. These commits have new hashes; bundle and file hashes prove their source provenance. The same rule applies to rollback snapshots, whose manifests alone receive closed dependency pins.
+
+**Where:** Local Genesis release and rollback branches under ARN-518; registry publication uses each exact new branch ref after isolated verification. Existing remote main refs are unchanged.
+
+The preserved Foresight tree includes Genesis-only repair/adversary workspace reuse and inline file-context handling absent from the mirror. Their complete original module source and published WASM bytes are retained; mirror build inputs for those modules are aligned to that source.
+
+
+## D21 — Require the research session to finish through its tool contract
+
+**Decision:** Configure seeded research sessions with the published agent runtime's existing tool_choice="required" setting.
+
+**Came up because:** The real provider-backed surveyor created three events and completed nine tool turns, then ended with a plain-text narration of prior tool calls without issuing World.SeedComplete. Its world remained Seeding. The session did not exhaust its40-turn bound; the new kernel successfully continued past the original callback limit.
+
+**Options:** Accept the incomplete text result; repeatedly retry the same unconstrained session; add a new completion coordinator; use the published runtime's existing required-tool configuration.
+
+**Chose the existing configuration because:** The surveyor's contract already requires SeedComplete followed by temper.done. Requiring a tool response prevents ordinary text-only completion for the configured Responses provider and lets the existing explicit done path terminate the session. It does not guarantee evidence quality or replace checking that the world actually became Active. Turn limits remain finite and the full provider flow must be rerun.
+
+**Where:** seed_world Session.Configure request and its actual-WASM regression; published paw-agent b72f5d6 provider caller's OpenAI Codex Responses request; isolated observed-world test for ARN-518.

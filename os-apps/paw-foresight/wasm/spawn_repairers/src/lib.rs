@@ -232,10 +232,16 @@ fn repairer_prompt(
          - \"deformation\": you amended the claim to make it bridgeable\n\
          Severity: \"low\" | \"medium\" | \"high\". You flag costs; you NEVER compute scores — \
          costing is deterministic and runs elsewhere.\n\n\
-         Write a repair log with temper.write (markdown: the backward chain with your \
-         reasoning), then self-report:\n\
+         Write your repair log (markdown: the backward chain with your reasoning) with the \
+         temper.write tool — this is the ONLY way to create a FILE, and your workspace already \
+         exists. Do NOT create Files, Directories, or Workspaces yourself, and do NOT invent a \
+         file-creation API: temper.create is for EventNodes only, never for files. Call \
+         temper.write exactly like this:\n\
+         result = temper.write(\"/repair-log.md\", \"<your markdown repair log>\")\n\
+         temper.write returns {{\"file_id\": \"...\", \"path\": \"...\", \"workspace_id\": \
+         \"...\"}}. Use result[\"file_id\"] as repair_log_file_id below, then self-report:\n\
          temper.action(\"Paths\", \"{path_id}\", \"RepairComplete\", {{\"repair_log_file_id\": \
-         \"<file-id-from-temper.write>\", \"required_node_ids\": \"[\\\"<event-node-id>\\\", \
+         \"<result file_id>\", \"required_node_ids\": \"[\\\"<event-node-id>\\\", \
          ...]\", \"cost_flags\": \"[{{\\\"kind\\\": \\\"...\\\", \\\"severity\\\": \\\"...\\\", \
          \\\"note\\\": \\\"...\\\"}}]\"}})\n\
          Then call temper.done(\"complete\")."
@@ -249,6 +255,19 @@ fn workspace_name(world_id: &str) -> String {
     format!("world-{world_id}")
 }
 
+fn odata_escape(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+fn workspace_id_from_entity(entity: &Value) -> Option<String> {
+    entity
+        .get("entity_id")
+        .or_else(|| entity.get("Id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// Resolve (or create) the per-world PawFS workspace and return its id.
 /// Sessions are Configured with this id so temper.write lands inside a
 /// workspace PawFS Cedar accepts — without it, File create is denied
@@ -260,31 +279,66 @@ fn ensure_world_workspace(
     world_id: &str,
 ) -> Result<String, String> {
     let name = workspace_name(world_id);
-    // Workspace rows are not readable by agent principals (paw-fs Cedar has
-    // no read/list permit on Workspace), so idempotent lookup is impossible:
-    // create one per spawn batch. Correctness needs only that each session's
-    // Configure workspace matches the files it writes; file READS are
-    // unrestricted, so cross-session reads work across workspaces.
-    let create_resp = ctx.http_call(
-        "POST",
-        &format!("{api}/tdata/Workspaces"),
-        headers,
-        &json!({ "name": name, "quota_limit": "104857600" }).to_string(),
-    )?;
-    if create_resp.status < 200 || create_resp.status >= 300 {
+    let lookup = || -> Option<String> {
+        let find_resp = ctx
+            .http_call(
+                "GET",
+                &format!(
+                    "{api}/tdata/Workspaces?$filter=Name%20eq%20'{}'",
+                    odata_escape(&name)
+                ),
+                headers,
+                "",
+            )
+            .ok()?;
+        if !(200..300).contains(&find_resp.status) {
+            return None;
+        }
+        let existing: Value = serde_json::from_str(&find_resp.body).ok()?;
+        existing
+            .get("value")
+            .and_then(|a| a.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(workspace_id_from_entity)
+    };
+    if let Some(id) = lookup() {
+        return Ok(id);
+    }
+
+    for attempt in 1..=3u8 {
+        let create_resp = ctx.http_call(
+            "POST",
+            &format!("{api}/tdata/Workspaces"),
+            headers,
+            &json!({ "name": name, "quota_limit": "104857600" }).to_string(),
+        )?;
+        if (200..300).contains(&create_resp.status) {
+            return serde_json::from_str::<Value>(&create_resp.body)
+                .ok()
+                .and_then(|v| workspace_id_from_entity(&v))
+                .ok_or_else(|| format!("Workspace {name} create returned no entity_id"));
+        }
+        if create_resp.status == 409 {
+            if let Some(id) = lookup() {
+                return Ok(id);
+            }
+        }
+        if create_resp.status >= 500 && attempt < 3 {
+            ctx.log(
+                "warn",
+                &format!(
+                    "create Workspace {name} failed (HTTP {}), retry {attempt}/3",
+                    create_resp.status
+                ),
+            );
+            continue;
+        }
         return Err(format!(
             "create Workspace {name} failed (HTTP {})",
             create_resp.status
         ));
     }
-    serde_json::from_str::<Value>(&create_resp.body)
-        .ok()
-        .and_then(|v| {
-            v.get("entity_id")
-                .and_then(|x| x.as_str())
-                .map(str::to_string)
-        })
-        .ok_or_else(|| format!("Workspace {name} create returned no entity_id"))
+    Err(format!("create Workspace {name} failed after retries"))
 }
 
 fn create_agent(
@@ -773,6 +827,35 @@ mod tests {
         ] {
             assert!(p.contains(needle), "repairer prompt missing: {needle}");
         }
+    }
+
+    #[test]
+    fn repairer_prompt_gives_explicit_file_write_recipe() {
+        // Same class of bug as the adversary wedge: an under-specified file-write
+        // instruction lets a session reverse-engineer file creation through
+        // temper.action against Directories, trip a Cedar gate, and loop in
+        // WaitingForApproval. The prompt must show the exact temper.write call,
+        // name the file_id return field, forbid improvising file/dir creation,
+        // and never leave the bare placeholder behind. (The repairer DOES create
+        // EventNodes via temper.create — the prohibition is scoped to
+        // Files/Directories/Workspaces only.)
+        let p = prompt(false);
+        assert!(
+            p.contains("temper.write(\"/repair-log.md\""),
+            "repairer prompt must show the literal temper.write call"
+        );
+        assert!(
+            p.contains("\"file_id\""),
+            "repairer prompt must name the file_id return field"
+        );
+        assert!(
+            p.contains("Do NOT") && p.contains("Directories"),
+            "repairer prompt must forbid improvising Directories file creation"
+        );
+        assert!(
+            !p.contains("<file-id-from-temper.write>"),
+            "the bare placeholder must be gone — the recipe captures result[\"file_id\"]"
+        );
     }
 
     #[test]
