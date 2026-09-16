@@ -453,3 +453,43 @@ fn learning_callbacks_accept_only_the_platform_wasm_service() {
         );
     }
 }
+
+#[test]
+fn dashboard_admin_can_subscribe_to_tenant_events() {
+    let engine = engine();
+    let admin = SecurityContext::from_verified_jwt(
+        "dashboard-owner",
+        temper_authz::PrincipalKind::Admin,
+        None,
+        None,
+        None,
+        None,
+    );
+    let attributes = HashMap::new();
+    assert!(
+        engine
+            .authorize(&admin, "read_events", "Entity", &attributes)
+            .is_allowed(),
+        "authenticated dashboard admin must receive tenant-scoped live updates"
+    );
+    for action in ["create", "update", "delete", "read"] {
+        assert!(
+            !engine
+                .authorize(&admin, action, "Entity", &attributes)
+                .is_allowed(),
+            "event subscription must not grant generic Entity action {action}"
+        );
+    }
+    for caller in [
+        SecurityContext::anonymous(),
+        ctx("ordinary-session", "agent"),
+        ctx("human-agent", "human"),
+    ] {
+        assert!(
+            !engine
+                .authorize(&caller, "read_events", "Entity", &attributes)
+                .is_allowed(),
+            "non-admin caller must not gain the dashboard event subscription"
+        );
+    }
+}

@@ -49,6 +49,14 @@ when { principal.agent_type == "system" };
 // publication WASM-gated, peers confirm what authors propose.
 // ============================================================
 
+// Dashboard subscriptions are filtered to the authenticated tenant by the
+// observe endpoint. This grants no generic Entity reads or mutations.
+permit(
+  principal is Admin,
+  action == Action::"read_events",
+  resource is Entity
+);
+
 // --- World ---
 permit(principal is Admin, action, resource is World);
 
