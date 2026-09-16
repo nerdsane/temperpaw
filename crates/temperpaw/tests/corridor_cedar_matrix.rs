@@ -39,7 +39,7 @@ fn forecasts_are_created_and_graded_only_by_system() {
     let a = attrs(&[("id", serde_json::json!("f-1"))]);
 
     let system = ctx("evidence-wasm", "system");
-    for action in ["create", "Resolve", "Score", "Void"] {
+    for action in ["create", "Resolve", "Score", "ScoreBatch", "Void"] {
         assert!(
             engine
                 .authorize(&system, action, "Forecast", &a)
@@ -49,7 +49,7 @@ fn forecasts_are_created_and_graded_only_by_system() {
     }
 
     let agent = ctx("some-session-agent", "agent");
-    for action in ["create", "Resolve", "Score", "Void"] {
+    for action in ["create", "Resolve", "Score", "ScoreBatch", "Void"] {
         assert!(
             !engine
                 .authorize(&agent, action, "Forecast", &a)
@@ -429,6 +429,7 @@ fn learning_callbacks_accept_only_the_platform_wasm_service() {
                 "ReplayOpened",
                 "ForecastPrepared",
                 "ForecastRegistrationComplete",
+                "ForecastRegistrationFailed",
             ][..],
         ),
         (
@@ -498,5 +499,101 @@ fn dashboard_admin_can_subscribe_to_tenant_events() {
                 .is_allowed(),
             "non-admin caller must not gain the dashboard event subscription"
         );
+    }
+}
+
+#[test]
+fn dashboard_admin_cannot_forge_learning_or_prediction_callbacks() {
+    let engine = engine();
+    let admin = SecurityContext::from_verified_jwt(
+        "dashboard-owner",
+        temper_authz::PrincipalKind::Admin,
+        None,
+        None,
+        None,
+        None,
+    );
+    let system = ctx("entity-trigger", "system");
+    let a = attrs(&[("id", serde_json::json!("protected-record"))]);
+    for (entity, actions) in [
+        (
+            "LearningRun",
+            &[
+                "Prepared",
+                "Trained",
+                "CandidatePassed",
+                "ConfirmAdoption",
+                "Reject",
+                "Fail",
+            ][..],
+        ),
+        (
+            "World",
+            &[
+                "ReplayOpened",
+                "AdoptModel",
+                "ForecastPrepared",
+                "ForecastRegistered",
+                "ForecastRegistrationComplete",
+                "ForecastRegistrationFailed",
+            ][..],
+        ),
+        (
+            "Forecast",
+            &[
+                "Register",
+                "Resolve",
+                "Score",
+                "ScoreBatch",
+                "Void",
+                "ResolveRevision",
+                "OutcomeVerified",
+                "RevisionVerified",
+                "OutcomeFailed",
+            ][..],
+        ),
+    ] {
+        for action in actions {
+            for caller in [
+                &admin,
+                &ctx("human-operator", "human"),
+                &ctx("supervisor", "supervisor"),
+                &SecurityContext::anonymous(),
+            ] {
+                assert!(
+                    !engine.authorize(caller, action, entity, &a).is_allowed(),
+                    "operator must not forge {entity}.{action}"
+                );
+            }
+            // Entity-trigger callbacks must continue to work. World registration
+            // preparation/completion are exclusively WASM-service callbacks.
+            if ![
+                "ForecastPrepared",
+                "ForecastRegistrationComplete",
+                "ForecastRegistrationFailed",
+            ]
+            .contains(action)
+            {
+                assert!(
+                    engine.authorize(&system, action, entity, &a).is_allowed(),
+                    "declared system transition must reach {entity}.{action}"
+                );
+            }
+        }
+    }
+    for (entity, actions) in [
+        ("LearningRun", &["create", "read", "list", "Start"][..]),
+        (
+            "World",
+            &["ConfigureLearning", "OpenReplay", "RegisterForecasts"][..],
+        ),
+        ("Forecast", &["read", "list", "RecordOutcome"][..]),
+    ] {
+        for action in actions {
+            assert!(
+                engine.authorize(&admin, action, entity, &a).is_allowed(),
+                "dashboard operator must retain {entity}.{action}"
+            );
+        }
     }
 }

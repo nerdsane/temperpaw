@@ -370,7 +370,7 @@ permit(
 // Only register_forecasts creates; only evidence resolves and grades.
 permit(
   principal,
-  action in [Action::"create", Action::"Resolve", Action::"Score", Action::"Void"],
+  action in [Action::"create", Action::"Resolve", Action::"Score", Action::"ScoreBatch", Action::"Void"],
   resource is Forecast
 ) when {
   principal.agent_type == "system"
@@ -500,7 +500,7 @@ permit(
 );
 
  // ARN-518: continuous learning and reviewed human outcome entry.
-permit(principal is Admin, action, resource is LearningRun);
+permit(principal is Admin, action in [Action::"create", Action::"read", Action::"list", Action::"Start"], resource is LearningRun);
 permit(principal, action in [Action::"read", Action::"list"], resource is LearningRun);
 permit(principal, action in [Action::"create", Action::"Start"], resource is LearningRun)
 when { ["human","supervisor","system"].contains(principal.agent_type) };
@@ -552,3 +552,34 @@ permit(principal, action == Action::"ForecastRegistered", resource is World)
 when { principal.agent_type == "system" };
 permit(principal == Agent::"service:wasm-runtime",
   action in [Action::"ForecastPrepared", Action::"ForecastRegistrationComplete"], resource is World);
+
+// Learning records and their inputs are produced by declared integrations.
+// Explicit denies also constrain the existing broad dashboard Admin permits.
+forbid(principal,
+  action in [Action::"Prepared", Action::"Trained", Action::"CandidatePassed",
+             Action::"ConfirmAdoption", Action::"Reject", Action::"Fail"],
+  resource is LearningRun)
+unless {
+  (principal has agent_type && principal.agent_type == "system")
+  || principal == Agent::"service:wasm-runtime"
+};
+forbid(principal,
+  action in [Action::"ReplayOpened", Action::"AdoptModel", Action::"ForecastPrepared",
+             Action::"ForecastRegistered", Action::"ForecastRegistrationComplete",
+             Action::"ForecastRegistrationFailed"],
+  resource is World)
+unless {
+  (principal has agent_type && principal.agent_type == "system")
+  || principal == Agent::"service:wasm-runtime"
+};
+forbid(principal,
+  action in [Action::"Register", Action::"Resolve", Action::"Score", Action::"ScoreBatch", Action::"Void",
+             Action::"ResolveRevision", Action::"OutcomeVerified",
+             Action::"RevisionVerified", Action::"OutcomeFailed"],
+  resource is Forecast)
+unless {
+  (principal has agent_type && principal.agent_type == "system")
+  || principal == Agent::"service:wasm-runtime"
+};
+permit(principal == Agent::"service:wasm-runtime",
+  action == Action::"ForecastRegistrationFailed", resource is World);

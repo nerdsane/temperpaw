@@ -109,3 +109,15 @@
 **Chose declared entity triggers because:** They preserve strict initialization, immutable revisions, deterministic retry identities and the one-concern WASM rule without a kernel change. This adds one transient world state and persisted pending-registration fields.
 
 **Where:** os-apps/paw-foresight/specs/world.ioa.toml, specs/forecast.ioa.toml, and wasm/register_forecasts/src/lib.rs.
+
+## D10 — Keep learning callbacks outside operator authority
+
+**Decision**: Restrict learning, model-adoption, forecast-registration and grading callbacks to their declared system and WASM principals, including against existing broad Admin permits.
+
+**Came up because:** The first review and a failing Cedar test proved that a signed-in dashboard admin could submit forged LearningRun.Prepared data. The same broad permits cover World and Forecast, whose callbacks supply the new learner's model and scored examples.
+
+**Options:** Narrow only LearningRun's Admin permit; enforce the boundary across every callback that produces this learner's model or prediction record.
+
+**Chose the complete callback boundary because:** Cedar permits are additive. Explicit denies prevent broader dashboard permissions from bypassing the new integrity contract while retaining create/start, replay, prediction-update and reviewed outcome-entry controls.
+
+**Where:** os-apps/paw-foresight/policies/foresight.cedar; crates/temperpaw/tests/corridor_cedar_matrix.rs.
