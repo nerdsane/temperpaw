@@ -49,6 +49,14 @@ when { principal.agent_type == "system" };
 // publication WASM-gated, peers confirm what authors propose.
 // ============================================================
 
+// Dashboard subscriptions are filtered to the authenticated tenant by the
+// observe endpoint. This grants no generic Entity reads or mutations.
+permit(
+  principal is Admin,
+  action == Action::"read_events",
+  resource is Entity
+);
+
 // --- World ---
 permit(principal is Admin, action, resource is World);
 
@@ -414,7 +422,7 @@ permit(
   ["seed_world", "sample_endpoints", "decompose_endpoint", "spawn_repairers",
    "spawn_adversaries", "aggregate_costs", "evidence_ingest",
    "register_forecasts", "render_artifacts", "consistency_gate",
-   "grade_hindcast", "animate_dwellers", "adjudicate_nodes"].contains(context.module)
+   "grade_hindcast", "animate_dwellers", "adjudicate_nodes", "learning_prepare", "learning_train", "learning_evaluate", "forecast_outcome", "replay_open"].contains(context.module)
 };
 
 permit(
@@ -425,7 +433,7 @@ permit(
   ["seed_world", "sample_endpoints", "decompose_endpoint", "spawn_repairers",
    "spawn_adversaries", "aggregate_costs", "evidence_ingest",
    "register_forecasts", "render_artifacts", "consistency_gate",
-   "grade_hindcast", "animate_dwellers", "adjudicate_nodes"].contains(context.module)
+   "grade_hindcast", "animate_dwellers", "adjudicate_nodes", "learning_prepare", "learning_train", "learning_evaluate", "forecast_outcome", "replay_open"].contains(context.module)
 };
 
 // ── Session relay (v1 trust model) ─────────────────────────────
@@ -477,9 +485,11 @@ permit(
   resource is Artifact
 );
 
+// Corridor sessions create skeleton EventNodes via temper.create in monty.
 permit(
   principal == Agent::"service:wasm-runtime",
-  action in [Action::"Confirm", Action::"UpdateEdges", Action::"AdjudicationVerdict"],
+  action in [Action::"create", Action::"read", Action::"list", Action::"Confirm",
+             Action::"UpdateEdges", Action::"AdjudicationVerdict"],
   resource is EventNode
 );
 
@@ -488,3 +498,57 @@ permit(
   action in [Action::"RecordTraversal", Action::"RecordContradiction"],
   resource is Dweller
 );
+
+ // ARN-518: continuous learning and reviewed human outcome entry.
+permit(principal is Admin, action, resource is LearningRun);
+permit(principal, action in [Action::"read", Action::"list"], resource is LearningRun);
+permit(principal, action in [Action::"create", Action::"Start"], resource is LearningRun)
+when { ["human","supervisor","system"].contains(principal.agent_type) };
+permit(principal, action in [Action::"Prepared",Action::"Trained",Action::"CandidatePassed",Action::"ConfirmAdoption",Action::"Reject",Action::"Fail"], resource is LearningRun)
+when { principal.agent_type == "system" };
+permit(principal, action in [Action::"ConfigureLearning",Action::"OpenReplay",Action::"RegisterForecasts"], resource is World)
+when { ["human","supervisor","system"].contains(principal.agent_type) };
+permit(principal, action in [Action::"ReplayOpened",Action::"AdoptModel"], resource is World)
+when { principal.agent_type == "system" };
+permit(principal, action == Action::"RecordOutcome", resource is Forecast)
+when { ["human","supervisor","system"].contains(principal.agent_type) };
+permit(principal, action in [Action::"ResolveRevision",Action::"OutcomeVerified",Action::"RevisionVerified",Action::"OutcomeFailed"], resource is Forecast)
+when { principal.agent_type == "system" };
+// PATCH and PUT both authorize UPDATE_ACTION = "update" in the OData write handler.
+// The precheck label "patch" is not the Cedar action.
+forbid(principal, action == Action::"update", resource is Forecast);
+forbid(principal, action == Action::"update", resource is LearningRun);
+
+// World model parameters and mode are changed only by declared actions.
+forbid(principal, action == Action::"update", resource is World);
+
+// Immutable history remains available after a world is archived.
+forbid(principal, action == Action::"delete", resource is Forecast);
+forbid(principal, action == Action::"delete", resource is LearningRun);
+forbid(principal, action == Action::"delete", resource is World);
+// A new world begins with the identity model. Learned parameters enter via AdoptModel.
+forbid(principal, action == Action::"create", resource is World)
+when { resource has ModelJson && resource.ModelJson != "" };
+forbid(principal, action == Action::"create", resource is World)
+when { resource has AdoptedLearningRunId && resource.AdoptedLearningRunId != "" };
+
+
+// Action integrations return through the kernel's named WASM service. Entity
+// triggers keep their declared system principal; operator actions are separate.
+permit(principal == Agent::"service:wasm-runtime",
+  action in [Action::"Prepared", Action::"Trained", Action::"CandidatePassed",
+             Action::"Reject", Action::"Fail"],
+  resource is LearningRun);
+permit(principal == Agent::"service:wasm-runtime",
+  action == Action::"ReplayOpened", resource is World);
+permit(principal == Agent::"service:wasm-runtime",
+  action in [Action::"OutcomeVerified", Action::"RevisionVerified", Action::"OutcomeFailed"],
+  resource is Forecast);
+
+// Registration crosses entities through declared system triggers only.
+permit(principal, action == Action::"Register", resource is Forecast)
+when { principal.agent_type == "system" };
+permit(principal, action == Action::"ForecastRegistered", resource is World)
+when { principal.agent_type == "system" };
+permit(principal == Agent::"service:wasm-runtime",
+  action in [Action::"ForecastPrepared", Action::"ForecastRegistrationComplete"], resource is World);

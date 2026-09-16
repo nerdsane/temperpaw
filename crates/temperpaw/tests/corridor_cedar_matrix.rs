@@ -405,3 +405,98 @@ fn legacy_entity_types_are_retired_read_only_except_for_system() {
         );
     }
 }
+
+#[test]
+fn learning_callbacks_accept_only_the_platform_wasm_service() {
+    let engine = engine();
+    let actual_service = temper_server::request_context::AgentContext::for_service("wasm-runtime")
+        .security_ctx
+        .expect("service must carry typed authority");
+    let unrelated_service =
+        temper_server::request_context::AgentContext::for_service("other-service")
+            .security_ctx
+            .expect("service must carry typed authority");
+    let session = ctx("ordinary-session", "agent");
+    let a = attrs(&[("id", serde_json::json!("learning-test"))]);
+    for (entity, actions) in [
+        (
+            "LearningRun",
+            &["Prepared", "Trained", "CandidatePassed", "Reject", "Fail"][..],
+        ),
+        (
+            "World",
+            &[
+                "ReplayOpened",
+                "ForecastPrepared",
+                "ForecastRegistrationComplete",
+            ][..],
+        ),
+        (
+            "Forecast",
+            &["OutcomeVerified", "RevisionVerified", "OutcomeFailed"][..],
+        ),
+    ] {
+        for action in actions {
+            assert!(
+                engine
+                    .authorize(&actual_service, action, entity, &a)
+                    .is_allowed(),
+                "actual WASM callback must reach {entity}.{action}"
+            );
+            for denied in [&session, &unrelated_service] {
+                assert!(
+                    !engine.authorize(denied, action, entity, &a).is_allowed(),
+                    "unrelated caller must not reach {entity}.{action}"
+                );
+            }
+        }
+    }
+    for (entity, action) in [("World", "OpenReplay"), ("Forecast", "RecordOutcome")] {
+        assert!(
+            !engine
+                .authorize(&actual_service, action, entity, &a)
+                .is_allowed(),
+            "callback permit must not grant operator action {entity}.{action}"
+        );
+    }
+}
+
+#[test]
+fn dashboard_admin_can_subscribe_to_tenant_events() {
+    let engine = engine();
+    let admin = SecurityContext::from_verified_jwt(
+        "dashboard-owner",
+        temper_authz::PrincipalKind::Admin,
+        None,
+        None,
+        None,
+        None,
+    );
+    let attributes = HashMap::new();
+    assert!(
+        engine
+            .authorize(&admin, "read_events", "Entity", &attributes)
+            .is_allowed(),
+        "authenticated dashboard admin must receive tenant-scoped live updates"
+    );
+    for action in ["create", "update", "delete", "read"] {
+        assert!(
+            !engine
+                .authorize(&admin, action, "Entity", &attributes)
+                .is_allowed(),
+            "event subscription must not grant generic Entity action {action}"
+        );
+    }
+    for caller in [
+        SecurityContext::anonymous(),
+        ctx("ordinary-session", "agent"),
+        ctx("human-agent", "human"),
+    ] {
+        assert!(
+            !engine
+                .authorize(&caller, "read_events", "Entity", &attributes)
+                .is_allowed(),
+            "non-admin caller must not gain the dashboard event subscription"
+        );
+    }
+}

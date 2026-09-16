@@ -163,7 +163,10 @@ fn repair_cost(cost_flags: &Value, challenge_flags: &Value) -> f64 {
 
 /// The most expensive single flag in a set — the revision trigger signal.
 fn max_flag_points(flags: &Value) -> f64 {
-    parse_flags(flags).iter().map(flag_points).fold(0.0, f64::max)
+    parse_flags(flags)
+        .iter()
+        .map(flag_points)
+        .fold(0.0, f64::max)
 }
 
 /// Human-readable brief of the expensive objections a revision (or an
@@ -865,7 +868,12 @@ fn world_cascade_self_heal(ctx: &Context, fields: &Value) -> Result<(), String> 
     let world_id = ctx.entity_id.clone();
     let api = api_url(ctx);
     let headers = system_headers(ctx);
-    world_cascade(ctx, &api, &headers, &world_id, "", None)
+    world_cascade(ctx, &api, &headers, &world_id, "", None)?;
+    // No-op paths inside world_cascade (claims still Bridging, canonical already
+    // set, etc.) must still report success: the host treats an empty WASM result
+    // as failure and ResumeWorldCascade has on_failure = Fail.
+    set_success_result("", &json!({}));
+    Ok(())
 }
 
 /// Endpoint.ResumeEndpointScoring (UnderRepair state_timeout): every claim on
@@ -904,7 +912,9 @@ fn endpoint_scoring_self_heal(ctx: &Context, _fields: &Value) -> Result<(), Stri
                 return Ok(());
             }
             "Settled" => {
-                let cost = row_str(c, "BestRouteCost").parse::<f64>().unwrap_or(f64::MAX);
+                let cost = row_str(c, "BestRouteCost")
+                    .parse::<f64>()
+                    .unwrap_or(f64::MAX);
                 settled_costs.push(cost);
             }
             "Unreachable" => unreachable_count += 1,
@@ -938,9 +948,7 @@ fn endpoint_scoring_self_heal(ctx: &Context, _fields: &Value) -> Result<(), Stri
     );
     ctx.log(
         "info",
-        &format!(
-            "aggregate_costs: endpoint {endpoint_id} self-heal scored at weight {weight:.4}"
-        ),
+        &format!("aggregate_costs: endpoint {endpoint_id} self-heal scored at weight {weight:.4}"),
     );
     set_success_result("", &json!({}));
     Ok(())

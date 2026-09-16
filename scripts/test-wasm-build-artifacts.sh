@@ -102,6 +102,19 @@ for mode in default absolute relative missing fail; do
                 fi
             done < "$TEST_ARTIFACT_LOG"
             test -s "$TEST_ARTIFACT_LOG"
+            if [[ "$builder" == "$TMP/repo/os-apps/paw-foresight/wasm/build.sh" ]]; then
+                python3 - "$ROOT/os-apps/paw-foresight/app.toml" "$TMP/repo/os-apps/paw-foresight/wasm" <<'PY_MANIFEST'
+from pathlib import Path
+import sys, tomllib
+
+manifest = tomllib.loads(Path(sys.argv[1]).read_text())
+modules = [item["name"] for item in manifest["wasm_modules"]]
+assert modules, "Foresight must declare its runtime modules"
+missing = [name for name in modules if not (Path(sys.argv[2]) / name / (name + ".wasm")).is_file()]
+if missing:
+    raise SystemExit("FAIL: Foresight builder omitted declared modules: " + ", ".join(missing))
+PY_MANIFEST
+            fi
         fi
     done
     echo "PASS: $mode (${#builders[@]} builders)"

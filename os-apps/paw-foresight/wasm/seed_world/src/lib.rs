@@ -1,9 +1,9 @@
 //! seed_world — spawns the skeleton builders for a world (ADR-002).
 //!
 //! On World.Seed: spawn a surveyor session (determined facts only — the
-//! skeleton) and a bookmaker session (market-priced marginals — enrichment
-//! that must never block the world). The surveyor self-reports
-//! World.SeedComplete; the bookmaker just adds EventNodes while it can.
+//! skeleton). The surveyor self-reports World.SeedComplete. Bookmaker
+//! (market-priced marginals) is disabled — it wasted eval time searching
+//! prediction markets the user did not ask for.
 //!
 //! Hindcast worlds (hindcast_mode = "true") get web tools stripped at
 //! Configure time: evidence comes only from the frozen corpus.
@@ -94,8 +94,7 @@ fn surveyor_prompt(
          Never state anything dated after the world's vantage."
             .to_string()
     } else {
-        "Use temper.web_search / temper.web_fetch to verify what is already determined."
-            .to_string()
+        "Use temper.web_search / temper.web_fetch to verify what is already determined.".to_string()
     };
     format!(
         "You are the Surveyor for world {world_id} (\"{name}\", domain: {domain}).\n\
@@ -107,6 +106,17 @@ fn surveyor_prompt(
          contract cliffs), regulations already enacted with future effect. If a claim \
          needs a probability, it is not yours to record.\n\n\
          {corpus_line}\n{research_line}\n\n\
+         EXECUTION RULES (Monty REPL — you only have the execute tool; each call is one Python \
+         script that runs to completion before the next turn):\n\
+         - NEVER put the whole job in one execute() call. A monolithic script on turn 1 is a \
+         known failure mode: the session can mark complete without running it.\n\
+         - Use MANY SMALL execute() calls across turns. Each script should do ONE step only: \
+         create 1-2 EventNodes, OR temper.list to verify, OR temper.write the skeleton, OR \
+         temper.action SeedComplete, OR temper.done — never combine these in one script.\n\
+         - After every create batch, run a separate execute() that only calls \
+         temper.list(\"EventNodes\", \"world_id eq '{world_id}'\") and prints the count.\n\
+         - Only call temper.done(\"complete\") in its own final execute(), after SeedComplete \
+         returns successfully.\n\n\
          For each determined fact, create an EventNode:\n\
          temper.create(\"EventNodes\", {{\"world_id\": \"{world_id}\", \"statement\": \"...\", \
          \"layer\": \"slow|mid\", \"probability\": \"1.0\", \"provenance\": \"determined\", \
@@ -119,12 +129,13 @@ fn surveyor_prompt(
          CONSENSUS POLE (what most informed observers currently expect). These are the \
          dimensions the engine will sample diverse futures across, so make them orthogonal \
          and genuinely contested — not restatements of one another.\n\n\
-         Then write a one-page skeleton summary with temper.write (markdown), and finish by \
-         self-reporting (uncertainty_axes is a JSON array of {{\"axis\": \"...\", \"consensus_pole\": \"...\"}}):\n\
-         temper.action(\"Worlds\", \"{world_id}\", \"SeedComplete\", \
-         {{\"skeleton_node_count\": \"<n>\", \"graph_snapshot_file_id\": \"<file-id-from-temper.write>\", \
-         \"uncertainty_axes\": \"[{{\\\"axis\\\": \\\"...\\\", \\\"consensus_pole\\\": \\\"...\\\"}}, ...]\"}})\n\
-         Then call temper.done(\"complete\")."
+         Then temper.write(\"/skeleton.md\", \"<markdown summary>\") — the ONLY way to create \
+         a file. Do NOT create Files, Directories, or Workspaces yourself.\n\
+         temper.write returns {{\"file_id\": \"...\"}}. In a separate execute(), call \
+         temper.action(\"Worlds\", \"{world_id}\", \"SeedComplete\", {{\"skeleton_node_count\": \
+         \"<n>\", \"graph_snapshot_file_id\": \"<file_id>\", \"uncertainty_axes\": \
+         \"[{{\\\"axis\\\": \\\"...\\\", \\\"consensus_pole\\\": \\\"...\\\"}}, ...]\"}}).\n\
+         Then temper.done(\"complete\") in its own execute()."
     )
 }
 
@@ -374,32 +385,10 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             &workspace_id,
         )?;
 
-        // Bookmaker is enrichment: a spawn failure is logged, never fatal.
-        let bookmaker_msg = bookmaker_prompt(
-            &world_id,
-            "{AGENT_ID}",
-            &get("domain"),
-            &get("target_date"),
-            &corpus_inline,
-            hindcast,
+        ctx.log(
+            "info",
+            "seed_world: done (surveyor will report SeedComplete; bookmaker disabled)",
         );
-        if let Err(e) = spawn_session(
-            &ctx,
-            &api,
-            &headers,
-            &format!("Bookmaker-{world_id}"),
-            "bookmaker",
-            &model,
-            &provider,
-            &tools,
-            "30",
-            &bookmaker_msg,
-            &workspace_id,
-        ) {
-            ctx.log("warn", &format!("seed_world: bookmaker spawn failed: {e}"));
-        }
-
-        ctx.log("info", "seed_world: done (surveyor will report SeedComplete)");
         // A successful run with nothing to dispatch must still set a
         // result: the host treats an empty result as failure.
         set_success_result("", &json!({}));
@@ -456,6 +445,52 @@ mod tests {
         assert!(
             !p.contains("temper.read("),
             "surveyor prompt must not ask the session to read the corpus"
+        );
+        assert!(
+            p.contains("NEVER put the whole job in one execute()"),
+            "surveyor prompt must forbid monolithic execute() scripts"
+        );
+        assert!(
+            p.contains("MANY SMALL execute()"),
+            "surveyor prompt must require incremental execute() calls"
+        );
+    }
+
+    #[test]
+    fn surveyor_prompt_gives_explicit_file_write_recipe() {
+        // Same class of bug as the adversary wedge: an under-specified file-write
+        // instruction lets a session reverse-engineer file creation through
+        // temper.action against Directories, trip a Cedar gate, and loop in
+        // WaitingForApproval. The prompt must show the exact temper.write call,
+        // name the file_id return field, forbid improvising file/dir creation,
+        // and never leave the bare placeholder behind. (The surveyor DOES create
+        // EventNodes via temper.create — the prohibition is scoped to
+        // Files/Directories/Workspaces only.)
+        let p = surveyor_prompt(
+            "w-1",
+            "a-1",
+            "Test",
+            "ai coding tools",
+            "desc",
+            "2026-12-11",
+            "corpus",
+            false,
+        );
+        assert!(
+            p.contains("temper.write(\"/skeleton.md\""),
+            "surveyor prompt must show the literal temper.write call"
+        );
+        assert!(
+            p.contains("\"file_id\""),
+            "surveyor prompt must name the file_id return field"
+        );
+        assert!(
+            p.contains("Do NOT") && p.contains("Directories"),
+            "surveyor prompt must forbid improvising Directories file creation"
+        );
+        assert!(
+            !p.contains("<file-id-from-temper.write>"),
+            "the bare placeholder must be gone — the recipe captures result[\"file_id\"]"
         );
     }
 
