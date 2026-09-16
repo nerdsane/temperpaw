@@ -2,7 +2,7 @@
 
 ## Use the existing TemperPaw dashboard
 
-**Decision:** Add Foresight to the authenticated TemperPaw dashboard.
+**Decision**: Add Foresight to the authenticated TemperPaw dashboard.
 
 **Came up because:** The user asked for a working interface as soon as possible, and the historical Temper-based Deep Sci-Fi frontend is in a closed, unmerged 117-file rewrite.
 
@@ -14,7 +14,7 @@
 
 ## Use an isolated worktree on the functioning governed computer
 
-**Decision:** Work in a dedicated git worktree on Computers('arni-big') while its requested copy remains unresolved.
+**Decision**: Work in a dedicated git worktree on Computers('arni-big') while its requested copy remains unresolved.
 
 **Came up because:** Computer.Copy created 01a0a7c4-ad8d-7e20-b5d9-54b05ab62f08 in CopyUnknown, and reconciliation returned HTTP 404, while governed Exec on arni-big succeeded.
 
@@ -26,7 +26,7 @@
 
 ## 3. Fit a bounded probability calibrator
 
-**Decision:** Fit logistic calibration as the first trainable predictive component while retaining the scenario engine.
+**Decision**: Fit logistic calibration as the first trainable predictive component while retaining the scenario engine.
 
 **Came up because:** The user prioritized a complete, observable learning loop quickly.
 
@@ -38,7 +38,7 @@
 
 ## 4. Let the authenticated server select the tenant
 
-**Decision:** Remove the dashboard's hardcoded default-tenant header.
+**Decision**: Remove the dashboard's hardcoded default-tenant header.
 
 **Came up because:** Dedicated Foresight runs in tenant deep-sci-fi; authentication already injects its configured tenant.
 
@@ -50,7 +50,7 @@
 
 ## 5. Preserve Genesis changes during publication
 
-**Decision:** Reconcile existing Genesis fixes before applying the learner delta.
+**Decision**: Reconcile existing Genesis fixes before applying the learner delta.
 
 **Came up because:** Genesis commit 7c5b6e750b215d64e3d3178e7c9eb4abefaf1909 contains scenario, prompt, timeout and policy fixes absent from the GitHub mirror.
 
@@ -62,7 +62,7 @@
 
 ## 6. Reuse the published runtime with identical server source
 
-**Decision:** Run the new app and UI against the verified published f1b3f892ce652f1355daeabe68ae49cd3de3fa85 runtime for local proof.
+**Decision**: Diagnose the app and UI integration against the verified published f1b3f892ce652f1355daeabe68ae49cd3de3fa85 runtime before rebuilding the required session adapter.
 
 **Came up because:** A fresh native build consumed the computer's remaining disk capacity.
 
@@ -75,7 +75,7 @@
 
 ## 7. Authenticate browser requests through the supported inner API contract
 
-**Decision:** Translate a verified dashboard session into the server's existing single-use credential scoped to its identity, tenant, method and URI.
+**Decision**: Translate a verified dashboard session into the server's existing single-use credential scoped to its identity, tenant, method and URI.
 
 **Came up because:** A real signed-in browser passed /auth/me but received an empty401 from the inner platform bearer middleware. That middleware does not accept the outer dashboard's typed context by itself.
 
@@ -84,3 +84,16 @@
 **Chose the existing credential mechanism because:** It retains both authentication layers and the user's permissions while fixing the necessary TemperPaw integration. Untrusted headers cannot mint a credential.
 
 **Where:** crates/temperpaw/src/auth.rs and crates/temperpaw/src/startup.rs; composed-router regression test and live browser acceptance flow.
+
+
+## 8. Continue on the approved replacement computer
+
+**Decision**: Restore the integration branch on an isolated copy of arni-big-2.
+
+**Came up because:** arni-big stopped accepting Exec calls during the native build, and its documented Wake action returned HTTP404 Sandbox not found. The user explicitly approved the replacement computer.
+
+**Options:** Wait for the missing sandbox; move to the laptop; use an isolated copy of another governed computer.
+
+**Chose the governed copy because:** It preserves the prescribed execution layer and has enough disk capacity for a fresh build. Interrupted tests and scratch artifacts are recreated and rerun rather than treated as completed evidence.
+
+**Where:** Computer 01a0a805-fcd7-7252-94fa-8100d049e845; integration worktree /home/tl-user/worktrees/arn-518-foresight.
