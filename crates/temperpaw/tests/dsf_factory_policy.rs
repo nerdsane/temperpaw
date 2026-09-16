@@ -43,6 +43,28 @@ fn resident_agents_can_raise_questions_but_cannot_answer_them() {
         SecurityContext::anonymous().with_agent_context(Some("spoof"), None, Some("dsf-factory"));
     assert!(!allowed(&engine, &spoof, "Ask", "create"));
 }
+
+#[test]
+fn verified_operator_can_answer_asks_without_other_factory_powers() {
+    let text = fs::read_to_string(app().join("../paw-patrol/policies/patrol.cedar")).unwrap();
+    let resident = fs::read_to_string(app().join("policies/resident_asks.cedar")).unwrap();
+    let engine = AuthzEngine::new(&format!("{text}\n{resident}")).unwrap();
+    let operator = SecurityContext::from_resolved_identity("operator", "operator", None);
+    assert!(allowed(&engine, &operator, "Ask", "Answer"));
+    for (entity, action) in [
+        ("Ask", "create"), ("Ask", "RaiseBlocking"), ("Ask", "Withdraw"),
+        ("Ask", "update"), ("Ask", "delete"), ("Effort", "ConfirmMerge"),
+    ] {
+        assert!(!allowed(&engine, &operator, entity, action), "{entity}.{action}");
+    }
+    for ctx in [
+        SecurityContext::anonymous(),
+        SecurityContext::anonymous().with_agent_context(Some("operator"), None, Some("operator")),
+        SecurityContext::from_resolved_identity("factory", "dsf-factory", None),
+    ] {
+        assert!(!allowed(&engine, &ctx, "Ask", "Answer"));
+    }
+}
 #[test]
 fn registered_members_can_request_every_declared_command_but_not_forge_callbacks() {
     let engine = policy("");
