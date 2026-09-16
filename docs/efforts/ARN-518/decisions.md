@@ -420,3 +420,16 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose validation before side effects because:** It preserves prior route IDs during background exploration and prevents invalid input from leaving unattached workers. Blank initial state is legitimate; malformed existing state must remain an explicit failure. The already failed claims are final by their declared contract. Their scored paths remain preserved as evidence, and verification uses a new normal run instead of adding a test-only resurrection action or patching database state. The dashboard also includes failed claims in its existing failure list so this stage cannot appear healthy while attachment has failed.
 
 **Where:** `os-apps/paw-foresight/wasm/spawn_repairers/src/lib.rs`; actual-WASM regression; `dashboard/src/lib/foresight.ts` and `dashboard/src/routes/foresight/+page.svelte`; PR #526.
+
+
+## D35 — Package the tested app and UI over the matching immutable server image
+
+**Decision:** Build a delivery image from the existing immutable `681969c` server image and overlay the exact tested app closure and dashboard, subject to native-input equivalence and resulting-image verification.
+
+**Came up because:** The live preview uses a development binary with the required kernel callback fix, while the dedicated production image predates it. A successful existing Linux release build at `681969c` already contains that native source. Rebuilding the whole server and every unrelated WASM would add avoidable delivery time.
+
+**Options:** Deploy the older production server; rebuild all native and WASM components; or retain the matching immutable release server and package only the verified app and UI files.
+
+**Chose the immutable base because:** It preserves the compiled server and unrelated packaged applications while allowing the final app closure and UI to be checked byte for byte. The base is `ghcr.io/nerdsane/temperpaw@sha256:5846ef5906e86bb260f411af30c165abdbb8aa243b958886622585a4f328f831`, with OCI revision `681969cc909ea9cfcb82a90d3d64f9eb91c2a775`. This is a packaging choice, not a verification exemption: native build inputs must match, the resulting image must run before deployment, and production must report the pinned application versions. The latest fetched GitHub main is `07cbb1d`, an ancestor of this branch. No shared CI or deployment workflow is changed.
+
+**Where:** The bounded release recipe and receipts under `/private/tmp/arn518-genesis-final-02944f0/`; the final tested 360-file Genesis closure and 73-file dashboard build. Publication and production activation remain separate steps after verification and review.
