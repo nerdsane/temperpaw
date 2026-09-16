@@ -97,3 +97,15 @@
 **Chose the governed copy because:** It preserves the prescribed execution layer and has enough disk capacity for a fresh build. Interrupted tests and scratch artifacts are recreated and rerun rather than treated as completed evidence.
 
 **Where:** Computer 01a0a805-fcd7-7252-94fa-8100d049e845; integration worktree /home/tl-user/worktrees/arn-518-foresight.
+
+## D9 — Initialize forecasts through declared transitions
+
+**Decision**: Register forecasts through a declared one-at-a-time World → Forecast → World transition loop.
+
+**Came up because:** The first authenticated browser registration returned HTTP400 StrictActionContract; strict entities accept only identity during creation.
+
+**Options:** Disable strictness; dispatch Register inside WASM; add kernel initializer support; use existing entity triggers.
+
+**Chose declared entity triggers because:** They preserve strict initialization, immutable revisions, deterministic retry identities and the one-concern WASM rule without a kernel change. This adds one transient world state and persisted pending-registration fields.
+
+**Where:** os-apps/paw-foresight/specs/world.ioa.toml, specs/forecast.ioa.toml, and wasm/register_forecasts/src/lib.rs.
