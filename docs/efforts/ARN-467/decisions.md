@@ -488,3 +488,15 @@ Successful collection also carries an empty declared error_message, so a recover
 **Verification:** The cascade fails on the pre-change file (`L1 FAILED: 25 states explored, 6 dead transition(s)`) and passes on this one (`L1 PASSED: 33 states explored`); the whole spec directory goes from `Error: IOA verification failed for entity 'Experiment'` to `IOA verification cascade: ALL PASSED` for all twelve entities. Each new check was run against a mutation first: removing `Select`'s increment, deleting `SelectionSucceeded`'s `param_equals_field` constraint, and pointing `sequence_field()` back at `operation_sequence` each fail the corresponding test. The composite cross-entity stage reports 236 dropped reactions and a PARTIAL `DsfExperiment` scope, both of which reproduce on `origin/main` with this spec removed or replaced by a counter-free variant — they were simply unreachable while the cascade aborted at Experiment.
 
 **Where:** os-apps/dsf-twin/specs/experiment.ioa.toml (`selection_sequence`, `Select`, the three selection constraints); os-apps/dsf-twin/specs/model.csdl.xml (regenerated, one property); os-apps/dsf-twin/wasm/dsf_experiment_common/src/lib.rs (`Phase::sequence_field`, `Invocation::parse`, `execute`), src/guest.rs, src/tests.rs; crates/temperpaw/tests/dsf_experiment_runtime.rs (`a_retried_selection_refuses_the_previous_attempt_s_result`); crates/temperpaw/tests/dsf_factory_contract.rs (selection and cleanup sequence numbers); temper rev 2c6b9460 `crates/temper-verify/src/{cascade.rs,checker.rs,model/builder.rs,model/types.rs}`.
+
+## D40: Keep application and participant observations recurring through the model state machine
+
+**Decision:** DsfModelSync schedules a due check every minute from Idle and Ready. Its existing collector skips provider reads until the recorded next_due_at, while an explicit Refresh still collects immediately. Pause disables scheduling, and failures retain the existing bounded retry path.
+
+**Came up because:** Rita clarified that agents must operate through and maintain the application, infrastructure and user layers. Infrastructure already schedules observations, but successful model collection enters Ready indefinitely; the investigation worker consumes existing observations without scheduling new ones.
+
+**Options:** Add an external polling loop; ignore each source's interval and collect at a fixed cadence; or use declared state timeouts and a sequence-fenced deferred callback in the existing collector.
+
+**Chose declared timeouts because:** Scheduling stays in the executable contract, source intervals remain meaningful, and a due check performs no external reads when the recorded deadline is in the future. Manual refresh remains available. The tradeoff is up to one minute of scheduling delay after a source becomes due. This is a candidate delta against GitHub source; publication still requires comparison with canonical Genesis source and verified installed pins.
+
+**Where:** os-apps/dsf-twin/specs/model_sync.base.toml, generated IOA/CSDL and policies, dsf_model_collect, and dsf_factory_contract tests.
