@@ -157,3 +157,15 @@
 **Chose the existing setup contract because:** It gives the UI a real configured pair without exposing credentials or duplicating model configuration. Settings must remain reachable before initial setup is complete; authentication still applies. Replay remains available independently of provider setup.
 
 **Where:** dashboard/src/routes/foresight/+page.svelte and dashboard setup routing.
+
+## D14 — Package the required file-storage module
+
+**Decision**: Use one aggregate paw-fs WASM build entry in Docker and CI so all existing child module builders run.
+
+**Came up because:** The immutable release image for d758711 failed its isolated fresh startup: paw-fs declares artifact_batch_apply as app-required, but Docker builds only blob_adapter and workspace_fs. The missing artifact predates this effort, but prevents the complete release image from booting for this app's required verification.
+
+**Options:** Add another per-module entry to both callers; give paw-fs one aggregate build entry like the other apps; trim the core app or copy a module into the extracted image.
+
+**Chose the aggregate entry because:** It removes the duplicated per-module selection that caused the omission, reuses the existing builders, and keeps the tested image intact. The change is limited to packaging and its existing regression coverage; file-storage behavior and the platform are unchanged.
+
+**Where:** Dockerfile; .github/workflows/ci.yml; os-apps/paw-fs/wasm/build.sh; existing WASM packaging tests. Failed immutable image sha256:d221367b10339a427e2be4c7fe9aac73a285a8728313a243adcc5792ed85b2cb; raw evidence /tmp/arn518-image-verification/image-verification-d758711.json.
