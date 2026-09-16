@@ -217,3 +217,16 @@
 **Chose separate bounds because:** The existing inline limit of eight still stops recursion, while a finite 512-hop internal context-lineage budget allows ordinary research to progress. Detaching resets only inline depth. The kernel change preserves authentication, principal propagation, reaction limits and application turn and spending bounds. It does not claim aggregate fanout accounting or persistence of this budget across restarts.
 
 **Where:** nerdsane/temper PR #473 and docs/efforts/ARN-518 in that repository; the two Temper dependency manifests and Cargo.lock in this PR. Delivery requires the reviewed kernel revision, a rebuilt app, and a successful real-provider preview before release.
+
+
+## D19 — Preserve the published agent package across divergent Git source
+
+**Decision:** Base the agent release package on published paw-agent b72f5d6e9b9c6e00c4b887f0dd0892b767be45dd, preserving its source and WASM bytes except the required SessionEntry permission and an exact paw-fs dependency pin.
+
+**Came up because:** Genesis Git main c2e99e5e5bae0dbfc667fee929100cef32ecebc6 differs from the published dependency package. The published package preserves streamed tool calls at response completion and contains compaction, tool-completion and sandbox-cleanup behavior absent from Git main. Git main separately contains OpenRouter work, so branch names do not establish chronology or compatibility.
+
+**Options:** Publish the Git main candidate; combine the divergent implementations; preserve the currently published package with the two release-required changes.
+
+**Chose the published package because:** Genesis publication is the installed application contract. A wholesale source replacement would regress working provider behavior; merging independent provider changes is outside this delivery. Publication must retain the divergent Git main and use a separate source branch if supported. The old production manifests also float dependencies, so rollback preparation must pin the complete captured package closure rather than assume that reinstalling old root refs restores old dependencies.
+
+**Where:** Genesis paw-agent release preparation for ARN-518; dedicated Foresight installed metadata captured in tenant_installed_apps; app PR526 and kernel PR473. Candidate packages remain unpublished until their exact bytes pass isolated verification.
