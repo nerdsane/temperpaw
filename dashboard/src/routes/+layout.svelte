@@ -1,5 +1,6 @@
 <script lang="ts">
   import '../app.css';
+  import { requiresAgentSetup } from '$lib/setup-routing';
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { base } from '$app/paths';
@@ -67,9 +68,7 @@
           try {
             const setupStatus = await fetchSetupStatus();
             if (
-              !setupStatus.has_anthropic_key
-              || !setupStatus.has_agents
-              || !setupStatus.has_personalized_soul
+              requiresAgentSetup(relativePath($page.url.pathname), setupStatus)
             ) {
               await goto(appHref('/welcome'));
               return;
