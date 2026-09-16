@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/foresight.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld, utcTime } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 test('unknown and malformed probabilities never look like zero certainty', () => {
   for (const value of [null, undefined, '', '  ', 'NaN', 'Infinity', -0.1, 1.01]) assert.equal(probability(value), null);
@@ -60,4 +60,11 @@ test('simulation loader supplies dated inputs, never fitted models or evaluation
     assert.ok(value.source_refs.every(ref => ref.startsWith('fixture:')));
     for (const key of ['model_json','report_json','candidate_brier','slope','intercept']) assert.equal(key in value,false);
   }
+});
+
+test('action timestamps are fixed UTC seconds accepted by the backend', () => {
+  assert.equal(utcTime('2025-03-01T12:34'), '2025-03-01T12:34:00Z');
+  assert.equal(utcTime('2025-03-01T12:34:56.789Z'), '2025-03-01T12:34:56Z');
+  assert.equal(utcTime('2025-03-01'), '2025-03-01T00:00:00Z');
+  assert.throws(() => utcTime('not a date'), /valid UTC/);
 });
