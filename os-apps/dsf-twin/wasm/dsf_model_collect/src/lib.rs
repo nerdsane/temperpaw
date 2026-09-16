@@ -346,6 +346,21 @@ pub fn collect(
         return Err("invalid host time".into());
     }
     let sequence = counter(fields, "sync_sequence")?;
+    if field(fields, "scheduled_refresh") == Some(&Value::Bool(true))
+        && let Some(due) = field(fields, "next_due_at")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+    {
+        let due = DateTime::parse_from_rfc3339(due)
+            .map_err(|_| "invalid next_due_at")?
+            .timestamp_millis();
+        if now_ms < due {
+            return Ok(Callback {
+                action: "CollectionDeferred",
+                params: json!({"expected_sequence": sequence}),
+            });
+        }
+    }
     let config = read_binding(host, base, tenant, fields)?;
     let mut request = provider_request(&config, now_ms)?;
     if matches!(config.source, Source::OperationalSnapshot { .. })

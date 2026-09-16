@@ -316,3 +316,41 @@ async fn packaged_validation_refuses_unbound_discovery_before_any_provider_or_pr
             .contains("verification requires a Railway application resource")
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn packaged_model_collector_defers_only_scheduled_future_reads() {
+    let module = "dsf_model_collect";
+    let engine = WasmEngine::new().unwrap();
+    let hash = engine.compile_and_cache(&bytes(module)).unwrap();
+    for scheduled in [true, false] {
+        let ctx = context(
+            "DsfModelSync",
+            module,
+            json!({"fields":{
+                "sync_sequence":7, "scheduled_refresh":scheduled,
+                "next_due_at":"2099-01-01T00:00:00Z"
+            }}),
+        );
+        let result = engine
+            .invoke(
+                &hash,
+                &ctx,
+                Arc::new(SimWasmHost::new().with_default_response(403, "not accessible")),
+                &WasmResourceLimits::default(),
+                Arc::new(RwLock::new(StreamRegistry::default())),
+            )
+            .await
+            .unwrap();
+        assert!(result.success, "{result:?}");
+        assert_eq!(
+            result.callback_action,
+            if scheduled {
+                "CollectionDeferred"
+            } else {
+                "CollectionFailed"
+            }
+        );
+        assert_eq!(result.callback_params["expected_sequence"], 7);
+        assert!(result.callback_params.get("observation_id").is_none());
+    }
+}

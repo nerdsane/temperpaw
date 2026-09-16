@@ -368,3 +368,73 @@ fn snapshot_rejects_invalid_revision_cursor_or_page_limits() {
         assert!(parse_source(&cfg, &row, 1_000_000).is_err());
     }
 }
+
+#[test]
+fn scheduled_collection_waits_without_reading_sources_or_creating_observations() {
+    let mut host = FakeHost::new(vec![]);
+    let fields =
+        json!({"sync_sequence":2,"scheduled_refresh":true,"next_due_at":"1970-01-01T00:20:00Z"});
+    let result = collect(
+        &mut host,
+        "https://temper.invalid",
+        "default",
+        "sync-1",
+        &fields,
+        1_000_000,
+    )
+    .unwrap();
+    assert_eq!(result.action, "CollectionDeferred");
+    assert_eq!(result.params, json!({"expected_sequence":2}));
+    assert!(host.requests.is_empty());
+}
+
+#[test]
+fn manual_due_and_first_collections_read_the_provider() {
+    for (scheduled, due) in [
+        (false, Some("1970-01-01T00:20:00Z")),
+        (true, Some("1970-01-01T00:10:00Z")),
+        (true, Some("1970-01-01T00:16:40Z")),
+        (true, None),
+    ] {
+        let mut fields = sync();
+        fields["scheduled_refresh"] = json!(scheduled);
+        if let Some(due) = due {
+            fields["next_due_at"] = json!(due);
+        }
+        let mut host = FakeHost::new(vec![
+            config_json(dd(), "api"),
+            json!({"status":"Active"}),
+            json!({"status":"ok","series":[]}),
+        ]);
+        let result = collect(
+            &mut host,
+            "https://temper.invalid",
+            "default",
+            "sync-1",
+            &fields,
+            1_000_000,
+        )
+        .unwrap();
+        assert_eq!(result.action, "CollectionAbsent");
+        assert_eq!(host.requests.len(), 3);
+        assert_eq!(result.params["next_due_at"], "1970-01-01T00:21:40.000Z");
+    }
+}
+
+#[test]
+fn malformed_due_time_fails_without_reading_a_provider() {
+    let mut host = FakeHost::new(vec![]);
+    let fields = json!({"sync_sequence":2,"scheduled_refresh":true,"next_due_at":"not-a-time"});
+    assert!(
+        collect(
+            &mut host,
+            "https://temper.invalid",
+            "default",
+            "sync-1",
+            &fields,
+            1_000_000
+        )
+        .is_err()
+    );
+    assert!(host.requests.is_empty());
+}

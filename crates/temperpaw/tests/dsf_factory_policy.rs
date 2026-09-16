@@ -327,3 +327,24 @@ fn actual_wasm_authorization_adapter_uses_method_context_and_secret_id() {
         WasmAuthzDecision::Deny(_)
     ));
 }
+
+#[test]
+fn model_due_checks_and_deferred_callbacks_are_runtime_only() {
+    let engine = policy("permit(principal, action, resource);");
+    let agent = SecurityContext::from_resolved_identity("factory", "dsf-factory", None);
+    for action in ["RefreshIfDue", "CollectionDeferred"] {
+        assert!(!allowed(&engine, &agent, "DsfModelSync", action));
+        assert!(allowed(
+            &engine,
+            &service("wasm-runtime"),
+            "DsfModelSync",
+            action
+        ));
+        assert!(allowed(
+            &engine,
+            &service("timeout-scheduler"),
+            "DsfModelSync",
+            action
+        ));
+    }
+}

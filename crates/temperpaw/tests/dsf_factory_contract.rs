@@ -1163,3 +1163,113 @@ fn only_current_verified_operation_can_satisfy_the_effort() {
     assert_eq!(acknowledged["fields"]["deploy_verified"], false);
     assert_eq!(acknowledged["fields"]["verified_revision"], "revision-1");
 }
+
+#[test]
+fn model_sync_schedules_due_checks_and_fences_deferred_results() {
+    let ioa = temper_spec::automaton::parse_automaton(&source("model_sync")).unwrap();
+    for state in ["Idle", "Ready"] {
+        assert!(ioa.state_timeouts.iter().any(|timer| timer.state == state
+            && timer.on_timeout == "RefreshIfDue"
+            && timer.after_seconds == 60));
+    }
+    assert!(
+        !ioa.state_timeouts
+            .iter()
+            .any(|timer| timer.state == "Paused")
+    );
+    let mut sim = simulator("model_sync", "DsfModelSync", 467);
+    step(
+        &mut sim,
+        "Configure",
+        json!({"subject_type":"DsfFlow", "source_kind":"github", "source_id":"repo", "resource_id":"flow-1", "source_config_ref":"file-1", "computer_id":"computer-1"}),
+    );
+    for sequence in 1..=3 {
+        let row = step(&mut sim, "RefreshIfDue", json!({}));
+        assert_eq!(row["fields"]["scheduled_refresh"], true);
+        assert!(
+            sim.step(
+                "subject",
+                "CollectionDeferred",
+                &json!({"expected_sequence":sequence-1}).to_string()
+            )
+            .is_err()
+        );
+        step(
+            &mut sim,
+            "CollectionDeferred",
+            json!({"expected_sequence":sequence}),
+        );
+        sim.assert_status("subject", "Ready");
+    }
+    step(&mut sim, "Pause", json!({}));
+    assert!(sim.step("subject", "RefreshIfDue", "{}").is_err());
+    step(&mut sim, "Resume", json!({}));
+    let row = step(&mut sim, "Refresh", json!({}));
+    assert_eq!(row["fields"]["scheduled_refresh"], false);
+}
+
+#[tokio::test]
+async fn model_sync_timer_rearms_after_deferral_and_stops_on_pause() {
+    use temper_runtime::{ActorSystem, tenant::TenantId};
+    use temper_server::{
+        registry::SpecRegistry,
+        request_context::AgentContext,
+        state::{DispatchCommand, ServerState},
+    };
+    let xml = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../os-apps/dsf-twin/specs/model.csdl.xml"),
+    )
+    .unwrap();
+    // Shorten only the timer. No provider module is installed in this fixture;
+    // callbacks below stand in for its deferred result, not a provider success.
+    let ioa = source("model_sync").replace("after_seconds = 60", "after_seconds = 1");
+    let mut registry = SpecRegistry::new();
+    registry.register_tenant(
+        "default",
+        temper_spec::csdl::parse_csdl(&xml).unwrap(),
+        xml,
+        &[("DsfModelSync", ioa.as_str())],
+    );
+    let state = ServerState::from_registry(ActorSystem::new("model-sync-timers"), registry);
+    let tenant = TenantId::from("default".to_owned());
+    let ctx = AgentContext::for_service("model-sync-timer-test");
+    state
+        .get_or_create_tenant_entity(&tenant, "DsfModelSync", "subject", json!({}))
+        .await
+        .unwrap();
+    let dispatch = |action, params| {
+        state.dispatch(DispatchCommand {
+            tenant: &tenant,
+            entity_type: "DsfModelSync",
+            entity_id: "subject",
+            action,
+            params,
+            agent_ctx: &ctx,
+            await_integration: false,
+            await_reactions: true,
+        })
+    };
+    assert!(dispatch("Configure", json!({"subject_type":"DsfFlow", "source_kind":"github", "source_id":"repo", "resource_id":"flow-1", "source_config_ref":"file-1", "computer_id":"computer-1"})).await.unwrap().success);
+    for sequence in 1..=2 {
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let row = state
+            .get_tenant_entity_state(&tenant, "DsfModelSync", "subject")
+            .await
+            .unwrap();
+        assert_eq!(row.state.status, "Collecting");
+        assert!(
+            dispatch("CollectionDeferred", json!({"expected_sequence":sequence}))
+                .await
+                .unwrap()
+                .success
+        );
+    }
+    assert!(dispatch("Pause", json!({})).await.unwrap().success);
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    let row = state
+        .get_tenant_entity_state(&tenant, "DsfModelSync", "subject")
+        .await
+        .unwrap();
+    assert_eq!(row.state.status, "Paused");
+}

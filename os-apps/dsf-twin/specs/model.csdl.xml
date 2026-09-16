@@ -3013,6 +3013,7 @@
         </Key>
         <Property Name="Id" Type="Edm.String" Nullable="false" />
         <Property Name="Status" Type="Edm.String" />
+        <Property Name="ScheduledRefresh" Type="Edm.Boolean" />
         <Property Name="SourceKind" Type="Edm.String" />
         <Property Name="SourceId" Type="Edm.String" />
         <Property Name="ResourceId" Type="Edm.String" />
@@ -3051,6 +3052,13 @@
       </Action>
       <Action Name="Refresh" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
+      </Action>
+      <Action Name="RefreshIfDue" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
+      </Action>
+      <Action Name="CollectionDeferred" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
+        <Parameter Name="expected_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="CollectionFailed" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
