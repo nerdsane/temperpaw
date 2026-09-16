@@ -591,3 +591,51 @@ fn dashboard_admin_cannot_forge_learning_or_prediction_callbacks() {
         }
     }
 }
+
+#[test]
+fn dashboard_research_can_create_workspace_without_workspace_management_access() {
+    let engine = engine();
+    let admin = SecurityContext::from_verified_jwt(
+        "dashboard-owner",
+        temper_authz::PrincipalKind::Admin,
+        None,
+        None,
+        None,
+        None,
+    );
+    let resource = attrs(&[("id", serde_json::json!("research-workspace"))]);
+    for action in ["create", "Create"] {
+        assert!(
+            engine
+                .authorize(&admin, action, "Workspace", &resource)
+                .is_allowed(),
+            "dashboard research must be able to create its workspace"
+        );
+    }
+    for action in [
+        "read",
+        "list",
+        "update",
+        "delete",
+        "Freeze",
+        "Thaw",
+        "WorkspaceArchive",
+    ] {
+        assert!(
+            !engine
+                .authorize(&admin, action, "Workspace", &resource)
+                .is_allowed(),
+            "research creation must not grant workspace {action}"
+        );
+    }
+    assert!(
+        !engine
+            .authorize(
+                &SecurityContext::anonymous(),
+                "create",
+                "Workspace",
+                &resource
+            )
+            .is_allowed()
+    );
+}

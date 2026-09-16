@@ -169,3 +169,15 @@
 **Chose the aggregate entry because:** It removes the duplicated per-module selection that caused the omission, reuses the existing builders, and keeps the tested image intact. The change is limited to packaging and its existing regression coverage; file-storage behavior and the platform are unchanged.
 
 **Where:** Dockerfile; .github/workflows/ci.yml; os-apps/paw-fs/wasm/build.sh; existing WASM packaging tests. Failed immutable image sha256:d221367b10339a427e2be4c7fe9aac73a285a8728313a243adcc5792ed85b2cb; raw evidence /tmp/arn518-image-verification/image-verification-d758711.json.
+
+## D15 — Permit dashboard research to create its workspace
+
+**Decision:** Grant authenticated admins create-only access to Workspace in the Foresight app policy.
+
+**Came up because:** On 16 September, the real-provider browser flow at 33e74b7 created and configured a world, then failed at seed_world's Workspace POST with HTTP 403. The kernel preserves the initiating admin identity for transition-triggered internal HTTP; the filesystem policy permits only agents to create workspaces.
+
+**Options:** Add the required create-only app permission; impersonate an agent or change kernel identity propagation; pre-create workspaces outside the user flow.
+
+**Chose the create-only permission because:** It preserves verified caller identity and makes the normal dashboard flow work without kernel changes or special test setup. It grants no workspace read, update, delete, freeze, or archive access. Rita explicitly approved this permission change after the denial was reported.
+
+**Where:** os-apps/paw-foresight/policies/foresight.cedar; crates/temperpaw/tests/corridor_cedar_matrix.rs; PR #526. The regression failed against 33e74b7 before the permission was added.

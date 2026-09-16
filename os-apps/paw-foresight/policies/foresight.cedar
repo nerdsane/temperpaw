@@ -583,3 +583,12 @@ unless {
 };
 permit(principal == Agent::"service:wasm-runtime",
   action == Action::"ForecastRegistrationFailed", resource is World);
+
+// Dashboard-started research retains the verified admin identity during its
+// seed_world internal calls. Grant workspace creation only; do not broaden
+// workspace reads, management, or the existing agent permissions.
+permit(
+  principal is Admin,
+  action in [Action::"create", Action::"Create"],
+  resource is Workspace
+);
