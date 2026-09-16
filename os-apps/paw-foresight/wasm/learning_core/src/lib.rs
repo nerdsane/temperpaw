@@ -196,8 +196,8 @@ pub fn prepare(
     }
     valid.sort_by(|a, b| (&a.resolved_at, &a.event_id).cmp(&(&b.resolved_at, &b.event_id)));
     let split = valid.len() * 2 / 3;
-    let cutoff = valid
-        .get(split.saturating_sub(1))
+    let cutoff = valid[..split]
+        .last()
         .map(|e| e.resolved_at.clone())
         .unwrap_or_default();
     let mut training = Vec::new();
@@ -399,6 +399,48 @@ mod tests {
         );
         assert_eq!(incumbent.slope, 1.0);
     }
+    #[test]
+    fn one_fresh_event_is_validation_even_when_revisions_repeat_it() {
+        let mut incumbent = Model::identity("simulated");
+        incumbent.evaluated_through = "2025-02-16T00:00:00Z".into();
+        let mut first = fixture()[0].clone();
+        first.registered_at = "2025-03-01T00:00:00Z".into();
+        first.resolved_at = "2025-06-01T00:00:00Z".into();
+        let mut revision = first.clone();
+        revision.registered_at = "2025-03-02T00:00:00Z".into();
+        for data in [vec![first.clone()], vec![revision, first.clone()]] {
+            let duplicates = data.len() - 1;
+            let prepared = prepare(data, "simulated", "2025-06-01T00:00:00Z", &incumbent).unwrap();
+            assert!(prepared.training.is_empty());
+            assert_eq!(prepared.validation, vec![first.clone()]);
+            assert_eq!(
+                prepared
+                    .skipped_reasons
+                    .get("duplicate_event")
+                    .copied()
+                    .unwrap_or(0),
+                duplicates
+            );
+            assert!(
+                !prepared
+                    .skipped_reasons
+                    .contains_key("validation_not_prospective")
+            );
+            let candidate = fit(&prepared, &incumbent, "insufficient-run");
+            let report = evaluate(
+                &prepared,
+                &incumbent,
+                &candidate,
+                "simulated",
+                "2025-06-01T00:00:00Z",
+            );
+            assert_eq!(report["training_count"], 0);
+            assert_eq!(report["validation_count"], 1);
+            assert_eq!(report["decision"], "rejected");
+            assert_eq!(candidate.predict(0.55), incumbent.predict(0.55));
+        }
+    }
+
     #[test]
     fn temporal_separation_and_duplicate_events() {
         let mut data = fixture();
