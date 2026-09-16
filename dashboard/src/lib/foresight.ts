@@ -284,3 +284,26 @@ export async function startForesightResearch(id: string, research: ResearchConfi
   await api.postEntityAction('Worlds', id, 'Configure', researchFields(research));
   await api.postEntityAction('Worlds', id, 'Seed', {});
 }
+
+/** Weighted futures are complete; other settled states remain visible separately. */
+export function futureProgress(endpoints: ReturnType<typeof parseEndpoint>[]) {
+  const counts = {pending:0, completed:0, discarded:0, failed:0};
+  for (const endpoint of endpoints) {
+    if (endpoint.status === 'Weighted') counts.completed++;
+    else if (endpoint.status === 'Discarded') counts.discarded++;
+    else if (endpoint.status === 'Failed') counts.failed++;
+    else counts.pending++;
+  }
+  return counts;
+}
+
+/** Sampling reuses existing endpoints without resetting them, so expose only the first pass. */
+export async function startForesightExploration(
+  world: World, endpoints: ReturnType<typeof parseEndpoint>[],
+  api: Pick<WorldOperations, 'postEntityAction'>,
+): Promise<void> {
+  if (world.status !== 'Active') throw new Error('Exploration requires an active world.');
+  if (!world.agentProvider || !world.agentModel) throw new Error('This world needs a research provider and model before exploration.');
+  if (endpoints.length) throw new Error('This world already has possible futures. Inspect their progress before continuing.');
+  await api.postEntityAction('Worlds', world.id, 'SampleEndpoints', {});
+}

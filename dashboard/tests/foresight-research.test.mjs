@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/foresight.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { researchConfiguration, createForesightWorld, startForesightResearch } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, parseWorld, parseEndpoint } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 function operations() {
   const calls=[];
@@ -61,4 +61,38 @@ test('research never seeds when configuration is unavailable or saving it fails'
     async postEntityAction(_set,_id,action) { if(action==='Configure') throw new Error('denied'); seeded=true; },
   }),/denied/);
   assert.equal(seeded,false);
+});
+
+
+const researchWorld = () => parseWorld({
+  Id:'active-world', Status:'Active', agent_provider:'openai_codex', agent_model:'configured-model',
+});
+
+test('exploration invokes the existing world action with its actual identifier', async () => {
+  const started=operations();
+  await startForesightExploration(researchWorld(),[],started.api);
+  assert.deepEqual(started.calls,[{set:'Worlds',id:'active-world',action:'SampleEndpoints',body:{}}]);
+});
+
+test('existing futures block duplicate sampling, including settled or failed rows', async () => {
+  for (const status of ['Sampled','Written','UnderRepair','Scored','Weighted','Discarded','Failed','Unknown']) {
+    const blocked=operations();
+    await assert.rejects(startForesightExploration(researchWorld(),[parseEndpoint({Id:'future-1',Status:status})],blocked.api),/already/i);
+    assert.deepEqual(blocked.calls,[]);
+  }
+});
+
+test('exploration requires an active world with its own research configuration', async () => {
+  for (const patch of [{status:'Seeding'},{status:'Failed'},{agentModel:''},{agentProvider:''}]) {
+    const blocked=operations();
+    await assert.rejects(startForesightExploration({...researchWorld(),...patch},[],blocked.api));
+    assert.deepEqual(blocked.calls,[]);
+  }
+});
+
+test('future progress separates pending work, completed futures, discards and failures', () => {
+  const rows=['Sampled','Written','UnderRepair','Scored','Weighted','Discarded','Failed','Unknown']
+    .map((Status,i)=>parseEndpoint({Id:'future-'+i,Status}));
+  assert.deepEqual(futureProgress(rows),{pending:5,completed:1,discarded:1,failed:1});
+  assert.deepEqual(futureProgress([]),{pending:0,completed:0,discarded:0,failed:0});
 });

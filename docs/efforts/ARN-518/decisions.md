@@ -258,3 +258,27 @@ The preserved Foresight tree includes Genesis-only repair/adversary workspace re
 **Chose the existing configuration because:** The surveyor's contract already requires SeedComplete followed by temper.done. Requiring a tool response prevents ordinary text-only completion for the configured Responses provider and lets the existing explicit done path terminate the session. It does not guarantee evidence quality or replace checking that the world actually became Active. Turn limits remain finite and the full provider flow must be rerun.
 
 **Where:** seed_world Session.Configure request and its actual-WASM regression; published paw-agent b72f5d6 provider caller's OpenAI Codex Responses request; isolated observed-world test for ARN-518.
+
+## D22 — Expose first-pass future exploration without inventing resampling
+
+**Decision:** Add an Active-world control for the existing SampleEndpoints action, disable it once endpoints exist, and display each endpoint's actual progress.
+
+**Came up because:** The live surveyor completed SeedComplete and recorded eight observed events, but the UI exposed only forecast registration. Registration does not create alternative futures. The existing endpoint sampler reuses slots without resetting settled endpoint states, so presenting it as a general retry would be misleading.
+
+**Options:** Leave the action available only through generic entity tools; add a full resampling protocol; expose the supported first pass with honest progress.
+
+**Chose the first pass because:** It makes the requested worlds flow usable with the existing application contract while avoiding duplicate writer launches and an unrelated lifecycle redesign. Existing endpoints remain inspectable, including failure states.
+
+**Where:** Foresight dashboard world and activity controls; World.SampleEndpoints contract; isolated observed world en-01a0ab41-48cc-7001-a581-84b89bbdbeff.
+
+## D23 — Apply explicit completion to tool-dependent Foresight workers
+
+**Decision:** Require tool responses in every audited Foresight worker configuration whose completion contract requires an entity action or temper.done.
+
+**Came up because:** After the seed fix completed research in sixteen turns, one of three endpoint writers ended with plain text narrating BundleWritten and left its endpoint Sampled. The other two wrote their bundles. The endpoint and downstream worker launchers omitted the same existing tool_choice setting.
+
+**Options:** Repair only the failed test entity; repeat unconstrained sessions; apply the seed's tested configuration to the affected worker launchers.
+
+**Chose the shared configuration rule because:** The observed failure is the same premature text-only completion class. Each worker already has a bounded tool-based completion contract. This changes request configuration only, preserves the existing published application behavior, and does not introduce a runtime coordinator or guarantee that a worker's content is correct.
+
+**Where:** Foresight Session.Configure calls in sample_endpoints, spawn_repairers, spawn_adversaries, decompose_endpoint, consistency_gate, adjudicate_nodes, render_artifacts and animate_dwellers. Each has an explicit tool-based completion contract. Actual outgoing-request tests and rebuilt module hashes provide the verification boundary.

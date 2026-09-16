@@ -425,3 +425,195 @@ async fn seed_world_records_research_session_from_the_create_response() {
     assert_ne!(result.callback_params["research_session_id"], "agent-1");
     assert_eq!(result.callback_params["expected_research_attempt"], 7);
 }
+
+fn corridor_session_host() -> SimWasmHost {
+    let host = SimWasmHost::new().with_default_response(404, "unexpected request");
+    let responses = [
+        ("Workspaces", 201, json!({"entity_id":"workspace-1"})),
+        ("Agents", 201, json!({"entity_id":"agent-1"})),
+        ("Sessions", 201, json!({"entity_id":"session-1"})),
+        ("Sessions('session-1')/TemperPaw.Configure", 200, json!({})),
+        (
+            "Worlds('world-1')",
+            200,
+            json!({
+                "entity_id":"world-1",
+                "fields":{"agent_model":"fixture-model","agent_provider":"fixture-provider"}
+            }),
+        ),
+        (
+            "Endpoints?$filter=world_id eq 'world-1'",
+            200,
+            json!({"value":[]}),
+        ),
+        ("Endpoints", 201, json!({"entity_id":"endpoint-1"})),
+        ("Paths", 201, json!({"entity_id":"path-1"})),
+        ("Paths('path-1')", 200, json!({})),
+        ("Paths('subject-1')", 200, json!({})),
+        ("Files('file-1')", 200, json!({"WorkspaceId":"workspace-1"})),
+        (
+            "Claims?$filter=world_id eq 'world-1'",
+            200,
+            json!({"value":[]}),
+        ),
+        (
+            "EventNodes?$filter=world_id eq 'world-1'",
+            200,
+            json!({"value":[{
+                "Id":"node-1","Status":"Confirmed","Provenance":"authored",
+                "ResolveBy":"2026-09-01","Statement":"An overdue test event"
+            }]}),
+        ),
+        (
+            "Dwellers('dweller-1')",
+            200,
+            json!({"AgentId":"agent-1","Name":"Test dweller"}),
+        ),
+    ];
+    responses
+        .into_iter()
+        .fold(host, |host, (path, status, body)| {
+            host.with_response(
+                &format!("https://temper.test/tdata/{path}"),
+                status,
+                &body.to_string(),
+            )
+        })
+        .with_response(
+            "https://temper.test/tdata/Files('file-1')/$value",
+            200,
+            "Fixture artifact content",
+        )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn corridor_workers_require_tools_in_outgoing_session_configuration() {
+    // Exercise each production Configure builder, including both roles that
+    // share animate_dwellers. A successful no-op cannot satisfy this test.
+    let cases = [
+        (
+            "sample_endpoints",
+            "SampleEndpoints",
+            "World",
+            "endpoint-writer",
+            json!({"endpoint_budget":"1"}),
+        ),
+        (
+            "sample_endpoints",
+            "ResumeWriter",
+            "Endpoint",
+            "endpoint-writer",
+            json!({"world_id":"world-1"}),
+        ),
+        (
+            "spawn_repairers",
+            "SubmitForBridge",
+            "Claim",
+            "repairer",
+            json!({"world_id":"world-1","current_text":"A future claim"}),
+        ),
+        (
+            "spawn_adversaries",
+            "RepairComplete",
+            "Path",
+            "adversary",
+            json!({"world_id":"world-1"}),
+        ),
+        (
+            "decompose_endpoint",
+            "SubmitForRepair",
+            "Endpoint",
+            "decomposer",
+            json!({"world_id":"world-1","bundle_file_id":"file-1"}),
+        ),
+        (
+            "consistency_gate",
+            "SubmitForCheck",
+            "Artifact",
+            "checker",
+            json!({"world_id":"world-1","content_file_id":"file-1"}),
+        ),
+        (
+            "adjudicate_nodes",
+            "AdjudicateNodes",
+            "World",
+            "adjudicator",
+            json!({"last_adjudication_date":"2026-09-16"}),
+        ),
+        (
+            "render_artifacts",
+            "Render",
+            "World",
+            "renderer-author",
+            json!({"canonical_path_id":"path-1"}),
+        ),
+        (
+            "animate_dwellers",
+            "AnimateDwellers",
+            "World",
+            "caster",
+            json!({}),
+        ),
+        (
+            "animate_dwellers",
+            "SpawnNextDweller",
+            "World",
+            "dweller",
+            json!({"dweller_ids":"[\"dweller-1\"]"}),
+        ),
+    ];
+    let mut missing_tool_requirement = Vec::new();
+    for (module, trigger, entity_type, role, mut fields) in cases {
+        fields["agent_model"] = json!("fixture-model");
+        fields["agent_provider"] = json!("fixture-provider");
+        let mut ctx = context(module, trigger, fields);
+        ctx.entity_type = entity_type.into();
+        if entity_type != "World" {
+            ctx.entity_id = "subject-1".into();
+        }
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let result = invoke(
+            module,
+            ctx,
+            SessionConfigureHost {
+                inner: corridor_session_host(),
+                configure_requests: Arc::clone(&requests),
+            },
+        )
+        .await;
+        assert!(result.success, "{module}/{trigger}: {result:?}");
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "{module}/{trigger} must configure its worker"
+        );
+        let request = &requests[0];
+        assert_eq!(request["agent_name"], role, "{module}/{trigger}");
+        assert_eq!(request["model"], "fixture-model", "{module}/{trigger}");
+        assert_eq!(
+            request["provider"], "fixture-provider",
+            "{module}/{trigger}"
+        );
+        assert_eq!(request["workspace_id"], "workspace-1", "{module}/{trigger}");
+        assert!(
+            request["tools_enabled"]
+                .as_str()
+                .unwrap()
+                .split(',')
+                .any(|tool| tool == "temper_action"),
+            "{module}/{trigger} must be able to report its result through an action"
+        );
+        println!(
+            "{module}/{trigger}: role={role} tool_choice={}",
+            request["tool_choice"]
+        );
+        if request["tool_choice"] != "required" {
+            missing_tool_requirement.push(format!("{module}/{trigger}"));
+        }
+    }
+    assert!(
+        missing_tool_requirement.is_empty(),
+        "Tool-dependent workers must not finish with a plain-text end turn: {missing_tool_requirement:?}"
+    );
+}

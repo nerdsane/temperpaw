@@ -7,7 +7,7 @@
   import { createEntity, postEntityAction, queryEntities, getEntity, fetchSetupStatus, getSecret, listSecretKeys } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    loadResearchSession, researchSessionProblem, type ResearchSessionState, forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, researchConfiguration, createForesightWorld, startForesightResearch, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    loadResearchSession, researchSessionProblem, type ResearchSessionState, forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
@@ -23,6 +23,8 @@
   let forecasts = $state<Forecast[]>([]);
   let events = $state<ReturnType<typeof parseEvent>[]>([]);
   let endpoints = $state<ReturnType<typeof parseEndpoint>[]>([]);
+  let endpointsAvailable = $state(false);
+  let explorationRequests = $state<Record<string, boolean>>({});
   let paths = $state<ReturnType<typeof parsePath>[]>([]);
   let claims = $state<ReturnType<typeof parseClaim>[]>([]);
   let runs = $state<LearningRun[]>([]);
@@ -55,6 +57,8 @@
 
   const world = $derived(worlds.find((item) => item.id === selectedId) ?? null);
   const groupedForecasts = $derived(forecastGroups(forecasts));
+  const futures = $derived(futureProgress(endpoints));
+  const explorationRequested = $derived(explorationRequests[selectedId] === true);
   const researchProblem = $derived(researchSessionProblem(researchSession, world?.status ?? ''));
   const failures = $derived([
     ...(researchProblem ? [researchProblem] : []),
@@ -89,6 +93,7 @@
   async function load() {
     const generation = ++loadGeneration;
     loading = true;
+    endpointsAvailable = false;
     errors = [];
     notices = [];
     try { await loadWorlds(); } catch (err) { errors = [err instanceof Error ? err.message : 'Could not load worlds.']; }
@@ -112,6 +117,9 @@
       return result.value.slice(0, 500);
     });
     events = rows[0].map(parseEvent); endpoints = rows[1].map(parseEndpoint);
+    const endpointResult = results[1];
+    endpointsAvailable = endpointResult.status === 'fulfilled' && endpointResult.value.length <= 500;
+    if (endpoints.length || ['Failed','Archived'].includes(world?.status ?? '')) delete explorationRequests[selectedId];
     paths = rows[2].map(parsePath); claims = rows[3].map(parseClaim);
     forecasts = rows[4].map(parseForecast); runs = rows[5].map(parseLearningRun);
     loading = false;
@@ -161,6 +169,24 @@
         await postEntityAction('Worlds', selectedId, action, action === 'RegisterForecasts' ? {last_ingest_date:world?.mode === 'observed' ? utcTime(new Date().toISOString()) : utcTime(asOf)} : {});
       }
       message = action === 'RegisterForecasts' ? 'Prediction registration requested.' : 'World research started.';
+    });
+  }
+  async function exploreFutures() {
+    if (!world || busy || loading || !endpointsAvailable || explorationRequested) return;
+    const selectedWorld = world;
+    await perform(async () => {
+      if (!worldResearch.ready) throw new Error(worldResearch.reason);
+      explorationRequests[selectedWorld.id] = true;
+      try {
+        await startForesightExploration(selectedWorld, endpoints, {postEntityAction});
+      } catch (err) {
+        delete explorationRequests[selectedWorld.id];
+        throw err;
+      }
+      if (selectedId === selectedWorld.id) {
+        message = 'Exploration requested. Future records will show its progress below.';
+        tab = 'world';
+      }
     });
   }
   async function startLearning() {
@@ -281,7 +307,14 @@
           <a href="{base}/settings">Configure research ↗</a>
           <button disabled={researchLoading} onclick={() => void loadResearchConfiguration()}>Refresh configuration</button>
         {/if}
-        {#if world.status === 'Active'}<button disabled={busy} onclick={() => worldAction('RegisterForecasts')}>Update predictions</button>{/if}
+        {#if world.status === 'Active'}
+          {#if !endpoints.length}
+            <button class="primary" disabled={busy || loading || !endpointsAvailable || explorationRequested || researchLoading || !world.agentProvider || !world.agentModel || !worldResearch.ready} onclick={() => void exploreFutures()}>{explorationRequested ? 'Exploration requested…' : 'Explore possible futures'}</button>
+            {#if !world.agentProvider || !world.agentModel}<p class="small">This world has no research model. Create an observed world with research configured to explore futures.</p>
+            {:else if !researchLoading && !worldResearch.ready}<p class="small">{worldResearch.reason} <a href="{base}/settings">Configure research ↗</a></p><button disabled={researchLoading} onclick={() => void loadResearchConfiguration()}>Refresh configuration</button>{/if}
+          {/if}
+          <button disabled={busy} onclick={() => worldAction('RegisterForecasts')}>Update predictions</button>
+        {/if}
         <a class="record-link" href={recordHref('World',world.id)}>World record ↗</a>
       </div>
     </section>
@@ -305,15 +338,19 @@
         </li>{/each}</ol>
       </section>
       <section class="panel"><p class="eyebrow">Alternative futures</p><h2>Where this world could go</h2><p class="small">Route cost measures how difficult a scenario is to support. It is separate from the probability of a prediction.</p>
-        {#if !endpoints.length}<p class="empty">No alternative futures have been produced yet.</p>{/if}
-        <div class="future-grid">{#each endpoints as endpoint}<article class="future"><p class="eyebrow">{endpoint.status}</p><h3>{endpoint.summary || 'Future being developed'}</h3>{#if endpoint.discardReason}<p>{endpoint.discardReason}</p>{/if}
+        {#if loading}<p class="small">Checking future records…</p>
+        {:else if !endpointsAvailable}<p class="notice">The complete future list is unavailable. Exploration cannot be started until it can be checked.</p>
+        {:else if endpoints.length}<p aria-live="polite">{futures.completed} completed · {futures.pending} in progress · {futures.discarded} discarded · {futures.failed} failed</p>
+        {:else if explorationRequested}<p class="notice" role="status">Exploration was requested. Waiting for the first future record.</p>
+        {:else}<p class="empty">No alternative futures yet. Use “Explore possible futures” to develop scenarios from this world's research.</p>{/if}
+        <div class="future-grid">{#each endpoints as endpoint}<article class="future"><p class="eyebrow">{endpoint.status}</p><h3>{endpoint.summary || 'Future being developed'}</h3>{#if endpoint.error}<p class="error">{endpoint.error}</p>{/if}{#if endpoint.discardReason}<p>{endpoint.discardReason}</p>{/if}<a href={recordHref('Endpoint',endpoint.id)}>Future record ↗</a>
           <details><summary>Assumptions and routes</summary><pre>{endpoint.assumptions || 'No driver assumptions recorded.'}</pre>{#each paths.filter(path => path.endpointId === endpoint.id) as path}<div class="route"><p><strong>{path.classification || path.status}</strong> · Repair cost {path.cost ?? 'unmeasured'}</p><p>{path.note}</p><pre>{path.nodes}</pre><a href={recordHref('Path',path.id)}>Route evidence ↗</a></div>{/each}
             {#each claims.filter(claim => claim.endpointId === endpoint.id) as claim}<p><strong>{claim.classification || claim.status}:</strong> {claim.statement} {claim.reason}</p>{/each}
           </details></article>{/each}</div>
       </section>
     {:else if tab === 'predictions'}
       <section class="panel"><p class="eyebrow">Beliefs with a record</p><h2>What the system expects</h2>{#if world.status === 'Active'}<button onclick={() => showQuestion = !showQuestion}>{showQuestion ? 'Close question form' : 'Add question'}</button>{/if}<p class="small">Earlier predictions remain visible when evidence or the model changes. Model in use: <strong>{activeModel}</strong>.</p>
-        {#if !groupedForecasts.length}<p class="empty">No predictions registered yet.{#if world.status === 'Active'} Use “Update predictions” to register eligible events.{/if}</p>{/if}
+        {#if !groupedForecasts.length}<p class="empty">No predictions registered yet.{#if world.status === 'Active'} {#if !endpoints.length && world.agentModel && world.agentProvider}Explore possible futures to develop scenarios, or add a question. {/if}Use “Update predictions” to register eligible events.{/if}</p>{/if}
         {#each groupedForecasts as group}<article class="prediction">
           <div class="event-title"><h3>{group.latest.question || 'Untitled prediction'}</h3><strong class="prediction-number">{percent(group.latest.probability)}</strong></div>
           <p class="small">{group.latest.status} · Resolves by {date(group.latest.deadline)} · {group.latest.evidence || 'Evidence kind not recorded'}</p>
@@ -374,6 +411,14 @@
         {:else}
           <p class="error">No research session is linked to this world. Its research status and failures cannot be verified from this page.</p>
         {/if}
+        <h3>Possible futures</h3>
+        {#if endpoints.length}
+          <p>{futures.completed} completed · {futures.pending} in progress · {futures.discarded} discarded · {futures.failed} failed</p>
+          {#each endpoints as endpoint}<p><strong>{endpoint.status}</strong> · <a href={recordHref('Endpoint',endpoint.id)}>{endpoint.summary || endpoint.id}</a></p>{/each}
+        {:else if explorationRequested}<p>Exploration requested; waiting for the first future record.</p>
+        {:else if loading}<p>Checking future records…</p>
+        {:else if !endpointsAvailable}<p>Future progress could not be verified.</p>
+        {:else}<p class="small">No exploration has been recorded for this world.</p>{/if}
         {#each runs.filter(run => ['Created','Preparing','Training','Evaluating','Adopting'].includes(run.status)) as run}<p><strong>{run.status}</strong> — Learning run <a href={recordHref('LearningRun',run.id)}>{run.id}</a></p>{/each}
         {#each failures as failure}<p class="error">{failure}</p>{/each}
         <h3>State changes observed in this session</h3>{#if !activity.length}<p class="empty">New changes will appear here while this page is open. Entity records preserve the full history.</p>{/if}
