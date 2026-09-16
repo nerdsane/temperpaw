@@ -7,7 +7,7 @@
   import { createEntity, postEntityAction, queryEntities } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
@@ -158,14 +158,14 @@
   async function addQuestion() {
     await perform(async () => {
       if (!questionText.trim()) throw new Error('Enter a prediction question.');
-      if (!Number.isFinite(questionProbability) || questionProbability < 0 || questionProbability > 100) throw new Error('Probability must be between 0 and 100.');
+      const inputProbability = predictionInputProbability(questionProbability);
       const refs = questionSources.split('\n').map((value) => value.trim()).filter(Boolean);
       if (!refs.length) throw new Error('Include the evidence or fixture supporting this question.');
       const registeredAt = world?.mode === 'observed' ? utcTime(new Date().toISOString()) : utcTime(asOf);
       const deadline = utcTime(questionDeadline);
       if (deadline <= registeredAt) throw new Error('The question must resolve after the prediction time.');
       await createEntity('EventNodes', {
-        world_id:selectedId, statement:questionText.trim(), probability:String(questionProbability / 100),
+        world_id:selectedId, statement:questionText.trim(), probability:String(inputProbability),
         provenance:'authored', source_refs:JSON.stringify(refs), resolve_by:deadline, layer:'fast',
         author_agent_id:'dashboard',
       });
@@ -288,7 +288,7 @@
       {#if showQuestion}<form class="panel" onsubmit={(e) => { e.preventDefault(); void addQuestion(); }}>
         <h2>A question to predict</h2><p class="small">State an event whose outcome can be verified. The adopted calibration transforms your input probability into a registered prediction.</p>
         <label>Question<textarea bind:value={questionText} required rows="2" placeholder="Will this event happen by the resolution date?"></textarea></label>
-        <label>Input probability (%)<input type="number" min="0" max="100" step="0.1" bind:value={questionProbability} required /></label>
+        <label>Input probability (%)<input type="number" min="0.1" max="99.9" step="0.1" bind:value={questionProbability} required /></label>
         <label>Resolves by (UTC)<input type="datetime-local" bind:value={questionDeadline} required /></label>
         <label>Evidence references, one per line<textarea bind:value={questionSources} rows="2" required placeholder={world.mode === 'simulated' ? 'fixture:foresight-calibration-mechanics-v1' : 'https://source.example/evidence'}></textarea></label>
         <button class="primary" disabled={busy}>Add and predict</button>

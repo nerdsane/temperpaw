@@ -165,3 +165,11 @@ export function writeForesightLocation(href: string, state: ForesightLocation): 
   }
   return url.href;
 }
+
+/** Registration excludes certain/impossible claims, so validate before creating a question. */
+export function predictionInputProbability(percent: number): number {
+  if (!Number.isFinite(percent) || percent <= 0 || percent >= 100) {
+    throw new Error('Use a probability greater than 0 and less than 100 percent.');
+  }
+  return percent / 100;
+}

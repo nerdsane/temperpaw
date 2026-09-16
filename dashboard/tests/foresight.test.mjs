@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/foresight.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld, utcTime, readForesightLocation, writeForesightLocation } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 test('unknown and malformed probabilities never look like zero certainty', () => {
   for (const value of [null, undefined, '', '  ', 'NaN', 'Infinity', -0.1, 1.01]) assert.equal(probability(value), null);
@@ -87,4 +87,11 @@ test('refresh restores the selected world, replay clock and view without losing 
 test('invalid URL view and replay dates cannot become executable UI state', () => {
   assert.deepEqual(readForesightLocation('https://example.test/dashboard/foresight?view=unknown&at=bad'), {worldId:'',asOf:'',tab:'world'});
   assert.equal(readForesightLocation('https://example.test/?at=2025-02-31T00:00').asOf, '');
+});
+
+test('new forecast questions reject certainty values that registration skips', () => {
+  for (const value of [0,100,-1,101,NaN,Infinity]) assert.throws(() => predictionInputProbability(value), /greater than 0.*less than 100/);
+  assert.equal(predictionInputProbability(55), 0.55);
+  assert.equal(predictionInputProbability(0.1), 0.001);
+  assert.ok(Math.abs(predictionInputProbability(99.9) - 0.999) < Number.EPSILON);
 });
