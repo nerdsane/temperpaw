@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/foresight.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld, utcTime } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld, utcTime, readForesightLocation, writeForesightLocation } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 test('unknown and malformed probabilities never look like zero certainty', () => {
   for (const value of [null, undefined, '', '  ', 'NaN', 'Infinity', -0.1, 1.01]) assert.equal(probability(value), null);
@@ -74,4 +74,17 @@ test('outcome provenance stays separate from prediction provenance', () => {
   assert.equal(forecast.evidence, 'observed');
   assert.equal(forecast.outcomeEvidence, 'proxy-price');
   assert.equal(parseForecast({Id:'legacy'}).outcomeEvidence, '');
+});
+
+test('refresh restores the selected world, replay clock and view without losing other URL state', () => {
+  const state = {worldId:'world older', asOf:'2025-03-02T00:00', tab:'learning'};
+  const href = writeForesightLocation('https://example.test/dashboard/foresight?existing=yes#evidence', state);
+  assert.deepEqual(readForesightLocation(href), state);
+  assert.equal(new URL(href).searchParams.get('existing'), 'yes');
+  assert.equal(new URL(href).hash, '#evidence');
+  assert.deepEqual(readForesightLocation(writeForesightLocation(href, {...state, worldId:'next'})), {...state,worldId:'next'});
+});
+test('invalid URL view and replay dates cannot become executable UI state', () => {
+  assert.deepEqual(readForesightLocation('https://example.test/dashboard/foresight?view=unknown&at=bad'), {worldId:'',asOf:'',tab:'world'});
+  assert.equal(readForesightLocation('https://example.test/?at=2025-02-31T00:00').asOf, '');
 });

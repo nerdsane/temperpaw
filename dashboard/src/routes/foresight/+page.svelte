@@ -2,13 +2,16 @@
   import { onMount } from 'svelte';
   import simulatedExamples from '$lib/foresight-simulated.json';
   import { base } from '$app/paths';
+  import { replaceState } from '$app/navigation';
+  import { page } from '$app/stores';
   import { createEntity, postEntityAction, queryEntities } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
+  let locationReady = $state(false);
   let loading = $state(false);
   let busy = $state(false);
   let errors = $state<string[]>([]);
@@ -58,6 +61,12 @@
   const busyRun = $derived(runs.some((run) => ['Preparing','Training','Evaluating','Adopting'].includes(run.status)));
   const sortedRuns = $derived([...runs].sort((a, b) => b.id.localeCompare(a.id)));
   const activeModel = $derived(world?.model?.version || 'Uncalibrated baseline');
+
+  $effect(() => {
+    if (!locationReady) return;
+    const href = writeForesightLocation(window.location.href, {worldId:selectedId, asOf, tab});
+    if (href !== window.location.href) replaceState(href, $page.state);
+  });
 
   function recordHref(set: string, id: string): string { return `${base}/entities/${set}/${encodeURIComponent(id)}`; }
   function date(value: string): string { return value ? value.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace(/Z$/, ' UTC') : 'Not recorded'; }
@@ -177,6 +186,11 @@
     });
   }
   onMount(() => {
+    const saved = readForesightLocation(window.location.href);
+    selectedId = saved.worldId;
+    if (saved.asOf) asOf = saved.asOf;
+    tab = saved.tab;
+    locationReady = true;
     void load();
     const stream = createSSEConnection('foresight', undefined, undefined, (event) => {
       if (!['World','EventNode','Endpoint','Path','Claim','Forecast','LearningRun'].includes(event.entity_type)) return;
