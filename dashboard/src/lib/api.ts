@@ -5,7 +5,6 @@ const BASE = ''; // relative — proxied by Vite in dev, served by tower-http in
 
 // Default headers for all OData requests.
 const HEADERS: Record<string, string> = {
-  'x-tenant-id': 'default',
   'x-temper-principal-kind': 'human',
   'x-temper-principal-id': 'dashboard'
 };

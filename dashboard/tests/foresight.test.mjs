@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+const source = readFileSync(new URL('../src/lib/foresight.ts', import.meta.url), 'utf8');
+const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+
+test('unknown and malformed probabilities never look like zero certainty', () => {
+  for (const value of [null, undefined, '', 'NaN', 'Infinity', -0.1, 1.01]) assert.equal(probability(value), null);
+  assert.equal(probability('0'), 0);
+  assert.equal(probability(1), 1);
+});
+test('world title and model are real fields, not invented summaries', () => {
+  const world = parseWorld({ Id:'w', Status:'Active', domain:'Energy storage', model_json:'{"version":"m1","slope":0.8,"intercept":0.1}' });
+  assert.equal(world.title, 'Energy storage');
+  assert.equal(world.model.version, 'm1');
+  assert.equal(parseWorld({Id:'w'}).model, null);
+});
+test('prediction history keeps revisions and separates equal questions from different events', () => {
+  const rows = [
+    {Id:'old', event_node_id:'event-a', question:'Will it happen?', registered_at:'2025-01-01', probability:'0.8'},
+    {Id:'new', event_node_id:'event-a', question:'Will it happen?', previous_forecast_id:'old', registered_at:'2025-02-01', probability:'0.6'},
+    {Id:'other', event_node_id:'event-b', question:'Will it happen?', registered_at:'2025-02-01', probability:'0.7'},
+  ].map(parseForecast);
+  const groups = forecastGroups(rows);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.find(g => g.eventId === 'event-a').revisions.map(f => f.id), ['new','old']);
+  assert.equal(groups.find(g => g.eventId === 'event-a').latest.previousId, 'old');
+});
+test('learning retains a measured zero score and exposes malformed reports', () => {
+  const run = parseLearningRun({Id:'l', Status:'Adopted', report_json:JSON.stringify({schema_version:1,decision:'adopted',reason:'Held-out improvement',training_count:12,validation_count:4,skipped_count:0,incumbent_brier:0.25,candidate_brier:0,learned_changes:[{name:'slope',before:1,after:0.8,meaning:'Reduced confidence'}]})});
+  assert.equal(run.report.candidateBrier, 0);
+  assert.equal(run.report.trainingCount, 12);
+  assert.equal(run.report.changes[0].meaning, 'Reduced confidence');
+  assert.match(parseLearningRun({Id:'x', report_json:'broken'}).reportError, /report/i);
+  assert.equal(parseLearningRun({Id:'x'}).report, null);
+});
+test('evidence links accept only http(s), preserving labels as text elsewhere', () => {
+  assert.deepEqual(sourceLinks('["javascript:alert(1)","https://example.org/a","file:///tmp/private"]'), ['https://example.org/a']);
+});
+test('dataset validation rejects non-arrays, oversize and malformed JSON before network writes', () => {
+  assert.equal(parseDataset(''), '');
+  assert.equal(parseDataset('[{"id":"a"}]'), '[{"id":"a"}]');
+  assert.throws(() => parseDataset('{}'), /array/i);
+  assert.throws(() => parseDataset('oops'), /JSON/i);
+  assert.throws(() => parseDataset(JSON.stringify(Array.from({length:513},()=>({})))), /512/);
+});

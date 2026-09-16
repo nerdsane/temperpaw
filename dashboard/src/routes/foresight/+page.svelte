@@ -1,0 +1,335 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { base } from '$app/paths';
+  import { createEntity, postEntityAction, queryEntities } from '$lib/api';
+  import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
+  import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
+    forecastGroups, sourceLinks, parseDataset, percent, measure, type World, type Forecast, type LearningRun } from '$lib/foresight';
+
+  let worlds = $state<World[]>([]);
+  let selectedId = $state('');
+  let loading = $state(false);
+  let busy = $state(false);
+  let errors = $state<string[]>([]);
+  let notices = $state<string[]>([]);
+  let message = $state('');
+  let actionError = $state('');
+  let streamStatus = $state('Connecting');
+  let tab = $state('world');
+  let forecasts = $state<Forecast[]>([]);
+  let events = $state<ReturnType<typeof parseEvent>[]>([]);
+  let endpoints = $state<ReturnType<typeof parseEndpoint>[]>([]);
+  let paths = $state<ReturnType<typeof parsePath>[]>([]);
+  let claims = $state<ReturnType<typeof parseClaim>[]>([]);
+  let runs = $state<LearningRun[]>([]);
+  let activity = $state<StateChangeEvent[]>([]);
+  let showCreate = $state(false);
+  let newName = $state('');
+  let newDomain = $state('');
+  let newDescription = $state('');
+  let newTarget = $state('');
+  let newMode = $state('observed');
+  let newBudget = $state(100);
+  let asOf = $state(new Date().toISOString().slice(0, 16));
+  let dataset = $state('');
+  let outcomeForecast = $state('');
+  let outcome = $state('yes');
+  let outcomeSources = $state('');
+  let outcomeTime = $state(new Date().toISOString().slice(0, 16));
+  let loadGeneration = 0;
+  let disposed = false;
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const world = $derived(worlds.find((item) => item.id === selectedId) ?? null);
+  const groupedForecasts = $derived(forecastGroups(forecasts));
+  const failures = $derived([
+    ...(world?.error ? [world.error] : []),
+    ...endpoints.flatMap((item) => item.error ? [item.error] : []),
+    ...paths.flatMap((item) => item.error ? [item.error] : []),
+    ...forecasts.flatMap((item) => item.error ? [item.error] : []),
+    ...runs.flatMap((item) => item.error ? [item.error] : []),
+  ]);
+  const busyRun = $derived(runs.some((run) => ['Preparing','Training','Evaluating','Adopting'].includes(run.status)));
+  const sortedRuns = $derived([...runs].sort((a, b) => b.id.localeCompare(a.id)));
+  const activeModel = $derived(world?.model?.version || 'Uncalibrated baseline');
+
+  function recordHref(set: string, id: string): string { return `${base}/entities/${set}/${encodeURIComponent(id)}`; }
+  function date(value: string): string { return value ? value.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace(/Z$/, ' UTC') : 'Not recorded'; }
+  function escape(value: string): string { return value.replaceAll("'", "''"); }
+  function utc(value: string): string {
+    const parsed = new Date(value.endsWith('Z') ? value : value + 'Z');
+    if (!Number.isFinite(parsed.getTime())) throw new Error('Enter a valid UTC date and time.');
+    return parsed.toISOString();
+  }
+  async function loadWorlds() {
+    const rows = await queryEntities('Worlds', undefined, 'Id desc', 101);
+    if (disposed) return;
+    worlds = rows.slice(0, 100).map(parseWorld);
+    if (rows.length > 100) notices = [...notices.filter((value) => !value.startsWith('World list')), 'World list shows the newest 100 worlds.'];
+    if (!selectedId && worlds.length) selectedId = worlds[0].id;
+  }
+  async function load() {
+    const generation = ++loadGeneration;
+    loading = true;
+    errors = [];
+    notices = [];
+    try { await loadWorlds(); } catch (err) { errors = [err instanceof Error ? err.message : 'Could not load worlds.']; }
+    if (!selectedId || disposed || generation !== loadGeneration) { loading = false; return; }
+    const filter = `world_id eq '${escape(selectedId)}'`;
+    const sets = ['EventNodes','Endpoints','Paths','Claims','Forecasts','LearningRuns'];
+    const results = await Promise.allSettled(sets.map((set) => queryEntities(set, filter, 'Id desc', 501)));
+    if (disposed || generation !== loadGeneration) return;
+    const rows = results.map((result, index) => {
+      if (result.status === 'rejected') {
+        errors.push(`${sets[index]}: ${result.reason instanceof Error ? result.reason.message : 'Could not load records'}`);
+        return [];
+      }
+      if (result.value.length > 500) notices.push(`${sets[index]}: showing the newest 500 records. Older records are excluded from this view.`);
+      return result.value.slice(0, 500);
+    });
+    events = rows[0].map(parseEvent); endpoints = rows[1].map(parseEndpoint);
+    paths = rows[2].map(parsePath); claims = rows[3].map(parseClaim);
+    forecasts = rows[4].map(parseForecast); runs = rows[5].map(parseLearningRun);
+    loading = false;
+  }
+  async function chooseWorld() {
+    dataset = ''; outcomeForecast = ''; message = ''; activity = [];
+    forecasts = []; events = []; endpoints = []; paths = []; claims = []; runs = [];
+    await load();
+  }
+  async function perform(action: () => Promise<void>) {
+    if (busy) return;
+    busy = true; message = ''; actionError = '';
+    try { await action(); }
+    catch (err) { actionError = err instanceof Error ? err.message : 'The action failed.'; }
+    finally { busy = false; await load(); }
+  }
+  async function createWorld() {
+    await perform(async () => {
+      const created = await createEntity('Worlds');
+      const id = String(created.Id ?? created._entity_id ?? '');
+      if (!id) throw new Error('The world was created without a returned identifier.');
+      selectedId = id;
+      await postEntityAction('Worlds', id, 'ConfigureLearning', { learning_mode: newMode });
+      await postEntityAction('Worlds', id, 'Configure', {
+        name:newName.trim(), domain:newDomain.trim(), description:newDescription.trim(),
+        target_date:newTarget, frontier_date:newTarget, horizon_months:'12', endpoint_budget:'3',
+        token_budget_cents:String(newBudget), hindcast_mode:newMode === 'historical' ? 'true' : 'false',
+      });
+      if (newMode !== 'observed') {
+        await postEntityAction('Worlds', id, 'OpenReplay', {
+          learning_mode:newMode, domain:newDomain.trim(), frontier_date:newTarget, last_ingest_date:utc(asOf),
+        });
+      }
+      message = newMode === 'observed' ? 'World configured. Start research when you are ready.' : 'Replay world opened. Add dated experiences in “What it learned”.';
+      if (newMode !== 'observed') tab = 'learning';
+      showCreate = false;
+    });
+  }
+  async function worldAction(action: string) {
+    await perform(async () => {
+      await postEntityAction('Worlds', selectedId, action, action === 'RegisterForecasts' ? {last_ingest_date:world?.mode === 'observed' ? new Date().toISOString() : utc(asOf)} : {});
+      message = action === 'RegisterForecasts' ? 'Prediction registration requested.' : 'World research started.';
+    });
+  }
+  async function startLearning() {
+    await perform(async () => {
+      if (!world) throw new Error('Choose a world first.');
+      const prepared = parseDataset(dataset);
+      if (world.mode === 'observed' && prepared) throw new Error('Observed learning uses recorded outcomes. Choose a historical or simulated world to supply replay data.');
+      if (world.mode !== 'observed' && !prepared) throw new Error('Supply a dated replay dataset.');
+      const run = await createEntity('LearningRuns');
+      const id = String(run.Id ?? run._entity_id ?? '');
+      if (!id) throw new Error('The learning run has no identifier.');
+      await postEntityAction('LearningRuns', id, 'Start', { world_id:selectedId, mode:world.mode, as_of:utc(asOf), dataset_json:prepared });
+      message = 'Learning requested. Its progress and evaluation will appear below.';
+    });
+  }
+  async function recordOutcome() {
+    await perform(async () => {
+      const refs = outcomeSources.split('\n').map((source) => source.trim()).filter(Boolean);
+      if (!refs.length) throw new Error('Include at least one outcome source.');
+      await postEntityAction('Forecasts', outcomeForecast, 'RecordOutcome', {
+        outcome, outcome_source_refs:JSON.stringify(refs), resolved_at:utc(outcomeTime),
+      });
+      message = 'Outcome submitted for scoring and learning.';
+      outcomeForecast = '';
+    });
+  }
+  onMount(() => {
+    void load();
+    const stream = createSSEConnection('foresight', undefined, undefined, (event) => {
+      if (!['World','EventNode','Endpoint','Path','Claim','Forecast','LearningRun'].includes(event.entity_type)) return;
+      const known = [selectedId, ...events.map(e => e.id), ...endpoints.map(e => e.id), ...paths.map(e => e.id), ...forecasts.map(e => e.id), ...runs.map(e => e.id)];
+      if (known.includes(event.entity_id)) activity = [event, ...activity].slice(0, 40);
+      if (!refreshTimer) refreshTimer = setTimeout(() => { refreshTimer = undefined; void load(); }, 300);
+    });
+    stream.source.addEventListener('open', () => streamStatus = 'Live');
+    stream.source.addEventListener('error', () => streamStatus = 'Reconnecting — refresh is available');
+    return () => { disposed = true; loadGeneration++; clearTimeout(refreshTimer); stream.close(); };
+  });
+</script>
+
+<svelte:head>
+  <title>Foresight · TemperPaw</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
+</svelte:head>
+
+<div class="foresight">
+  <header class="masthead">
+    <div><p class="eyebrow">Temper / Foresight</p><h1>Watch the future take shape.</h1><p>Explore possible worlds, follow predictions, and see what experience changes.</p></div>
+    <div class="live"><span class:connected={streamStatus === 'Live'}></span>{streamStatus}<button onclick={load} disabled={loading}>Refresh</button></div>
+  </header>
+  <div class="world-picker">
+    <label>World<select bind:value={selectedId} onchange={chooseWorld} disabled={busy}><option value="">Choose a world</option>{#each worlds as item}<option value={item.id}>{item.title} · {item.status}</option>{/each}</select></label>
+    <button class="primary" onclick={() => showCreate = !showCreate}>{showCreate ? 'Close' : 'New world'}</button>
+  </div>
+  {#if showCreate}
+    <form class="panel create-form" onsubmit={(e) => { e.preventDefault(); void createWorld(); }}>
+      <h2>Create a world</h2>
+      <label>Name<input bind:value={newName} required maxlength="150" placeholder="A future to investigate" /></label>
+      <label>Domain<input bind:value={newDomain} required maxlength="300" placeholder="What changes are we exploring?" /></label>
+      <label class="wide">Description<textarea bind:value={newDescription} rows="2" required placeholder="The situation, questions and assumptions."></textarea></label>
+      <label>Target date<input type="date" bind:value={newTarget} required /></label>
+      <label>Experience source<select bind:value={newMode}><option value="observed">Observed outcomes</option><option value="historical">Historical replay</option><option value="simulated">Simulated demonstration</option></select></label>
+      <label>Research budget (cents)<input type="number" min="1" max="10000" bind:value={newBudget} required /></label>
+      <div class="wide"><p class="small">Each world's evidence source stays distinct. Simulated learning demonstrates mechanics and does not establish real-world accuracy.</p><button class="primary" disabled={busy}>{busy ? 'Creating…' : 'Create world'}</button></div>
+    </form>
+  {/if}
+  <div aria-live="polite">
+    {#if message}<p class="notice">{message}</p>{/if}
+    {#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
+    {#each errors as error}<p class="error" role="alert">{error}</p>{/each}
+    {#each notices as notice}<p class="notice">{notice}</p>{/each}
+  </div>
+  {#if world}
+    <section class="world-intro">
+      <div><p class="eyebrow">{world.status} / {world.mode === 'simulated' ? 'Simulated demonstration' : world.mode === 'historical' ? 'Historical replay' : 'Observed evidence'}</p><h2>{world.title}</h2>{#if world.description}<p>{world.description}</p>{/if}<p>Target {world.target || 'not set'} · Prediction frontier {world.frontier || 'not set'}</p></div>
+      <div class="world-actions">
+        {#if world.status === 'Created'}<button class="primary" disabled={busy} onclick={() => worldAction('Seed')}>Start research</button>{/if}
+        {#if world.status === 'Active'}<button disabled={busy} onclick={() => worldAction('RegisterForecasts')}>Update predictions</button>{/if}
+        <a class="record-link" href={recordHref('World',world.id)}>World record ↗</a>
+      </div>
+    </section>
+    {#if world.mode !== 'observed'}<label class="replay-clock">Replay clock (UTC)<input type="datetime-local" bind:value={asOf} required /><span class="small">New predictions use this time; learning uses only outcomes available by it.</span></label>{/if}
+    <div class="metrics">
+      <div><span>Events</span><strong>{events.length}</strong></div>
+      <div><span>Possible futures</span><strong>{endpoints.length}</strong></div>
+      <div><span>Predicted questions</span><strong>{groupedForecasts.length}</strong></div>
+      <div><span>Learning runs</span><strong>{runs.length}</strong></div>
+    </div>
+    <nav class="view-nav" aria-label="Foresight views">
+      {#each [['world','World'],['predictions','Predictions'],['learning','What it learned'],['activity','Activity']] as [key,label]}<button aria-pressed={tab === key} onclick={() => tab = key}>{label}{#if key === 'activity' && failures.length}<span class="badge">{failures.length}</span>{/if}</button>{/each}
+    </nav>
+
+    {#if tab === 'world'}
+      <section class="panel"><p class="eyebrow">The situation</p><h2>Events and dependencies</h2><p class="small">Evidence describes what is known; predictions describe what may happen. Follow an event's dependencies to inspect its assumptions.</p>
+        {#if !events.length}<p class="empty">{loading ? 'Loading events…' : 'No events have been recorded for this world yet.'}</p>{/if}
+        <ol class="event-list">{#each events as event}<li><div class="event-title"><h3>{event.statement || 'Untitled event'}</h3><span class="probability">{percent(event.probability)}</span></div><p class="small">{event.layer || 'Unclassified'} · {event.status} · {date(event.date)}</p>
+          {#if event.resolution}<p>Outcome: {event.resolution}</p>{/if}
+          <details><summary>Evidence and dependencies</summary><p>{event.provenance || 'No provenance recorded.'}</p><pre>{event.sources || 'No source references recorded.'}</pre>{#each sourceLinks(event.sources) as link}<a href={link} target="_blank" rel="noreferrer">{link} ↗</a>{/each}<p class="small">Dependencies</p><pre>{event.edges || 'None recorded.'}</pre><a href={recordHref('EventNode',event.id)}>Open event record ↗</a></details>
+        </li>{/each}</ol>
+      </section>
+      <section class="panel"><p class="eyebrow">Alternative futures</p><h2>Where this world could go</h2><p class="small">Route cost measures how difficult a scenario is to support. It is separate from the probability of a prediction.</p>
+        {#if !endpoints.length}<p class="empty">No alternative futures have been produced yet.</p>{/if}
+        <div class="future-grid">{#each endpoints as endpoint}<article class="future"><p class="eyebrow">{endpoint.status}</p><h3>{endpoint.summary || 'Future being developed'}</h3>{#if endpoint.discardReason}<p>{endpoint.discardReason}</p>{/if}
+          <details><summary>Assumptions and routes</summary><pre>{endpoint.assumptions || 'No driver assumptions recorded.'}</pre>{#each paths.filter(path => path.endpointId === endpoint.id) as path}<div class="route"><p><strong>{path.classification || path.status}</strong> · Repair cost {path.cost ?? 'unmeasured'}</p><p>{path.note}</p><pre>{path.nodes}</pre><a href={recordHref('Path',path.id)}>Route evidence ↗</a></div>{/each}
+            {#each claims.filter(claim => claim.endpointId === endpoint.id) as claim}<p><strong>{claim.classification || claim.status}:</strong> {claim.statement} {claim.reason}</p>{/each}
+          </details></article>{/each}</div>
+      </section>
+    {:else if tab === 'predictions'}
+      <section class="panel"><p class="eyebrow">Beliefs with a record</p><h2>What the system expects</h2><p class="small">Earlier predictions remain visible when evidence or the model changes. Model in use: <strong>{activeModel}</strong>.</p>
+        {#if !groupedForecasts.length}<p class="empty">No predictions registered yet.{#if world.status === 'Active'} Use “Update predictions” to register eligible events.{/if}</p>{/if}
+        {#each groupedForecasts as group}<article class="prediction">
+          <div class="event-title"><h3>{group.latest.question || 'Untitled prediction'}</h3><strong class="prediction-number">{percent(group.latest.probability)}</strong></div>
+          <p class="small">{group.latest.status} · Resolves by {date(group.latest.deadline)} · {group.latest.evidence || 'Evidence kind not recorded'}</p>
+          <p>Input {percent(group.latest.baseProbability)} → Prediction {percent(group.latest.probability)} <span class="small">/ {group.latest.model || 'Model not recorded'}</span></p>
+          {#if group.latest.error}<p class="error">{group.latest.error}</p>{/if}
+          {#if group.latest.outcome}<p><strong>Outcome: {group.latest.outcome}</strong> · Score {measure(group.latest.score)} <span class="small">(Brier score; lower is better)</span></p>{/if}
+          <div class="inline-actions"><a href={recordHref('Forecast',group.latest.id)}>Prediction record ↗</a>{#if group.latest.learningRunId}<a href={recordHref('LearningRun',group.latest.learningRunId)}>Learning behind this prediction ↗</a>{/if}{#if group.latest.status === 'Preregistered'}<button disabled={busy} onclick={() => outcomeForecast = group.latest.id}>Record outcome</button>{/if}</div>
+          <details><summary>{group.revisions.length} recorded {group.revisions.length === 1 ? 'prediction' : 'revisions'} · evidence and history</summary>{#each group.revisions as revision}<div class="revision"><p><strong>{percent(revision.probability)}</strong> · {date(revision.registered)} · {revision.model || 'Model unrecorded'}</p><p class="small">Input {percent(revision.baseProbability)} · {revision.status} · {revision.outcome || 'Unresolved'}</p><pre>{revision.sources || revision.marketRef || 'No outcome evidence recorded.'}</pre>{#each sourceLinks(revision.sources || revision.marketRef) as link}<a href={link} target="_blank" rel="noreferrer">{link} ↗</a>{/each}<a class="small" href={recordHref('Forecast',revision.id)}>{revision.id}</a></div>{/each}</details>
+        </article>{/each}
+      </section>
+      {#if outcomeForecast}<form class="panel outcome-form" onsubmit={(e) => { e.preventDefault(); void recordOutcome(); }}><h2>Record an outcome</h2><p>{forecasts.find(item => item.id === outcomeForecast)?.question}</p><label>Did the event happen?<select bind:value={outcome}><option value="yes">Yes</option><option value="no">No</option></select></label><label>Resolved at (UTC)<input type="datetime-local" bind:value={outcomeTime} required /></label><label>Sources, one per line<textarea bind:value={outcomeSources} required rows="3" placeholder="https://source.example/evidence"></textarea></label><div class="inline-actions"><button class="primary" disabled={busy}>Record and learn</button><button type="button" onclick={() => outcomeForecast = ''}>Cancel</button></div></form>{/if}
+    {:else if tab === 'learning'}
+      <section class="panel learning-intro"><p class="eyebrow">Learning from experience</p><h2>What changed, and why</h2><p>The learner adjusts how confidently it predicts events. Each candidate is tested against the previous model on the same held-out examples.</p><p class="small">This is learned calibration. It does not establish causal laws or guarantee future accuracy.</p><div class="model"><span>Current model</span><strong>{activeModel}</strong>{#if world.model}<span>Slope {measure(world.model.slope)} · Intercept {measure(world.model.intercept)}</span>{/if}</div>
+        <form onsubmit={(e) => { e.preventDefault(); void startLearning(); }}>
+          <label>Learn using evidence available by (UTC)<input type="datetime-local" bind:value={asOf} required /></label>
+          {#if world.mode !== 'observed'}<label>Dated {world.mode} experiences (JSON)<textarea bind:value={dataset} rows="7" spellcheck="false" placeholder="Paste a JSON array of dated experiences."></textarea></label><p class="small">Up to 512 experiences. Every item needs an event identity, input probability, outcome, dated registration and resolution, evidence kind and source references. Replay advances through dated evidence without waiting for real time.</p>{:else}<p class="small">This run uses verified outcomes already recorded in this world.</p>{/if}
+          {#if world.mode === 'simulated'}<p class="notice">Simulated world: improvements here demonstrate the mechanism using synthetic evidence. They do not update an observed-world model.</p>{/if}
+          <button class="primary" disabled={busy || busyRun || world.status !== 'Active'}>{busyRun ? 'Learning in progress…' : world.mode === 'observed' ? 'Learn from outcomes' : 'Run accelerated replay'}</button>
+        </form>
+      </section>
+      {#if !runs.length}<p class="panel empty">No learning runs yet. The first run will record its data, changed parameters, evaluation and decision here.</p>{/if}
+      {#each sortedRuns as run}<article class="panel learning-run">
+        <div class="event-title"><div><p class="eyebrow">{run.mode || world.mode} / {date(run.asOf)}</p><h2>{run.status === 'Adopted' ? 'An improved calibration was adopted' : run.status === 'Rejected' ? 'The previous model was kept' : run.status === 'Failed' ? 'Learning needs attention' : run.status}</h2></div><a class="record-link" href={recordHref('LearningRun',run.id)}>Run record ↗</a></div>
+        {#if run.error}<p class="error">{run.error}</p>{/if}{#if run.reportError}<p class="error">{run.reportError}</p>{/if}
+        {#if run.report}
+          <p>{run.report.reason}</p>
+          <div class="comparison"><div><span>Previous model</span><strong>{measure(run.report.incumbentBrier)}</strong></div><div><span>Candidate model</span><strong>{measure(run.report.candidateBrier)}</strong></div><div><span>Held-out examples</span><strong>{run.report.validationCount ?? '—'}</strong></div></div>
+          <p class="small">Brier score measures prediction error; lower is better. Trained on {run.report.trainingCount ?? 'unreported'} examples · Skipped {run.report.skippedCount ?? 'unreported'}.</p>
+          {#each run.report.changes as change}<div class="change"><strong>{change.meaning}</strong><p class="small">{change.name}: {measure(change.before)} → {measure(change.after)}</p></div>{/each}
+          {#each run.report.limitations as limitation}<p class="notice">{limitation}</p>{/each}
+          <details><summary>Training and evaluation evidence</summary><p>{run.report.provenance}</p><p class="small">Training identities</p><pre>{run.report.trainingIds.join('\n') || 'None recorded'}</pre><p class="small">Held-out identities</p><pre>{run.report.validationIds.join('\n') || 'None recorded'}</pre><p class="small">Skipped evidence</p><pre>{run.report.skipped}</pre></details>
+        {:else if !run.error && !run.reportError}<p class="small">The run has not published an evaluation yet. Current state: {run.status}.</p>{/if}
+      </article>{/each}
+    {:else}
+      <section class="panel"><p class="eyebrow">Current work</p><h2>What is happening</h2><p>World: <strong>{world.status}</strong> · Live connection: {streamStatus}</p>
+        {#each runs.filter(run => ['Created','Preparing','Training','Evaluating','Adopting'].includes(run.status)) as run}<p><strong>{run.status}</strong> — Learning run <a href={recordHref('LearningRun',run.id)}>{run.id}</a></p>{/each}
+        {#each failures as failure}<p class="error">{failure}</p>{/each}
+        {#if !failures.length}<p class="small">No failure messages in the loaded records.</p>{/if}
+        <h3>State changes observed in this session</h3>{#if !activity.length}<p class="empty">New changes will appear here while this page is open. Entity records preserve the full history.</p>{/if}
+        <ol class="activity">{#each activity as event}<li><strong>{event.entity_type} · {event.action}</strong><span>{event.status}</span><a href={recordHref(event.entity_type,event.entity_id)}>{event.entity_id}</a></li>{/each}</ol>
+      </section>
+    {/if}
+  {:else if !loading}
+    <section class="panel empty"><h2>A world to learn about.</h2><p>Create a world to explore its possible futures and track how evidence changes its predictions.</p></section>
+  {:else}<p class="panel">Loading worlds…</p>{/if}
+</div>
+
+<style>
+  .foresight { background:#fff; color:#101010; min-height:100vh; width:100%; padding:38px clamp(20px,4vw,64px) 66px; font:17px/1.55 'IBM Plex Sans',sans-serif; --rule:#1a1a1a; }
+  .foresight :global(*) { box-sizing:border-box; }
+  .foresight h1,.foresight h2,.foresight h3 { color:#101010; margin:0; font-weight:500; line-height:1.12; letter-spacing:-.02em; }
+  .foresight h1 { font:500 clamp(38px,4vw,66px)/1.02 'Cormorant Garamond',serif; max-width:800px; }
+  .foresight h2 { font:500 38px/1.1 'Cormorant Garamond',serif; }
+  .foresight h3 { font:500 22px/1.35 'IBM Plex Sans',sans-serif; }
+  .foresight p { margin:12px 0; }
+  .eyebrow,.live,.metrics span,.model,.comparison span { font:13px/1.55 'IBM Plex Mono',monospace; }
+  .eyebrow { text-transform:uppercase; letter-spacing:.08em; }
+  .masthead { border-bottom:2px solid var(--rule); padding-bottom:29px; display:flex; gap:29px; justify-content:space-between; align-items:start; }
+  .masthead p:not(.eyebrow) { max-width:600px; color:#6e6960; }
+  .live { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:180px; }
+  .live span { width:8px; height:8px; background:#ff3b1f; }.live .connected { background:#00aeef; }
+  .world-picker { display:flex; gap:17px; align-items:end; padding:22px 0; }
+  .world-picker label { flex:1; margin:0; }
+  .foresight label { display:grid; gap:8px; margin-bottom:17px; font-size:15px; font-weight:500; }
+  .foresight input,.foresight textarea,.foresight select { background:#fff; color:#101010; border:1px solid var(--rule); padding:11px 13px; border-radius:0; font:17px/1.4 'IBM Plex Sans',sans-serif; width:100%; min-width:0; }
+  .foresight textarea { resize:vertical; }.foresight input[type="datetime-local"] { max-width:360px; }
+  .foresight button { background:#fff; color:#101010; border:1px solid var(--rule); padding:11px 17px; border-radius:0; font:500 15px/1.4 'IBM Plex Sans',sans-serif; cursor:pointer; }
+  .foresight button:hover { background:#f4f1ea; }.foresight button:disabled { opacity:.55; cursor:wait; }
+  .foresight button.primary { background:#101010; color:#fff; }.foresight button.primary:hover { background:#333; }
+  .foresight :is(a,button,input,select,textarea,summary):focus-visible { outline:3px solid #00aeef; outline-offset:3px; }
+  .foresight a { color:#101010; text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
+  .panel { padding:29px; background:#f4f1ea; margin-top:22px; }.panel h2 { margin-bottom:17px; }
+  .small { font-size:15px; color:#6e6960; }.empty { padding-top:29px; padding-bottom:29px; color:#6e6960; }
+  .notice,.error { padding:15px 17px; border-left:4px solid #00aeef; background:#ece7dc; overflow-wrap:anywhere; }
+  .error { border-color:#ff3b1f; color:#101010; }.notice { color:#101010; }
+  .world-intro { padding:29px 0; display:flex; align-items:center; justify-content:space-between; gap:22px; }
+  .world-intro h2 { font-size:50px; }.world-actions { display:grid; gap:13px; flex-shrink:0; }
+  .record-link { font-size:13px; }.metrics { display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
+  .metrics>div { padding:17px 0; }.metrics span,.metrics strong { display:block; }.metrics strong { font:500 38px/1.3 'Cormorant Garamond',serif; }
+  .view-nav { display:flex; gap:8px; padding-top:22px; flex-wrap:wrap; }.view-nav button { border-color:transparent; padding:11px 17px; }.view-nav button[aria-pressed="true"] { border-bottom:3px solid #101010; background:#f6e800; }
+  .badge { margin-left:8px; }.event-list { list-style:none; margin:22px 0 0; padding:0; }.event-list>li,.prediction { padding:22px 0; border-top:1px solid var(--rule); }
+  .event-title { display:flex; justify-content:space-between; align-items:start; gap:22px; }.event-title h3 { max-width:800px; }.probability { font:500 22px/1.4 'IBM Plex Mono',monospace; flex-shrink:0; }
+  .prediction-number { font:500 38px/1.1 'Cormorant Garamond',serif; white-space:nowrap; }.future-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:22px; }
+  .future { border-top:2px solid var(--rule); padding-top:17px; }.foresight details { margin-top:17px; }.foresight summary { cursor:pointer; font-size:15px; font-weight:500; padding:8px 0; }
+  .foresight pre { color:#101010; background:#ece7dc; padding:13px; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.55 'IBM Plex Mono',monospace; max-height:320px; overflow:auto; margin:8px 0; }
+  .foresight details>a { display:block; margin:8px 0; }.route,.revision { margin:17px 0; padding:0 0 17px 17px; border-left:2px solid var(--rule); }.revision>a { display:block; }
+  .inline-actions { display:flex; flex-wrap:wrap; align-items:center; gap:17px; font-size:15px; }.create-form { display:grid; grid-template-columns:repeat(2,1fr); gap:17px; }.create-form h2,.wide { grid-column:1/-1; }
+  .model { display:flex; flex-wrap:wrap; gap:17px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); padding:17px 0; margin:22px 0; }
+  .comparison { display:grid; grid-template-columns:repeat(3,1fr); gap:17px; margin:22px 0; }.comparison span,.comparison strong { display:block; }.comparison strong { font:500 38px/1.3 'Cormorant Garamond',serif; }
+  .change { padding:13px 0; border-top:1px solid var(--rule); }.activity { padding:0; list-style:none; }.activity li { display:grid; grid-template-columns:1fr auto; border-top:1px solid var(--rule); padding:15px 0; }.activity a { grid-column:1/-1; font:13px/1.55 'IBM Plex Mono',monospace; }
+  @media(max-width:850px) { .masthead,.world-intro { flex-direction:column; align-items:start; }.foresight h1 { font-size:50px; }.world-actions { display:flex; flex-wrap:wrap; align-items:center; }.metrics { grid-template-columns:repeat(2,1fr); }.panel { padding:22px; } }
+  @media(max-width:540px) { .foresight { padding:22px 17px 90px; }.foresight h1,.world-intro h2 { font-size:38px; }.foresight h2 { font-size:29px; }.world-picker,.event-title { align-items:stretch; flex-direction:column; }.world-picker label { width:100%; }.create-form { grid-template-columns:1fr; }.comparison { gap:10px; }.comparison strong { font-size:29px; }.view-nav button { padding:10px; }.panel { padding:17px; }.prediction-number { font-size:29px; } }
+</style>
