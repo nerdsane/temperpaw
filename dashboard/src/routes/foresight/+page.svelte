@@ -212,6 +212,7 @@
       <label class="wide">Description<textarea bind:value={newDescription} rows="2" required placeholder="The situation, questions and assumptions."></textarea></label>
       <label>Target date<input type="date" bind:value={newTarget} required /></label>
       <label>Experience source<select bind:value={newMode}><option value="observed">Observed outcomes</option><option value="historical">Historical replay</option><option value="simulated">Simulated demonstration</option></select></label>
+      {#if newMode !== 'observed'}<label>Replay starts at (UTC)<input type="datetime-local" bind:value={asOf} required /></label>{/if}
       <label>Research budget (cents)<input type="number" min="1" max="10000" bind:value={newBudget} required /></label>
       <div class="wide"><p class="small">Each world's evidence source stays distinct. Simulated learning demonstrates mechanics and does not establish real-world accuracy.</p><button class="primary" disabled={busy}>{busy ? 'Creating…' : 'Create world'}</button></div>
     </form>
