@@ -405,3 +405,51 @@ fn legacy_entity_types_are_retired_read_only_except_for_system() {
         );
     }
 }
+
+#[test]
+fn learning_callbacks_accept_only_the_platform_wasm_service() {
+    let engine = engine();
+    let actual_service = temper_server::request_context::AgentContext::for_service("wasm-runtime")
+        .security_ctx
+        .expect("service must carry typed authority");
+    let unrelated_service =
+        temper_server::request_context::AgentContext::for_service("other-service")
+            .security_ctx
+            .expect("service must carry typed authority");
+    let session = ctx("ordinary-session", "agent");
+    let a = attrs(&[("id", serde_json::json!("learning-test"))]);
+    for (entity, actions) in [
+        (
+            "LearningRun",
+            &["Prepared", "Trained", "CandidatePassed", "Reject", "Fail"][..],
+        ),
+        ("World", &["ReplayOpened"][..]),
+        (
+            "Forecast",
+            &["OutcomeVerified", "RevisionVerified", "OutcomeFailed"][..],
+        ),
+    ] {
+        for action in actions {
+            assert!(
+                engine
+                    .authorize(&actual_service, action, entity, &a)
+                    .is_allowed(),
+                "actual WASM callback must reach {entity}.{action}"
+            );
+            for denied in [&session, &unrelated_service] {
+                assert!(
+                    !engine.authorize(denied, action, entity, &a).is_allowed(),
+                    "unrelated caller must not reach {entity}.{action}"
+                );
+            }
+        }
+    }
+    for (entity, action) in [("World", "OpenReplay"), ("Forecast", "RecordOutcome")] {
+        assert!(
+            !engine
+                .authorize(&actual_service, action, entity, &a)
+                .is_allowed(),
+            "callback permit must not grant operator action {entity}.{action}"
+        );
+    }
+}

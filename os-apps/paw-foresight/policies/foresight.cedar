@@ -523,3 +523,16 @@ forbid(principal, action == Action::"create", resource is World)
 when { resource has ModelJson && resource.ModelJson != "" };
 forbid(principal, action == Action::"create", resource is World)
 when { resource has AdoptedLearningRunId && resource.AdoptedLearningRunId != "" };
+
+
+// Action integrations return through the kernel's named WASM service. Entity
+// triggers keep their declared system principal; operator actions are separate.
+permit(principal == Agent::"service:wasm-runtime",
+  action in [Action::"Prepared", Action::"Trained", Action::"CandidatePassed",
+             Action::"Reject", Action::"Fail"],
+  resource is LearningRun);
+permit(principal == Agent::"service:wasm-runtime",
+  action == Action::"ReplayOpened", resource is World);
+permit(principal == Agent::"service:wasm-runtime",
+  action in [Action::"OutcomeVerified", Action::"RevisionVerified", Action::"OutcomeFailed"],
+  resource is Forecast);
