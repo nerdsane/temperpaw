@@ -1955,7 +1955,7 @@
         <Property Name="Coverage" Type="Edm.String" />
         <Property Name="ProvenanceRef" Type="Edm.String" />
         <Annotation Term="Temper.Provider" String="datadog" />
-        <Annotation Term="Temper.Role" String="resource" />
+        <Annotation Term="Temper.Role" String="monitor" />
       </EntityType>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />

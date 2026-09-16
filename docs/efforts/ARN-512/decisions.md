@@ -23,3 +23,13 @@ and fails the gates); bump by hand under this effort (chosen).
 **Chose pinning now over waiting because:** the edges are the visible half of the fix and the pin is a three-file change; given up: one more image build and deploy today.
 
 **Where:** same three files.
+
+## D3 — a Datadog monitor's role is `monitor`, not `resource` (Rita, 2026-09-15)
+
+**Decision:** the twin generator gives `DsfDatadogMonitor` `Temper.Role = "monitor"` (provider stays `datadog`); every other provider-managed type stays `resource`.
+
+**Came up because:** the Twins page coloured monitors as resources; a monitor watches the app rather than serving it.
+
+**Options:** leave it and colour by provider in the page (rejected: the role is the twin's concern, the page should not second-guess it); a `monitor` role (chosen).
+
+**Where:** `os-apps/dsf-twin/specs/generate.py` (`PROVIDER_ROLES`), regenerated `model.csdl.xml`, `test_names.py`.
