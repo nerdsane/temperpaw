@@ -192,7 +192,10 @@ fn progressive_registration_coalesces_requests_and_rejects_stale_batches() {
         .filter_map(|action| action.get("triggers").and_then(toml::Value::as_array))
         .flatten()
     {
-        if matches!(trigger.get("module").and_then(toml::Value::as_str), Some("register_forecasts" | "aggregate_costs")) {
+        if matches!(
+            trigger.get("module").and_then(toml::Value::as_str),
+            Some("register_forecasts" | "aggregate_costs")
+        ) {
             assert!(
                 trigger.get("on_failure").is_none(),
                 "a refused old callback must not compensate the current batch"

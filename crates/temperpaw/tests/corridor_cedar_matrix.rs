@@ -774,12 +774,37 @@ fn trusted_corridor_workers_reuse_workspaces_without_granting_session_browse() {
     let engine = engine();
     let workspace = attrs(&[("id", serde_json::json!("world-workspace"))]);
     for action in ["read", "list"] {
-        assert!(engine.authorize(&ctx("service:system", "system"), action, "Workspace", &workspace).is_allowed());
-        for principal in [ctx("repairer", "agent"), ctx("service:wasm-runtime", "wasm-runtime")] {
-            assert!(!engine.authorize(&principal, action, "Workspace", &workspace).is_allowed());
+        assert!(
+            engine
+                .authorize(
+                    &ctx("service:system", "system"),
+                    action,
+                    "Workspace",
+                    &workspace
+                )
+                .is_allowed()
+        );
+        for principal in [
+            ctx("repairer", "agent"),
+            ctx("service:wasm-runtime", "wasm-runtime"),
+        ] {
+            assert!(
+                !engine
+                    .authorize(&principal, action, "Workspace", &workspace)
+                    .is_allowed()
+            );
         }
     }
     for action in ["update", "delete", "Freeze", "WorkspaceArchive"] {
-        assert!(!engine.authorize(&ctx("service:system", "system"), action, "Workspace", &workspace).is_allowed());
+        assert!(
+            !engine
+                .authorize(
+                    &ctx("service:system", "system"),
+                    action,
+                    "Workspace",
+                    &workspace
+                )
+                .is_allowed()
+        );
     }
 }
