@@ -46,6 +46,7 @@ export function parseWorld(row: Row) {
     error: text(row, 'error_message'), corpusId: text(row, 'corpus_file_id'),
     agentProvider: text(row, 'agent_provider'), agentModel: text(row, 'agent_model'),
     researchSessionId: text(row, 'research_session_id'),
+    explorationPhase: text(row, 'exploration_phase'),
   };
 }
 export type World = ReturnType<typeof parseWorld>;
@@ -69,6 +70,36 @@ export async function loadResearchSession(
       turns: number(field(row, 'turn_count')), heartbeat: text(row, 'last_heartbeat_at') };
   } catch (error) {
     return { kind: 'unavailable', id, error: error instanceof Error ? error.message : 'Could not load the linked research session.' };
+  }
+}
+
+/** Only a verified failure belonging to this world can offer a research retry. */
+export function canRetryResearch(
+  world: World | null, session: ResearchSessionState, requestedSessionId?: string,
+): boolean {
+  return world?.status === 'Seeding' && session.kind === 'ready'
+    && session.id === world.researchSessionId && session.id !== requestedSessionId
+    && ['Failed', 'Cancelled'].includes(session.status);
+}
+
+/** Keep the old session fenced until the world reports its replacement, even after an uncertain HTTP failure. */
+export async function retryForesightResearch(
+  world: World, session: ResearchSessionState, requests: Record<string, string>,
+  api: Pick<WorldOperations, 'postEntityAction'>,
+): Promise<void> {
+  if (session.kind !== 'ready' || !canRetryResearch(world, session, requests[world.id])) {
+    throw new Error('Research retry requires a newly confirmed failed or cancelled session.');
+  }
+  requests[world.id] = session.id;
+  try {
+    await api.postEntityAction('Worlds', world.id, 'ResumeSeed', {});
+  } catch (error) {
+    // A client rejection did not accept the action; transport failures may have.
+    if (error && typeof error === 'object' && 'status' in error
+      && typeof error.status === 'number' && error.status >= 400 && error.status < 500 && error.status !== 408) {
+      delete requests[world.id];
+    }
+    throw error;
   }
 }
 
@@ -113,11 +144,11 @@ export function parseEvent(row: Row) {
     edges: text(row, 'edges'), resolution: text(row, 'resolution') };
 }
 export function parseEndpoint(row: Row) {
-  return { ...identity(row), summary: text(row, 'summary'), assumptions: text(row, 'driver_config'),
+  return { ...identity(row), summary: text(row, 'summary'), bundleFileId:text(row,'bundle_file_id'), assumptions: text(row, 'driver_config'),
     weight: probability(field(row, 'weight')), error: text(row, 'error_message'), discardReason: text(row, 'discard_reason') };
 }
 export function parsePath(row: Row) {
-  return { ...identity(row), endpointId: text(row, 'endpoint_id'), classification: text(row, 'classification'),
+  return { ...identity(row), endpointId: text(row, 'endpoint_id'), claimId:text(row,'claim_id'), classification: text(row, 'classification'),
     note: text(row, 'classification_note'), cost: number(field(row, 'repair_cost')), nodes: text(row, 'required_node_ids'),
     error: text(row, 'error_message') };
 }
@@ -181,6 +212,12 @@ export function utcTime(value: string): string {
   const parsed = new Date(value.endsWith('Z') ? value : value + 'Z');
   if (!Number.isFinite(parsed.getTime())) throw new Error('Enter a valid UTC date and time.');
   return parsed.toISOString().slice(0, 19) + 'Z';
+}
+
+/** Start a new outcome draft at the world's current clock, never a prior form's date. */
+export function outcomeFormDefaults(mode: string, replayClock: string, now = new Date()) {
+  const instant = mode === 'observed' ? now.toISOString() : replayClock;
+  return {time:utcTime(instant).slice(0, 19), outcome:'yes', sources:''};
 }
 
 export interface ForesightLocation { worldId: string; asOf: string; tab: string }
@@ -306,4 +343,35 @@ export async function startForesightExploration(
   if (!world.agentProvider || !world.agentModel) throw new Error('This world needs a research provider and model before exploration.');
   if (endpoints.length) throw new Error('This world already has possible futures. Inspect their progress before continuing.');
   await api.postEntityAction('Worlds', world.id, 'SampleEndpoints', {});
+}
+
+/** This is a requirement list, not a derived causal or chronological ordering. */
+export function requiredEvents(value: string, events: ReturnType<typeof parseEvent>[]) {
+  let ids: unknown;
+  try { ids = json(value || '[]'); }
+  catch { return {items:[], error:'The route has an unreadable required-event list.'}; }
+  if (!Array.isArray(ids) || !ids.every((id): id is string => typeof id === 'string' && id.trim().length > 0)) {
+    return {items:[], error:'The route has an invalid required-event list.'};
+  }
+  const byId = new Map(events.map(event => [event.id, event]));
+  return {items:ids.map(id => ({id, event:byId.get(id) ?? null})), error:''};
+}
+
+export type FutureBundleState =
+  | {kind:'loading'}
+  | {kind:'ready'; text:string}
+  | {kind:'unavailable'; error:string};
+
+/** Read the saved document through the same authenticated API boundary as entity reads. */
+export async function loadFutureBundle(
+  fileId: string, fetchResponse: (path: string) => Promise<Response>,
+): Promise<FutureBundleState> {
+  try {
+    const quotedId = encodeURIComponent(fileId.replaceAll("'", "''"));
+    const response = await fetchResponse(`/tdata/Files('${quotedId}')/$value`);
+    if (!response.ok) throw new Error(`The saved future story could not be read (HTTP ${response.status}).`);
+    return {kind:'ready', text:await response.text()};
+  } catch (error) {
+    return {kind:'unavailable', error:error instanceof Error ? error.message : 'The saved future story could not be read.'};
+  }
 }

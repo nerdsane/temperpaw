@@ -601,3 +601,64 @@ forbid(principal, action == Action::"ResearchSessionStarted", resource is World)
 unless { principal == Agent::"service:wasm-runtime" };
 forbid(principal, action == Action::"create", resource is World)
 when { resource has ResearchSessionId && resource.ResearchSessionId != "" };
+
+// Session reports enter deterministic work through declared system entity triggers.
+// The broad dashboard permits must not expose these internal entry actions.
+permit(principal, action == Action::"CheckDiversityBarrier", resource is Endpoint)
+when { principal has agent_type && principal.agent_type == "system" };
+forbid(principal, action == Action::"CheckDiversityBarrier", resource is Endpoint)
+unless { principal has agent_type && principal.agent_type == "system" };
+
+permit(principal, action in [Action::"PrepareClaims", Action::"StartWriter", Action::"EvaluateEndpointScoring"], resource is Endpoint)
+when { principal has agent_type && principal.agent_type == "system" };
+forbid(principal, action in [Action::"PrepareClaims", Action::"StartWriter", Action::"EvaluateEndpointScoring"], resource is Endpoint)
+unless { principal has agent_type && principal.agent_type == "system" };
+
+permit(principal, action in [Action::"PrepareBridge", Action::"EvaluateRoutes"], resource is Claim)
+when { principal has agent_type && principal.agent_type == "system" };
+forbid(principal, action in [Action::"PrepareBridge", Action::"EvaluateRoutes"], resource is Claim)
+unless { principal has agent_type && principal.agent_type == "system" };
+
+permit(principal, action in [Action::"EvaluateRepair", Action::"EvaluateChallenge", Action::"RelayScoredRoute", Action::"RelayPrunedRoute", Action::"StartChallenge", Action::"StartRepair"], resource is Path)
+when { principal has agent_type && principal.agent_type == "system" };
+forbid(principal, action in [Action::"EvaluateRepair", Action::"EvaluateChallenge", Action::"RelayScoredRoute", Action::"RelayPrunedRoute", Action::"StartChallenge", Action::"StartRepair"], resource is Path)
+unless { principal has agent_type && principal.agent_type == "system" };
+
+
+// Progressive publication and background exploration use declared trusted entries.
+permit(principal, action in [Action::"RequestForecastRegistration", Action::"StartForecastRegistration",
+  Action::"MaybeDeepen", Action::"ContinueDeepening", Action::"CommitForecastSnapshot"], resource is World)
+when { principal.agent_type == "system" };
+permit(principal == Agent::"service:wasm-runtime",
+  action in [Action::"BeginDeepening", Action::"DeepeningClaimPrepared", Action::"RegistrationSnapshotPrepared"], resource is World);
+forbid(principal, action in [Action::"RequestForecastRegistration", Action::"StartForecastRegistration",
+  Action::"MaybeDeepen", Action::"ContinueDeepening", Action::"CommitForecastSnapshot"], resource is World)
+unless { principal has agent_type && principal.agent_type == "system" };
+forbid(principal, action in [Action::"BeginDeepening", Action::"DeepeningClaimPrepared", Action::"RegistrationSnapshotPrepared"], resource is World)
+unless { principal == Agent::"service:wasm-runtime" };
+permit(principal, action == Action::"BeginDeepening", resource is Claim)
+when { principal.agent_type == "system" };
+forbid(principal, action == Action::"BeginDeepening", resource is Claim)
+unless { principal has agent_type && principal.agent_type == "system" };
+
+// The sequence-checked timer inherits the trusted identity that last reset it.
+permit(principal, action == Action::"ForecastRegistrationTimedOut", resource is World)
+when { principal.agent_type == "system" || principal == Agent::"service:wasm-runtime" };
+forbid(principal, action == Action::"ForecastRegistrationTimedOut", resource is World)
+unless { (principal has agent_type && principal.agent_type == "system") || principal == Agent::"service:wasm-runtime" };
+
+permit(principal, action == Action::"EvaluateWorldCascade", resource is World)
+when { principal has agent_type && principal.agent_type == "system" };
+forbid(principal, action == Action::"EvaluateWorldCascade", resource is World)
+unless { principal has agent_type && principal.agent_type == "system" };
+
+// Dashboard questions are explicit operator inputs. Worker-created requirements
+// must pass path evaluation and cannot claim this reserved manual author marker.
+forbid(principal, action == Action::"create", resource is EventNode)
+when { resource has AuthorAgentId && resource.AuthorAgentId == "dashboard" }
+unless { principal is Admin || (principal has agent_type && ["human","supervisor","system"].contains(principal.agent_type)) };
+
+// Declared corridor workers reuse their tenant's world workspaces. This does
+// not expose workspace browsing or management to model sessions or operators.
+permit(principal is Agent, action in [Action::"read", Action::"list"], resource is Workspace)
+when { principal has agent_type && principal.agent_type == "system" };

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/foresight.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, outcomeFormDefaults } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 test('unknown and malformed probabilities never look like zero certainty', () => {
   for (const value of [null, undefined, '', '  ', 'NaN', 'Infinity', -0.1, 1.01]) assert.equal(probability(value), null);
@@ -94,4 +94,24 @@ test('new forecast questions reject certainty values that registration skips', (
   assert.equal(predictionInputProbability(55), 0.55);
   assert.equal(predictionInputProbability(0.1), 0.001);
   assert.ok(Math.abs(predictionInputProbability(99.9) - 0.999) < Number.EPSILON);
+});
+
+test('outcome forms use the selected replay clock and reset previous answers', () => {
+  const now = new Date('2026-09-16T18:00:45Z');
+  for (const mode of ['simulated','historical']) {
+    const first = outcomeFormDefaults(mode,'2025-06-02T00:00',now);
+    assert.deepEqual(first,{time:'2025-06-02T00:00:00',outcome:'yes',sources:''});
+    first.time='2026-01-01T00:00'; first.outcome='no'; first.sources='unrelated-evidence';
+    assert.deepEqual(outcomeFormDefaults(mode,'2025-07-03T12:30',now),
+      {time:'2025-07-03T12:30:00',outcome:'yes',sources:''});
+  }
+});
+
+test('observed outcome forms use fresh UTC rather than the replay clock or a prior opening', () => {
+  assert.equal(outcomeFormDefaults('observed','2025-06-02T00:00',new Date('2026-09-16T18:00:45Z')).time,'2026-09-16T18:00:45');
+  assert.equal(outcomeFormDefaults('observed','invalid',new Date('2026-09-16T19:10:20Z')).time,'2026-09-16T19:10:20');
+});
+
+test('a replay outcome cannot silently replace a missing replay clock with actual time', () => {
+  assert.throws(()=>outcomeFormDefaults('simulated','',new Date('2026-09-16T18:00:00Z')),/valid UTC/);
 });

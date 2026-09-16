@@ -170,7 +170,7 @@ fn adversary_prompt(
          exists. Do NOT create Files, Directories, or Workspaces yourself, and do NOT invent a \
          file-creation API via temper.action — temper.write is the whole job. Call it exactly \
          like this:\n\
-         result = temper.write(\"/challenge-log.md\", \"<your markdown challenge log>\")\n\
+         result = temper.write(\"/challenge-log-{path_id}.md\", \"<your markdown challenge log>\")\n\
          temper.write returns {{\"file_id\": \"...\", \"path\": \"...\", \"workspace_id\": \
          \"...\"}}. Use result[\"file_id\"] as challenge_log_file_id below, then self-report:\n\
          temper.action(\"Paths\", \"{path_id}\", \"ChallengeComplete\", \
@@ -320,6 +320,7 @@ fn start_session(
     max_turns: &str,
     user_message: &str,
     workspace_id: &str,
+    latency_profile: &str,
 ) -> Result<String, String> {
     let session_resp = ctx.http_call(
         "POST",
@@ -350,6 +351,7 @@ fn start_session(
         "agent_name": role,
         "tools_enabled": tools,
         "tool_choice": "required",
+        "provider_latency_profile": latency_profile,
         "max_turns": max_turns,
         "user_message": message,
         "sandbox_url": "none",
@@ -455,15 +457,9 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             ) {
                 Ok(r) if r.status >= 200 && r.status < 300 => {
                     let endpoint: Value = serde_json::from_str(&r.body).unwrap_or(json!({}));
-                    let bundle_file_id =
-                        entity_field(&endpoint, "bundle_file_id", "BundleFileId");
-                    bundle_inline = fetch_file_inline(
-                        &ctx,
-                        &api,
-                        &headers,
-                        &bundle_file_id,
-                        "endpoint bundle",
-                    );
+                    let bundle_file_id = entity_field(&endpoint, "bundle_file_id", "BundleFileId");
+                    bundle_inline =
+                        fetch_file_inline(&ctx, &api, &headers, &bundle_file_id, "endpoint bundle");
                 }
                 Ok(r) => ctx.log(
                     "warn",
@@ -534,6 +530,11 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             "40",
             &adversary_msg,
             &workspace_id,
+            if entity_field(&world, "exploration_phase", "ExplorationPhase") == "first_pass" {
+                "foresight_first_pass"
+            } else {
+                "standard"
+            },
         )?;
 
         ctx.log(
@@ -558,6 +559,39 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_paths_are_owned_and_retry_stable() {
+        let output_paths = |id: &str| {
+            let prompt = adversary_prompt(id, "w-1", "repair", "bundle", "[]", false);
+            prompt
+                .split('"')
+                .filter(|part| part.starts_with('/') && part.ends_with(".md"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let first = output_paths("owner-a");
+        let second = output_paths("owner-b");
+        assert_eq!(first.len(), 1, "each saved artifact needs an explicit path");
+        assert_eq!(
+            first,
+            output_paths("owner-a"),
+            "a retry reuses its own files"
+        );
+        assert_eq!(second.len(), first.len());
+        assert!(first.iter().all(|path| path.contains("owner-a")));
+        assert!(second.iter().all(|path| path.contains("owner-b")));
+        assert!(
+            first.iter().all(|path| !second.contains(path)),
+            "workers sharing a workspace must never overwrite another worker's file"
+        );
+        let distinct: std::collections::BTreeSet<_> = first.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            first.len(),
+            "one worker's artifacts have different purposes"
+        );
+    }
 
     // Prompt-contract tests: the generated prompts must reference the exact
     // entity sets, action names, and parameter names the specs declare.
@@ -600,7 +634,7 @@ mod tests {
         // file/dir creation — and never leave the bare placeholder behind.
         let p = prompt(false);
         assert!(
-            p.contains("temper.write(\"/challenge-log.md\""),
+            p.contains("temper.write(\"/challenge-log-p-1.md\""),
             "adversary prompt must show the literal temper.write call"
         );
         assert!(
@@ -702,7 +736,10 @@ mod tests {
         assert_eq!(entity_field(&snake, "bundle_file_id", "BundleFileId"), "f1");
 
         let pascal = json!({ "BundleFileId": "f2" });
-        assert_eq!(entity_field(&pascal, "bundle_file_id", "BundleFileId"), "f2");
+        assert_eq!(
+            entity_field(&pascal, "bundle_file_id", "BundleFileId"),
+            "f2"
+        );
 
         // An empty snake_case value falls through to PascalCase.
         let empty_snake = json!({ "BundleFileId": "f2", "fields": { "bundle_file_id": "" } });

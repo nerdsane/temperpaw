@@ -43,7 +43,7 @@ fn context(module: &str, trigger: &str, fields: Value) -> WasmInvocationContext 
         trigger_action: trigger.into(),
         wasm_module: Some(module.into()),
         trigger_params: json!({}),
-        entity_state: json!({"status":"RegisteringForecasts","fields":fields,"events":[{"action":trigger,"timestamp":"2026-09-16T04:00:00.123456Z"}]}),
+        entity_state: json!({"status":"RegisteringForecasts","fields":fields,"counters":{"registration_attempt":1},"events":[{"action":trigger,"timestamp":"2026-09-16T04:00:00.123456Z"}]}),
         agent_id: None,
         session_id: None,
         integration_config: BTreeMap::from([(
@@ -59,16 +59,41 @@ fn context(module: &str, trigger: &str, fields: Value) -> WasmInvocationContext 
 }
 async fn invoke(
     module: &str,
-    ctx: WasmInvocationContext,
+    mut ctx: WasmInvocationContext,
     host: impl WasmHost + 'static,
 ) -> WasmInvocationResult {
-    let engine = WasmEngine::new().unwrap();
+    // Each invocation still receives a fresh host/context; reuse only compiled
+    // immutable modules so multi-case boundary tests do not compile per row.
+    static ENGINE: OnceLock<WasmEngine> = OnceLock::new();
+    let engine = ENGINE.get_or_init(|| WasmEngine::new().unwrap());
     let hash = engine.compile_and_cache(&module_bytes(module)).unwrap();
+    let host = Arc::new(host);
+    let result = engine
+        .invoke(
+            &hash,
+            &ctx,
+            host.clone(),
+            &WasmResourceLimits::default(),
+            Arc::new(RwLock::new(StreamRegistry::default())),
+        )
+        .await
+        .unwrap();
+    if result.callback_action != "RegistrationSnapshotPrepared" {
+        return result;
+    }
+    // Follow the declared snapshot-commit edge with a later host event, using
+    // the exact durable callback payload. Later live reads must not alter it.
+    for (key, value) in result.callback_params.as_object().unwrap() {
+        ctx.entity_state["fields"][key] = value.clone();
+    }
+    ctx.trigger_action = "CommitForecastSnapshot".into();
+    ctx.entity_state["events"] =
+        json!([{"action":"CommitForecastSnapshot","timestamp":"2026-09-16T04:00:01Z"}]);
     engine
         .invoke(
             &hash,
             &ctx,
-            Arc::new(host),
+            host,
             &WasmResourceLimits::default(),
             Arc::new(RwLock::new(StreamRegistry::default())),
         )
@@ -77,11 +102,77 @@ async fn invoke(
 }
 fn registration_host() -> SimWasmHost {
     SimWasmHost::new().with_default_response(404,"missing")
+      .with_response("https://temper.test/tdata/Endpoints?$filter=world_id eq 'world-1'&$top=513",200,"{\"value\":[]}")
       .with_response("https://temper.test/tdata/EventNodes?$filter=world_id eq 'world-1'&$top=513",200,&json!({"value":[{"Id":"node-1","Status":"Proposed","Probability":"0.55","Provenance":"authored","ResolveBy":"2027-06-01T00:00:00Z","Statement":"Synthetic future event"}]}).to_string())
       .with_response("https://temper.test/tdata/Forecasts?$filter=event_node_id eq 'node-1'&$top=513",200,"{\"value\":[]}")
 }
 fn world(mode: &str) -> Value {
     json!({"learning_mode":mode,"frontier_date":"2028-01-01T00:00:00Z","last_ingest_date":"2026-09-16T00:00:00Z","model_json":"","adopted_learning_run_id":""})
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn observed_manual_questions_remain_eligible_but_unreviewed_worker_nodes_do_not() {
+    for (author, expected) in [
+        ("dashboard", "ForecastPrepared"),
+        ("repairer", "ForecastRegistrationComplete"),
+    ] {
+        let host = registration_host().with_response("https://temper.test/tdata/EventNodes?$filter=world_id eq 'world-1'&$top=513",200,
+            &json!({"value":[{"Id":"node-1","AuthorAgentId":author,"Status":"Proposed","Probability":"0.55","Provenance":"authored","ResolveBy":"2027-06-01T00:00:00Z","Statement":"Explicit question"}]}).to_string());
+        let result = invoke(
+            "register_forecasts",
+            context(
+                "register_forecasts",
+                "StartForecastRegistration",
+                world("observed"),
+            ),
+            host,
+        )
+        .await;
+        assert_eq!(result.callback_action, expected, "{author}: {result:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn corridor_registration_waits_for_an_evaluated_path_and_excludes_siblings() {
+    for status in [
+        "Solving",
+        "Repaired",
+        "Challenged",
+        "Scored",
+        "Canonical",
+        "Rejected",
+    ] {
+        let path = json!({"Id":"path-ready","WorldId":"world-1","Status":status,"RequiredNodeIds":"[\"node-1\"]"});
+        let host = registration_host()
+            .with_response("https://temper.test/tdata/Endpoints?$filter=world_id eq 'world-1'&$top=513",200,"{\"value\":[{\"Id\":\"endpoint\"}]}")
+            .with_response("https://temper.test/tdata/Paths?$filter=world_id eq 'world-1'&$top=513",200,&json!({"value":[path]}).to_string())
+            .with_response("https://temper.test/tdata/EventNodes?$filter=world_id eq 'world-1'&$top=513",200,&json!({"value":[{"Id":"unfinished-sibling","Status":"Proposed","Probability":"0.8","Provenance":"authored","ResolveBy":"2027-06-01T00:00:00Z","Statement":"Unverified sibling requirement"},{"Id":"node-1","Status":"Proposed","Probability":"0.55","Provenance":"authored","ResolveBy":"2027-06-01T00:00:00Z","Statement":"Evaluated requirement"}]}).to_string())
+            .with_response("https://temper.test/tdata/Paths('path-ready')",200,&path.to_string());
+        let result = invoke(
+            "register_forecasts",
+            context(
+                "register_forecasts",
+                "StartForecastRegistration",
+                world("simulated"),
+            ),
+            host,
+        )
+        .await;
+        assert!(result.success, "{result:?}");
+        assert_eq!(
+            result.callback_action,
+            if status == "Canonical" {
+                "ForecastPrepared"
+            } else {
+                "ForecastRegistrationComplete"
+            },
+            "{status}: {result:?}"
+        );
+        assert_eq!(result.callback_params["expected_registration_attempt"], 1);
+        if status == "Canonical" {
+            assert_eq!(result.callback_params["forecast_event_node_id"], "node-1");
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -92,14 +183,17 @@ async fn observed_registration_uses_host_event_time_even_without_ingest_date() {
         let result = invoke(
             "register_forecasts",
             context("register_forecasts", "PathsScored", fields),
-            registration_host(),
+            registration_host()
+                .with_response("https://temper.test/tdata/Endpoints?$filter=world_id eq 'world-1'&$top=513",200,"{\"value\":[{\"Id\":\"endpoint\"}]}")
+                .with_response("https://temper.test/tdata/Paths?$filter=world_id eq 'world-1'&$top=513",200,"{\"value\":[{\"Id\":\"path\"}]}")
+                .with_response("https://temper.test/tdata/Paths('path')",200,&json!({"Id":"path","WorldId":"world-1","Status":"Canonical","RequiredNodeIds":"[\"node-1\"]"}).to_string()),
         )
         .await;
         assert!(result.success, "{result:?}");
         assert_eq!(result.callback_action, "ForecastPrepared", "{result:?}");
         assert_eq!(
             result.callback_params["forecast_registered_at"],
-            "2026-09-16T04:00:00Z"
+            "2026-09-16T04:00:01Z"
         );
     }
 }
@@ -226,6 +320,8 @@ async fn adoption_during_registration_keeps_the_batch_model_snapshot() {
     fields["adopted_learning_run_id"] = json!("new-run");
     fields["registration_model_json"] = json!(frozen.to_string());
     fields["forecast_learning_run_id"] = json!("old-run");
+    fields["forecast_registered_at"] = json!("2026-09-15T00:00:00Z");
+    fields["registration_nodes_json"] = json!(json!([{"Id":"node-1","Probability":"0.55","Provenance":"authored","ResolveBy":"2027-06-01T00:00:00Z","Statement":"Frozen future event"}]).to_string());
     let result = invoke(
         "register_forecasts",
         context("register_forecasts", "ForecastRegistered", fields),
@@ -242,6 +338,15 @@ async fn adoption_during_registration_keeps_the_batch_model_snapshot() {
         "old-run"
     );
     assert_eq!(result.callback_params["forecast_probability"], "0.55");
+    assert_eq!(
+        result.callback_params["forecast_question"],
+        "Frozen future event"
+    );
+    assert_eq!(
+        result.callback_params["forecast_registered_at"],
+        "2026-09-15T00:00:00Z"
+    );
+    assert_eq!(result.callback_params["expected_registration_attempt"], 1);
     assert_eq!(
         serde_json::from_str::<Value>(
             result.callback_params["registration_model_json"]

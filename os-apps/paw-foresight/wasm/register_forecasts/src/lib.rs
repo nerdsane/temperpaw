@@ -1,8 +1,8 @@
 //! register_forecasts — preregister the engine's gradeable word (ADR-002).
 //!
-//! On World.PathsScored: every EventNode that is a live, genuinely
-//! probabilistic, non-determined claim resolving inside the world's frontier
-//! becomes a Forecast — preregistered, immutable, graded later by
+//! World serializes requests from accepted paths and explicit replay inputs.
+//! Each batch freezes live, probabilistic requirements of Canonical/Tail paths
+//! inside the world's frontier. Forecasts are immutable and graded later by
 //! evidence_ingest. Changed inputs or an adopted model create linked immutable revisions.
 //! Identical requests converge to the same stored identity. Each invocation computes
 //! the next registration; declared entity triggers commit it and continue the loop.
@@ -11,6 +11,7 @@
 
 use corridor_embed::{build_embed_request, nearest, parse_embeddings};
 use foresight_learning_core::Model;
+use std::collections::BTreeSet;
 use temper_wasm_sdk::prelude::*;
 
 // --- Reconcile / dedup (D2 grounding, ADR-005) -------------------------------
@@ -352,11 +353,145 @@ fn first_source_ref(source_refs: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Only deterministic, completed evaluations release requirements for registration.
+fn evaluated_required_nodes(paths: &[Value], world_id: &str) -> Result<BTreeSet<String>, String> {
+    let mut nodes = BTreeSet::new();
+    for path in paths {
+        if row_str(path, "WorldId") != world_id || !matches!(row_status(path), "Canonical" | "Tail")
+        {
+            continue;
+        }
+        let required: Vec<String> = serde_json::from_str(row_str(path, "RequiredNodeIds"))
+            .map_err(|e| format!("Invalid evaluated path requirements: {e}"))?;
+        if required.len() > 512 || required.iter().any(String::is_empty) {
+            return Err(
+                "Evaluated path requires nonempty event IDs within the 512-event bound".into(),
+            );
+        }
+        nodes.extend(required);
+        if nodes.len() > 512 {
+            return Err("Evaluated path requirements exceed 512 events".into());
+        }
+    }
+    Ok(nodes)
+}
+
+fn list_rows(
+    ctx: &Context,
+    api: &str,
+    headers: &[(String, String)],
+    collection: &str,
+    world_id: &str,
+) -> Result<Vec<Value>, String> {
+    let response = ctx.http_call(
+        "GET",
+        &format!("{api}/tdata/{collection}?$filter=world_id eq '{world_id}'&$top=513"),
+        headers,
+        "",
+    )?;
+    if !(200..300).contains(&response.status) {
+        return Err(format!(
+            "Failed to list {collection}: HTTP {}",
+            response.status
+        ));
+    }
+    let body: Value = serde_json::from_str(&response.body).map_err(|e| e.to_string())?;
+    let rows = body
+        .get("value")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{collection} response missing value array"))?;
+    if rows.len() > 512 || body.get("@odata.nextLink").is_some() {
+        return Err(format!(
+            "{collection} exceeded 512 rows; refusing partial forecast eligibility"
+        ));
+    }
+    Ok(rows.clone())
+}
+
+/// Capture only the reviewed fields used to identify and price a forecast.
+fn registration_candidates(
+    ctx: &Context,
+    api: &str,
+    headers: &[(String, String)],
+    world_id: &str,
+    frontier: &str,
+    mode: &str,
+) -> Result<Vec<Value>, String> {
+    let endpoints = list_rows(ctx, api, headers, "Endpoints", world_id)?;
+    let eligible = if endpoints.is_empty() && matches!(mode, "historical" | "simulated") {
+        None // Explicit replay examples have no corridor requirements.
+    } else if endpoints.is_empty() {
+        Some(BTreeSet::new()) // An empty projection must not bypass observed review.
+    } else {
+        let mut paths = list_rows(ctx, api, headers, "Paths", world_id)?;
+        // Collection projections can lag. A path must pass its current durable
+        // evaluation state, even if the list still says Challenged (or Scored).
+        for path in &mut paths {
+            let id = row_id(path);
+            if id.is_empty() {
+                return Err("Path query returned a row without identity".into());
+            }
+            let response =
+                ctx.http_call("GET", &format!("{api}/tdata/Paths('{id}')"), headers, "")?;
+            if response.status != 200 {
+                return Err(format!(
+                    "Failed to verify path {id}: HTTP {}",
+                    response.status
+                ));
+            }
+            *path = serde_json::from_str(&response.body).map_err(|e| e.to_string())?;
+        }
+        Some(evaluated_required_nodes(&paths, world_id)?)
+    };
+    let mut nodes = list_rows(ctx, api, headers, "EventNodes", world_id)?;
+    if let Some(ids) = &eligible {
+        nodes.retain(|node| {
+            row_str(node, "Provenance") == "determined"
+                || manual_question(node)
+                || ids.contains(row_id(node))
+        });
+    }
+    let covered = compute_covered(ctx, &nodes, frontier);
+    let mut candidates = Vec::new();
+    for node in &nodes {
+        let id = row_id(node);
+        if id.is_empty()
+            || covered.contains(id)
+            || eligible
+                .as_ref()
+                .is_some_and(|ids| !ids.contains(id) && !manual_question(node))
+            || !should_register(
+                row_status(node),
+                row_str(node, "Probability"),
+                row_str(node, "Provenance"),
+                row_str(node, "ResolveBy"),
+                frontier,
+            )
+        {
+            continue;
+        }
+        candidates.push(json!({"Id":id,"Statement":row_str(node,"Statement"),"Probability":row_str(node,"Probability"),"Provenance":row_str(node,"Provenance"),"ResolveBy":row_str(node,"ResolveBy"),"SourceRefs":row_str(node,"SourceRefs")}));
+    }
+    Ok(candidates)
+}
+
+fn manual_question(node: &Value) -> bool {
+    row_str(node, "AuthorAgentId") == "dashboard" && row_str(node, "Provenance") == "authored"
+}
+
 /// Entry point.
 #[unsafe(no_mangle)]
 pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
+    let mut registration_attempt = 0;
     let result = (|| -> Result<(), String> {
         let ctx = Context::from_host()?;
+        registration_attempt = ctx
+            .entity_state
+            .get("counters")
+            .and_then(|c| c.get("registration_attempt"))
+            .and_then(Value::as_u64)
+            .filter(|attempt| *attempt > 0)
+            .ok_or("Missing World registration attempt")?;
         let fields = ctx.entity_state.get("fields").cloned().unwrap_or(json!({}));
         let get = |k: &str| -> String {
             fields
@@ -380,12 +515,19 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             }
             mode = "historical".into();
         }
-        let registered_at = if mode == "observed" {
+        let continuing = matches!(
+            ctx.trigger_action.as_str(),
+            "CommitForecastSnapshot" | "ForecastRegistered"
+        );
+        let registered_at = if ctx.trigger_action == "ForecastRegistered"
+            || (ctx.trigger_action == "CommitForecastSnapshot" && mode != "observed")
+        {
+            registration_time(&get("forecast_registered_at"))?
+        } else if mode == "observed" {
             host_registration_time(&ctx.entity_state)?
         } else {
             registration_time(&get("last_ingest_date"))?
         };
-        let continuing = ctx.trigger_action == "ForecastRegistered";
         let raw_model = get(if continuing {
             "registration_model_json"
         } else {
@@ -427,57 +569,40 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             ("x-temper-agent-type".to_string(), "system".to_string()),
         ];
 
-        // 1. Load every EventNode in this world.
-        let nodes_url = format!("{api}/tdata/EventNodes?$filter=world_id eq '{world_id}'&$top=513");
-        let resp = ctx.http_call("GET", &nodes_url, &headers, "")?;
-        if resp.status < 200 || resp.status >= 300 {
-            return Err(format!("failed to list EventNodes (HTTP {})", resp.status));
-        }
-        let body: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| format!("Invalid EventNode response: {e}"))?;
-        let nodes = body
-            .get("value")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .ok_or("EventNode response missing value array")?;
-
-        if nodes.len() > 512 || body.get("@odata.nextLink").is_some() {
-            return Err(
-                "EventNode query exceeded 512 rows; refusing incomplete registration".into(),
+        // Freeze evaluated inputs with the model and clock. A newly completed
+        // path belongs to the queued next batch, never an earlier preregistration.
+        let nodes = if continuing {
+            let rows: Vec<Value> = serde_json::from_str(&get("registration_nodes_json"))
+                .map_err(|e| format!("Invalid registration input snapshot: {e}"))?;
+            if rows.len() > 512 {
+                return Err("Registration snapshot exceeds 512 events".into());
+            }
+            rows
+        } else {
+            registration_candidates(&ctx, &api, &headers, &world_id, &frontier, &mode)?
+        };
+        let registration_nodes_json = serde_json::to_string(&nodes).map_err(|e| e.to_string())?;
+        if !continuing {
+            // Persist the candidate snapshot before assigning observed time.
+            // The following declared action supplies a host timestamp after
+            // every selected path/node was read, including concurrent arrivals.
+            set_success_result(
+                "RegistrationSnapshotPrepared",
+                &json!({
+                    "registration_nodes_json":registration_nodes_json,
+                    "registration_model_json":serde_json::to_string(&model).map_err(|e|e.to_string())?,
+                    "forecast_learning_run_id":learning_run_id,
+                    "forecast_registered_at":registered_at,
+                    "learning_mode":mode,
+                    "expected_registration_attempt":registration_attempt
+                }),
             );
+            return Ok(());
         }
 
-        // Reconcile (D2): authored nodes that merely restate a determined fact
-        // are collapsed here, before they can become free-resolving forecasts.
-        let covered = compute_covered(&ctx, &nodes, &frontier);
-
-        let mut reconciled = 0usize;
         for node in &nodes {
             let str_of = |k: &str| row_str(node, k);
-            let node_id = node
-                .get("Id")
-                .or_else(|| node.get("entity_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if node_id.is_empty() {
-                continue;
-            }
-            if !should_register(
-                row_status(node),
-                str_of("Probability"),
-                str_of("Provenance"),
-                str_of("ResolveBy"),
-                &frontier,
-            ) {
-                continue;
-            }
-            // Already-true fact restated as a forecast: skip (logged in
-            // compute_covered with the matched fact + distance).
-            if covered.contains(&node_id) {
-                reconciled += 1;
-                continue;
-            }
+            let node_id = row_id(node).to_string();
 
             // Each input/model pair has one immutable identity, including concurrent retries.
             let existing_url =
@@ -571,6 +696,8 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             set_success_result(
                 "ForecastPrepared",
                 &json!({
+                    "expected_registration_attempt":registration_attempt,
+                    "registration_nodes_json":registration_nodes_json,
                     "forecast_id":forecast_id, "forecast_registration_key":registration_key,
                     "forecast_world_id": world_id, "forecast_event_node_id": node_id,
                     "forecast_question": str_of("Statement"), "forecast_probability": probability.to_string(),
@@ -590,7 +717,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             "info",
             &format!(
                 "register_forecasts: world {world_id} — registration complete, \
-                 {reconciled} collapsed as determined-restating, from {} node(s)",
+                 from {} frozen candidate node(s)",
                 nodes.len()
             ),
         );
@@ -598,7 +725,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         // result: the host treats an empty result as failure.
         set_success_result(
             "ForecastRegistrationComplete",
-            &json!({"error_message":"","learning_mode":mode}),
+            &json!({"error_message":"","learning_mode":mode,"expected_registration_attempt":registration_attempt}),
         );
         Ok(())
     })();
@@ -606,7 +733,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
     if let Err(error) = result {
         set_success_result(
             "ForecastRegistrationFailed",
-            &json!({"error_message":error}),
+            &json!({"error_message":error,"expected_registration_attempt":registration_attempt}),
         );
     }
     0
@@ -617,6 +744,37 @@ mod tests {
     use super::*;
 
     const FRONTIER: &str = "2026-09-30";
+
+    #[test]
+    fn only_evaluated_paths_release_their_own_required_events() {
+        let paths = json!([
+            {"WorldId":"world","Status":"Solving","RequiredNodeIds":"[\"unfinished\"]"},
+            {"WorldId":"world","Status":"Repaired","RequiredNodeIds":"[\"unchallenged\"]"},
+            {"WorldId":"world","Status":"Challenged","RequiredNodeIds":"[\"unscored\"]"},
+            {"WorldId":"world","Status":"Scored","RequiredNodeIds":"[\"unclassified\"]"},
+            {"WorldId":"world","Status":"Rejected","RequiredNodeIds":"[\"rejected\"]"},
+            {"WorldId":"world","Status":"Tail","RequiredNodeIds":"[\"ready\",\"shared\"]"},
+            {"WorldId":"world","Status":"Canonical","RequiredNodeIds":"[\"canonical\",\"shared\"]"},
+            {"WorldId":"other","Status":"Scored","RequiredNodeIds":"[\"foreign\"]"}
+        ]);
+        let eligible = evaluated_required_nodes(paths.as_array().unwrap(), "world").unwrap();
+        assert_eq!(
+            eligible,
+            ["canonical", "ready", "shared"]
+                .into_iter()
+                .map(String::from)
+                .collect()
+        );
+    }
+
+    #[test]
+    fn malformed_evaluated_requirements_fail_closed() {
+        for required in ["not json", "[1]", "[\"\"]"] {
+            let paths =
+                json!([{"WorldId":"world","Status":"Canonical","RequiredNodeIds":required}]);
+            assert!(evaluated_required_nodes(paths.as_array().unwrap(), "world").is_err());
+        }
+    }
 
     #[test]
     fn determined_provenance_is_never_registered() {

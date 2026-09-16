@@ -341,17 +341,31 @@ hint = "Callback after endpoint writers are spawned. Corridor proceeds per Endpo
 [[action]]
 name = "ResumeWorldCascade"
 kind = "input"
-from = ["Active"]
-to = "Active"
+from = ["Active", "RegisteringForecasts"]
 params = []
 hint = "Self-heal: re-run world aggregate when claims are settled but canonical_path_id is unset. Fires on the Active state_timeout."
-effect = [{ type = "trigger", name = "aggregate_costs_world_cascade" }]
+
+[[action.triggers]]
+name = "evaluate_world_after_recovery"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "EvaluateWorldCascade"
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "EvaluateWorldCascade"
+kind = "input"
+from = ["Active", "RegisteringForecasts"]
+params = []
 
 [[action.triggers]]
 name = "aggregate_costs_world_cascade"
 kind = "wasm"
 module = "aggregate_costs"
-on_failure = "Fail"
+# A stale phase-fenced report must not fail newer exploration.
+# Host failures remain recorded and the world timer can retry.
 
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
@@ -359,20 +373,23 @@ temper_api_url = "{secret:temper_api_url}"
 [[action]]
 name = "PathsScored"
 kind = "input"
-from = ["Active"]
-to = "RegisteringForecasts"
-params = ["canonical_path_id"]
-hint = "aggregate_costs classified all paths for this pass. Registers implied near-term forecasts."
-effect = [{ type = "trigger", name = "register_forecasts" }]
+from = ["Active", "RegisteringForecasts"]
+params = ["canonical_path_id", "exploration_phase", "expected_exploration_phase"]
+constraints = [{kind="param_equals_field",param="expected_exploration_phase",field="exploration_phase"}]
+hint = "The pass is evaluated. Publish its pending predictions before background deepening."
+effect = [{type="set_bool",var="first_pass_complete",value=true},{type="set_bool",var="forecast_registration_pending",value=true}]
 
 [[action.triggers]]
-name = "register_forecasts"
-kind = "wasm"
-module = "register_forecasts"
-on_failure = "ForecastRegistrationFailed"
-
-[action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
+name = "start_requested_registration"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartForecastRegistration"
+to_state = "Active"
+guard = {type="bool_true", field="forecast_registration_pending"}
+params = {forecast_registration_key=""}
+[action.triggers.resolve_target]
+type = "same_id"
 
 
 [[action]]
@@ -577,18 +594,70 @@ after_seconds=120
 on_timeout="Fail"
 params={error_message="Replay world initialization did not complete within 120 seconds."}
 
+# Multiple evaluated paths coalesce into one follow-up batch. World remains
+# the sole registration writer; no worker can overlap its immutable commit loop.
+[[state]]
+name = "forecast_registration_pending"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "registration_attempt"
+type = "counter"
+initial = "0"
+
 [[action]]
 name = "RegisterForecasts"
 kind = "input"
+from = ["Active", "RegisteringForecasts"]
+params = ["last_ingest_date"]
+effect = [{type="set_bool",var="forecast_registration_pending",value=true}]
+
+[[action.triggers]]
+name = "start_requested_registration"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartForecastRegistration"
+to_state = "Active"
+guard = {type="bool_true", field="forecast_registration_pending"}
+params = {forecast_registration_key=""}
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "RequestForecastRegistration"
+kind = "input"
+from = ["Active", "RegisteringForecasts"]
+effect = [{type="set_bool",var="forecast_registration_pending",value=true}]
+
+[[action.triggers]]
+name = "start_requested_registration"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartForecastRegistration"
+to_state = "Active"
+guard = {type="bool_true", field="forecast_registration_pending"}
+params = {forecast_registration_key=""}
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "StartForecastRegistration"
+kind = "input"
 from = ["Active"]
 to = "RegisteringForecasts"
-params = ["last_ingest_date"]
+params = ["forecast_registration_key"]
+guard = "is_true forecast_registration_pending"
+effect = [{type="set_bool",var="forecast_registration_pending",value=false},{type="increment",var="registration_attempt"}]
 
 [[action.triggers]]
 name = "learning_register_forecasts"
 kind = "wasm"
 module = "register_forecasts"
-on_failure = "ForecastRegistrationFailed"
+# Module errors return an attempt-fenced callback. Host traps are handled by
+# the state timeout: stale callback rejection must not compensate a newer batch.
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
 
@@ -696,13 +765,44 @@ name = "forecast_registered_at"
 type = "string"
 initial = ""
 
+# Candidate selection commits before the observed preregistration clock starts.
+[[action]]
+name = "RegistrationSnapshotPrepared"
+kind = "input"
+from = ["RegisteringForecasts"]
+params = ["registration_nodes_json","registration_model_json","forecast_learning_run_id","forecast_registered_at","learning_mode","expected_registration_attempt"]
+constraints = [{kind="param_equals_field",param="expected_registration_attempt",field="registration_attempt"}]
+[[action.triggers]]
+name = "commit_frozen_forecast_snapshot"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "CommitForecastSnapshot"
+[action.triggers.resolve_target]
+type = "same_id"
+[action.triggers.params_from]
+expected_registration_attempt = "registration_attempt"
+
+[[action]]
+name = "CommitForecastSnapshot"
+kind = "input"
+from = ["RegisteringForecasts"]
+params = ["expected_registration_attempt"]
+constraints = [{kind="param_equals_field",param="expected_registration_attempt",field="registration_attempt"}]
+[[action.triggers]]
+name = "prepare_frozen_forecasts"
+kind = "wasm"
+module = "register_forecasts"
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+
 [[action]]
 name = "ForecastPrepared"
 kind = "input"
 from = ["RegisteringForecasts"]
 to = "RegisteringForecasts"
-params = ["forecast_id", "forecast_registration_key", "forecast_world_id", "forecast_event_node_id", "forecast_question", "forecast_probability", "forecast_base_probability", "forecast_model_version", "forecast_learning_run_id", "forecast_previous_forecast_id", "forecast_evidence_kind", "forecast_resolve_by", "forecast_market_ref", "forecast_engine_version", "forecast_registered_at", "registration_model_json", "learning_mode"]
-constraints = [{kind="param_nonempty",param="forecast_id"}]
+params = ["forecast_id", "forecast_registration_key", "forecast_world_id", "forecast_event_node_id", "forecast_question", "forecast_probability", "forecast_base_probability", "forecast_model_version", "forecast_learning_run_id", "forecast_previous_forecast_id", "forecast_evidence_kind", "forecast_resolve_by", "forecast_market_ref", "forecast_engine_version", "forecast_registered_at", "registration_model_json", "registration_nodes_json", "learning_mode", "expected_registration_attempt"]
+constraints = [{kind="param_nonempty",param="forecast_id"},{kind="param_equals_field",param="expected_registration_attempt",field="registration_attempt"}]
 
 [[action.triggers]]
 name = "commit_forecast_registration"
@@ -741,7 +841,6 @@ constraints = [{kind="param_equals_field",param="registration_key",field="foreca
 name = "prepare_next_forecast"
 kind = "wasm"
 module = "register_forecasts"
-on_failure = "ForecastRegistrationFailed"
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
 
@@ -750,13 +849,36 @@ name = "ForecastRegistrationComplete"
 kind = "input"
 from = ["RegisteringForecasts"]
 to = "Active"
-params = ["error_message", "learning_mode"]
+params = ["error_message", "learning_mode", "expected_registration_attempt"]
+constraints = [{kind="param_equals_field",param="expected_registration_attempt",field="registration_attempt"}]
+
+[[action.triggers]]
+name = "start_requested_registration"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartForecastRegistration"
+to_state = "Active"
+guard = {type="bool_true", field="forecast_registration_pending"}
+params = {forecast_registration_key=""}
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action.triggers]]
+name = "consider_background_deepening"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "MaybeDeepen"
+guard = {type="all_of",guards=[{type="bool_false",field="forecast_registration_pending"},{type="bool_true",field="first_pass_complete"},{type="bool_false",field="deepening_started"}]}
+[action.triggers.resolve_target]
+type = "same_id"
 
 [[state_timeout]]
 state = "RegisteringForecasts"
 after_seconds = 120
-on_timeout = "ForecastRegistrationFailed"
-reset_on = ["ForecastPrepared", "ForecastRegistered"]
+on_timeout = "ForecastRegistrationTimedOut"
+reset_on = ["RegistrationSnapshotPrepared", "CommitForecastSnapshot", "ForecastPrepared", "ForecastRegistered"]
 params = {error_message="Forecast registration did not complete within 120 seconds."}
 
 # Frozen before the first Forecast.Register and retained throughout this batch.
@@ -770,5 +892,116 @@ name = "ForecastRegistrationFailed"
 kind = "input"
 from = ["RegisteringForecasts"]
 to = "Active"
-params = ["error_message"]
+params = ["error_message", "expected_registration_attempt"]
 hint = "Registration did not finish; inspect the error, correct the replay clock or retry. Existing revisions are retained."
+constraints = [{kind="param_equals_field",param="expected_registration_attempt",field="registration_attempt"}]
+
+
+# The host's sequence-checked state timer interrupts a trapped batch.
+[[action]]
+name = "ForecastRegistrationTimedOut"
+kind = "input"
+from = ["RegisteringForecasts"]
+to = "Active"
+params = ["error_message"]
+
+[[state]]
+name = "first_pass_complete"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "exploration_phase"
+type = "string"
+initial = "first_pass"
+
+[[state]]
+name = "deepening_started"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "deepening_claim_ids"
+type = "string"
+initial = "[]"
+
+[[state]]
+name = "deepening_cursor"
+type = "string"
+initial = "0"
+
+[[state]]
+name = "deepening_claim_id"
+type = "string"
+initial = ""
+
+[[action]]
+name = "MaybeDeepen"
+kind = "input"
+from = ["Active"]
+guard = [{type="is_false",var="forecast_registration_pending"},{type="is_true",var="first_pass_complete"},{type="is_false",var="deepening_started"}]
+[[action.triggers]]
+name = "check_first_pass_predictions"
+kind = "wasm"
+module = "aggregate_costs"
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+
+[[action]]
+name = "BeginDeepening"
+kind = "input"
+from = ["Active"]
+params = ["deepening_claim_ids","deepening_cursor","exploration_phase"]
+guard = [{type="is_false",var="forecast_registration_pending"},{type="is_true",var="first_pass_complete"},{type="is_false",var="deepening_started"}]
+effect = [{type="set_bool",var="deepening_started",value=true}]
+[[action.triggers]]
+name = "start_deepening"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "ContinueDeepening"
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "ContinueDeepening"
+kind = "input"
+from = ["Active","RegisteringForecasts"]
+guard = "is_true deepening_started"
+[[action.triggers]]
+name = "prepare_background_claim"
+kind = "wasm"
+module = "aggregate_costs"
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+
+[[action]]
+name = "DeepeningClaimPrepared"
+kind = "input"
+from = ["Active","RegisteringForecasts"]
+params = ["deepening_claim_id","deepening_cursor","expected_deepening_cursor"]
+guard = "is_true deepening_started"
+constraints = [{kind="param_nonempty",param="deepening_claim_id"},{kind="param_equals_field",param="expected_deepening_cursor",field="deepening_cursor"}]
+[[action.triggers]]
+name = "deepen_claim"
+kind = "entity"
+principal = "system"
+target_entity = "Claim"
+target_action = "BeginDeepening"
+params = {settled_route_id=""}
+[action.triggers.resolve_target]
+type = "field"
+field = "deepening_claim_id"
+[[action.triggers]]
+name = "next_deepening_claim"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "ContinueDeepening"
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[state]]
+name = "registration_nodes_json"
+type = "string"
+initial = "[]"

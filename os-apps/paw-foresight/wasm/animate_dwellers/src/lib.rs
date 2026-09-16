@@ -193,7 +193,7 @@ fn dweller_prompt(
          temper.write call returns {{\"file_id\": \"...\", \"path\": \"...\", \"workspace_id\": \
          \"...\"}} — use result[\"file_id\"] for the file ids below.\n\n\
          1. Record your traversal: write your lived timeline notes (markdown) like this:\n\
-         result = temper.write(\"/traversal-notes.md\", \"<your lived timeline notes>\")\n\
+         result = temper.write(\"/traversal-notes-{dweller_id}.md\", \"<your lived timeline notes>\")\n\
          then:\n\
          temper.action(\"Dwellers\", \"{dweller_id}\", \"RecordTraversal\", {{\"path_id\": \
          \"{canonical_path_id}\", \"traversal_note_file_id\": \"<result file_id>\"}})\n\
@@ -206,7 +206,7 @@ fn dweller_prompt(
          3. Write YOUR STORY: first person, 600-1200 words, a specific day or episode of \
          your life inside this world — not a summary of the timeline. Ground every \
          world-fact in the claims and events above. Save it with temper.write like this:\n\
-         result = temper.write(\"/story.md\", \"<your first-person story, markdown>\")\n\
+         result = temper.write(\"/story-{dweller_id}.md\", \"<your first-person story, markdown>\")\n\
          then create the artifact (using result[\"file_id\"] as content_file_id) and submit it \
          to the gate:\n\
          temper.create(\"Artifacts\", {{\"world_id\": \"{world_id}\", \"path_id\": \
@@ -901,6 +901,49 @@ fn phase_contradiction(ctx: &Context, fields: &Value) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn output_paths_are_owned_and_retry_stable() {
+        let output_paths = |id: &str| {
+            let prompt = dweller_prompt(
+                id,
+                "w-1",
+                "world",
+                "2026-12-31",
+                "persona",
+                "claims",
+                "events",
+                "p-1",
+                "a-1",
+            );
+            prompt
+                .split('"')
+                .filter(|part| part.starts_with('/') && part.ends_with(".md"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let first = output_paths("owner-a");
+        let second = output_paths("owner-b");
+        assert_eq!(first.len(), 2, "each saved artifact needs an explicit path");
+        assert_eq!(
+            first,
+            output_paths("owner-a"),
+            "a retry reuses its own files"
+        );
+        assert_eq!(second.len(), first.len());
+        assert!(first.iter().all(|path| path.contains("owner-a")));
+        assert!(second.iter().all(|path| path.contains("owner-b")));
+        assert!(
+            first.iter().all(|path| !second.contains(path)),
+            "workers sharing a workspace must never overwrite another worker's file"
+        );
+        let distinct: std::collections::BTreeSet<_> = first.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            first.len(),
+            "one worker's artifacts have different purposes"
+        );
+    }
+
     // Prompt-contract tests: the generated prompts must reference the exact
     // entity sets, action names, and parameter names the specs declare.
 
@@ -984,11 +1027,11 @@ mod tests {
             "a-1",
         );
         assert!(
-            p.contains("temper.write(\"/traversal-notes.md\""),
+            p.contains("temper.write(\"/traversal-notes-d-1.md\""),
             "dweller prompt must show the literal temper.write call for the traversal note"
         );
         assert!(
-            p.contains("temper.write(\"/story.md\""),
+            p.contains("temper.write(\"/story-d-1.md\""),
             "dweller prompt must show the literal temper.write call for the story"
         );
         assert!(

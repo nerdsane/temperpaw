@@ -27,3 +27,11 @@ Synthetic fixture gains demonstrate the loop only. They do not establish live pr
 ## Adjacent behavior
 
 The dashboard session adapter affects authenticated OData reads/actions and event subscriptions. Recheck tenant isolation and method/URI/replay binding with the composed router. Hindcast batch grading must retain every revision's score and start one learning cycle for the batch. Registering forecasts must remain idempotent when a list response lags an authoritative row read.
+
+## Progressive first pass
+
+Create a new observed world and complete its normal Seed action; reusing an existing corpus is permitted, but do not synthesize SeedComplete. Sample three futures once. Verify distinct saved bundle bytes, at most three claims per future, and a challenged first-pass route before any additional revision round. Read the first registered Forecast while other claims are still running. Its required EventNode must belong to a Canonical/Tail path (or be an explicit dashboard-authored question).
+
+Record first prediction and first-pass elapsed times. Verify the first pass becomes usable before background claims reopen, and that the UI shows background exploration with the earlier forecasts still present. Confirm final background completion, retained path IDs, and immutable earlier forecasts. Exercise concurrent registration requests, stale registration callbacks and a stale first-pass callback after deepening begins. They must not lose pending requests, reset the phase, or backdate a newly selected input.
+
+Provider checks must use the exact installed module: preserve real multi-turn function calls, terminate on completed/failed/incomplete response events, record progress under the trusted entry, and allow at most one session-level retry after invocation termination. A 180-second hard call limit is not a measured idle timeout or a promise of end-to-end latency.

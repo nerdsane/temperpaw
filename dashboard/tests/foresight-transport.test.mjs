@@ -10,10 +10,12 @@ import ts from 'typescript';
 // Only unrelated view/format imports are replaced; transport and entity parsing are real.
 test('authenticated requests defer tenant selection to the server for default and dedicated deployments', async () => {
   let configuredTenant = 'default';
+  let actionStatus = 200;
   const received = [];
   const server = createServer((req, res) => {
     received.push({tenant:req.headers['x-tenant-id'], principal:req.headers['x-temper-principal-kind'], method:req.method});
     res.setHeader('content-type','application/json');
+    if (req.method === 'POST') res.statusCode = actionStatus;
     res.end(JSON.stringify({tenant:configuredTenant}));
   });
   server.listen(0,'127.0.0.1');
@@ -44,5 +46,9 @@ test('authenticated requests defer tenant selection to the server for default an
       assert.equal(request.method,'GET');
     }
     assert.ok(requestOptions.every(options => options.credentials === 'same-origin'));
+    actionStatus = 403;
+    await assert.rejects(module.exports.postEntityAction('Worlds','world-1','ResumeSeed',{}),
+      error => error.status === 403 && error.message.includes('OData action failed'));
+
   } finally { server.close(); await once(server,'close'); }
 });

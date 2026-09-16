@@ -22,6 +22,83 @@ fn engine() -> AuthzEngine {
     AuthzEngine::new(&policy).expect("foresight.cedar should parse")
 }
 
+#[test]
+fn progressive_registration_and_deepening_entries_keep_their_trusted_principals() {
+    let engine = engine();
+    let system = ctx("declared-entity-trigger", "system");
+    let wasm = temper_server::request_context::AgentContext::for_service("wasm-runtime")
+        .security_ctx
+        .unwrap();
+    let admin = SecurityContext::from_verified_jwt(
+        "dashboard-owner",
+        temper_authz::PrincipalKind::Admin,
+        None,
+        None,
+        None,
+        None,
+    );
+    let session = ctx("repairer-session", "agent");
+    let resource = attrs(&[("id", serde_json::json!("progressive-world"))]);
+    for (entity, action, allowed) in [
+        ("World", "RequestForecastRegistration", &system),
+        ("World", "StartForecastRegistration", &system),
+        ("World", "MaybeDeepen", &system),
+        ("World", "ContinueDeepening", &system),
+        ("World", "BeginDeepening", &wasm),
+        ("World", "DeepeningClaimPrepared", &wasm),
+        ("Claim", "BeginDeepening", &system),
+        ("Path", "StartRepair", &system),
+        ("Claim", "EvaluateRoutes", &system),
+        ("World", "EvaluateWorldCascade", &system),
+        ("Endpoint", "StartWriter", &system),
+        ("Endpoint", "EvaluateEndpointScoring", &system),
+        ("World", "CommitForecastSnapshot", &system),
+        ("World", "RegistrationSnapshotPrepared", &wasm),
+    ] {
+        assert!(
+            engine
+                .authorize(allowed, action, entity, &resource)
+                .is_allowed(),
+            "{entity}.{action}"
+        );
+        for denied in [&admin, &session] {
+            assert!(
+                !engine
+                    .authorize(denied, action, entity, &resource)
+                    .is_allowed(),
+                "forged {entity}.{action}"
+            );
+        }
+    }
+    assert!(
+        !engine
+            .authorize(&wasm, "StartForecastRegistration", "World", &resource)
+            .is_allowed()
+    );
+    assert!(
+        !engine
+            .authorize(&system, "DeepeningClaimPrepared", "World", &resource)
+            .is_allowed()
+    );
+    let manual = attrs(&[("AuthorAgentId", serde_json::json!("dashboard"))]);
+    assert!(
+        engine
+            .authorize(&admin, "create", "EventNode", &manual)
+            .is_allowed()
+    );
+    assert!(
+        !engine
+            .authorize(&session, "create", "EventNode", &manual)
+            .is_allowed()
+    );
+    let worker = attrs(&[("AuthorAgentId", serde_json::json!("repairer-session"))]);
+    assert!(
+        engine
+            .authorize(&session, "create", "EventNode", &worker)
+            .is_allowed()
+    );
+}
+
 fn ctx(id: &str, agent_type: &str) -> SecurityContext {
     SecurityContext::from_resolved_identity(id, agent_type, None)
 }
@@ -690,4 +767,19 @@ fn research_session_callback_cannot_be_forged_by_operators_or_plain_agents() {
             .authorize(&admin, "create", "World", &resource)
             .is_allowed()
     );
+}
+
+#[test]
+fn trusted_corridor_workers_reuse_workspaces_without_granting_session_browse() {
+    let engine = engine();
+    let workspace = attrs(&[("id", serde_json::json!("world-workspace"))]);
+    for action in ["read", "list"] {
+        assert!(engine.authorize(&ctx("service:system", "system"), action, "Workspace", &workspace).is_allowed());
+        for principal in [ctx("repairer", "agent"), ctx("service:wasm-runtime", "wasm-runtime")] {
+            assert!(!engine.authorize(&principal, action, "Workspace", &workspace).is_allowed());
+        }
+    }
+    for action in ["update", "delete", "Freeze", "WorkspaceArchive"] {
+        assert!(!engine.authorize(&ctx("service:system", "system"), action, "Workspace", &workspace).is_allowed());
+    }
 }

@@ -29,7 +29,7 @@ fn tools_enabled(hindcast: bool) -> String {
 /// token spend grows linearly with writers, and each endpoint fans out into
 /// repairer and adversary sessions besides.
 fn endpoint_budget(raw: &str) -> usize {
-    raw.trim().parse::<usize>().unwrap_or(3).min(5)
+    raw.trim().parse::<usize>().unwrap_or(3).clamp(1, 5)
 }
 
 /// Parse the surveyor's named uncertainty axes (ADR-006): a JSON array of
@@ -204,7 +204,7 @@ fn endpoint_writer_prompt(
          ONLY way to create a FILE, and your workspace already exists. Do NOT create Files, \
          Directories, or Workspaces yourself, and do NOT invent a file-creation API via \
          temper.action — temper.write is the whole job. Call it exactly like this:\n\
-         result = temper.write(\"/bundle.md\", \"<your full markdown bundle>\")\n\
+         result = temper.write(\"/bundle-{endpoint_id}.md\", \"<your full markdown bundle>\")\n\
          temper.write returns {{\"file_id\": \"...\", \"path\": \"...\", \"workspace_id\": \
          \"...\"}}. Use result[\"file_id\"] as bundle_file_id below, then self-report:\n\
          temper.action(\"Endpoints\", \"{endpoint_id}\", \"BundleWritten\", \
@@ -272,6 +272,7 @@ fn spawn_session(
     max_turns: &str,
     user_message: &str,
     workspace_id: &str,
+    latency_profile: &str,
 ) -> Result<String, String> {
     let agent_body = json!({ "Name": name, "Role": role });
     let agent_resp = ctx.http_call(
@@ -350,6 +351,7 @@ fn spawn_session(
         "agent_name": role,
         "tools_enabled": tools,
         "tool_choice": "required",
+        "provider_latency_profile": latency_profile,
         "max_turns": max_turns,
         "user_message": message,
         "sandbox_url": "none",
@@ -618,6 +620,7 @@ struct WriterCtx {
     provider: String,
     hindcast: bool,
     workspace_id: String,
+    latency_profile: String,
 }
 
 /// Build the writer context from a World's fields (already fetched), resolving
@@ -649,6 +652,12 @@ fn load_writer_ctx(
         model,
         provider,
         hindcast: f("HindcastMode") == "true",
+        latency_profile: if f("ExplorationPhase") == "first_pass" {
+            "foresight_first_pass"
+        } else {
+            "standard"
+        }
+        .into(),
         workspace_id,
     })
 }
@@ -689,6 +698,7 @@ fn spawn_writer(
         "50",
         &writer_msg,
         &wc.workspace_id,
+        &wc.latency_profile,
     )?;
     Ok(())
 }
@@ -705,7 +715,12 @@ fn phase_sample(ctx: &Context) -> Result<(), String> {
     // "fields" (snake) — wrap it so row_str finds them.
     let world_wrapped = json!({ "entity_id": world_id, "fields": world });
     let wc = load_writer_ctx(ctx, &api, &headers, &world_wrapped)?;
-    let budget = endpoint_budget(row_str(&world_wrapped, "EndpointBudget"));
+    let requested = endpoint_budget(row_str(&world_wrapped, "EndpointBudget"));
+    let budget = if row_str(&world_wrapped, "ExplorationPhase") == "first_pass" {
+        requested.min(3)
+    } else {
+        requested
+    };
     // ADR-006: the surveyor's named axes steer the anti-modal worlds so they
     // are distinct by construction; empty -> generic tail stances.
     let axes = parse_axes(row_str(&world_wrapped, "UncertaintyAxes"));
@@ -1083,7 +1098,7 @@ fn phase_resteer(ctx: &Context) -> Result<(), String> {
         .ok()
         .and_then(|v| v.get("stance").and_then(|s| s.as_str()).map(str::to_string))
         .unwrap_or_default();
-    let reason = if ctx.trigger_action == "ResumeWriter" {
+    let reason = if matches!(ctx.trigger_action.as_str(), "ResumeWriter" | "StartWriter") {
         "resume"
     } else {
         "resteer"
@@ -1116,12 +1131,12 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         let ctx = Context::from_host()?;
         match ctx.trigger_action.as_str() {
             "SampleEndpoints" => phase_sample(&ctx),
-            "BundleWritten" => phase_barrier(&ctx),
+            "BundleWritten" | "CheckDiversityBarrier" => phase_barrier(&ctx),
             "GateDiversity" => phase_gate(&ctx),
             // ReSteer (gate-dispatched) and ResumeWriter (the Sampled
             // state_timeout self-heal) share one path: re-spawn the writer with
             // the endpoint's stance + any revision_brief (ADR-0050/ADR-007).
-            "ReSteer" | "ResumeWriter" => phase_resteer(&ctx),
+            "ReSteer" | "ResumeWriter" | "StartWriter" => phase_resteer(&ctx),
             other => {
                 ctx.log(
                     "warn",
@@ -1253,6 +1268,7 @@ mod tests {
         assert_eq!(endpoint_budget("junk"), 3);
         assert_eq!(endpoint_budget("-1"), 3);
         assert_eq!(endpoint_budget("1"), 1);
+        assert_eq!(endpoint_budget("0"), 1);
         assert_eq!(endpoint_budget("5"), 5);
         assert_eq!(endpoint_budget("10"), 5);
     }
@@ -1276,6 +1292,45 @@ mod tests {
     }
 
     #[test]
+    fn writer_artifact_paths_are_endpoint_scoped_and_retry_stable() {
+        let prompt = |endpoint| {
+            endpoint_writer_prompt(
+                "world-1",
+                endpoint,
+                "writer-1",
+                "Test",
+                "AI",
+                "2026-12-31",
+                "modal",
+                "corpus",
+                "drivers",
+                "",
+                false,
+            )
+        };
+        let path = |text: String| {
+            text.split("temper.write(\"")
+                .nth(1)
+                .expect("write recipe")
+                .split('"')
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        let first = path(prompt("endpoint-1"));
+        let second = path(prompt("endpoint-2"));
+        assert_ne!(
+            first, second,
+            "parallel writers share a world workspace, so their artifact paths must differ"
+        );
+        assert_eq!(
+            first,
+            path(prompt("endpoint-1")),
+            "retry must reuse only its own artifact path"
+        );
+    }
+
+    #[test]
     fn writer_prompt_gives_explicit_file_write_recipe() {
         // Same class of bug as the adversary wedge: an under-specified file-write
         // instruction lets a session reverse-engineer file creation through
@@ -1285,7 +1340,7 @@ mod tests {
         // and never leave the bare placeholder behind.
         let p = writer_prompt(&driver_stance(0, &[]), false);
         assert!(
-            p.contains("temper.write(\"/bundle.md\""),
+            p.contains("temper.write(\"/bundle-e-1.md\""),
             "writer prompt must show the literal temper.write call"
         );
         assert!(

@@ -282,3 +282,115 @@ The preserved Foresight tree includes Genesis-only repair/adversary workspace re
 **Chose the shared configuration rule because:** The observed failure is the same premature text-only completion class. Each worker already has a bounded tool-based completion contract. This changes request configuration only, preserves the existing published application behavior, and does not introduce a runtime coordinator or guarantee that a worker's content is correct.
 
 **Where:** Foresight Session.Configure calls in sample_endpoints, spawn_repairers, spawn_adversaries, decompose_endpoint, consistency_gate, adjudicate_nodes, render_artifacts and animate_dwellers. Each has an explicit tool-based completion contract. Actual outgoing-request tests and rebuilt module hashes provide the verification boundary.
+
+## D24 — Open outcome forms at the selected world's clock
+
+**Decision:** Initialize each new outcome form from the selected replay clock for historical and simulated worlds, or fresh current UTC for observed worlds, and clear the prior draft's answer and sources.
+
+**Came up because:** Browser verification opened a simulated outcome at a 2025 replay clock, but the form retained the computer's 2026 page-load time. The backend accepts explicitly dated replay outcomes and uses their resolution time as the automatic learning cutoff, so submitting that default would advance the outcome and learning run beyond the selected replay point.
+
+**Options:** Leave the user to correct the computer-time default; force every outcome to the replay clock even in observed worlds; select the appropriate clock whenever the form opens.
+
+**Chose opening-time defaults because:** It preserves editable historical evidence dates, avoids carrying another forecast's draft across openings, and uses current time for real observed outcomes. The input keeps seconds so opening an observed outcome does not round its timestamp down before a recently registered prediction. Backend chronology and evidence validation remain authoritative.
+
+**Where:** Foresight dashboard outcome form, outcomeFormDefaults helper, and focused replay/observed/default-reset tests.
+
+
+## D25 — Enter deterministic corridor work through declared system reactions
+
+**Decision:** Keep session self-reports separate from deterministic corridor entry actions, and enter those actions through declared system entity triggers.
+
+**Came up because:** The real endpoint writer completed its bundle, but the all-written barrier inherited `service:wasm-runtime` and was denied `World.GateDiversity`. The same identity loss affects later deterministic integrations entered from session results.
+
+**Options:** Grant the shared session relay deterministic actions; rewrite the legacy corridor into returned composite batches; add trusted entry actions using the existing entity-trigger principal contract.
+
+**Chose the declared entry actions because:** The kernel assigns their system principal and preserves it across the existing internal HTTP path. Direct session and dashboard access stays denied. Composite batches do not run target integrations on PostgreSQL, so that rewrite would stop the pipeline. The existing legacy modules already dispatch cross-entity actions; this repair retains those calls and adds no new direct HTTP write. The user prioritized completing the full vertical slice and authorized required repairs, so a whole-engine migration is outside this repair. This is an explicit tradeoff against applying the no-direct-WASM-dispatch guidance retroactively to the legacy corridor.
+
+**Where:** `os-apps/paw-foresight/specs/endpoint.ioa.toml`, `specs/path.ioa.toml`, `policies/foresight.cedar`, and `crates/temperpaw/tests/foresight_gate_identity.rs`; PR #526.
+
+The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal` assertion (`no_further_transitions`) no longer expresses the intended contract: it forbids reporting as well as reopening. Remove that assertion and test that the sole action enabled from `Pruned` is the protected, state-preserving report. A pruned route remains terminal; no repair or challenge can restart it.
+
+## D26 — Publish a bounded first pass, then deepen it
+
+**Decision:** Extract at most three ranked claims per future, evaluate one repaired and challenged route per claim, publish accepted paths' predictions as they finish, and start bounded deeper exploration after the first pass and its queued prediction batch complete.
+
+**Came up because:** The observed run extracted 19 claims and withheld all predictions behind full-world settlement. Revision rounds and alternate routes amplified work, while completed paths were already useful. The user explicitly approved immediate publication, three claims per future, background alternatives, and faster recovery.
+
+**Options:** Keep the whole-world barrier; remove challenges to return faster; retain challenges but separate the first result from deeper search.
+
+**Chose a challenged first pass because:** It reduces initial work without presenting unchallenged paths as evaluated. Three futures produce at most nine initial claim workers. The first pass uses one route and no extra revision rounds; background exploration retains the existing three-route/two-revision ceiling. High-cost first-pass findings remain visibly strained or unreachable. Predictions use only Canonical/Tail path requirements and keep frozen inputs, model, and registration time per batch. Concurrent completion requests coalesce, and attempt/cursor guards reject stale callbacks. Prior paths and immutable forecasts remain available as exploration continues.
+
+**Where:** Foresight World/Claim/Path specs; aggregate_costs, decompose_endpoint, spawn_repairers, and register_forecasts modules; registration actor and actual-WASM tests; PR #526.
+
+## D27 — Recover provider streams without losing executable tool history
+
+**Decision:** Preserve matched Responses function calls and outputs as structured input, stop reading on explicit terminal response events, and enter provider work through declared system reactions with a bounded Foresight first-pass profile.
+
+**Came up because:** Thirteen failed repairer streams copied the client's historical `Tool call …` prose rather than emitting executable tool calls. Partial text arrived within a few minutes, but the client kept reading until its 600-second outer limit. Progress callbacks and timer-driven repair restarts also lost their trusted entry identity and were denied.
+
+**Options:** Increase concurrency; shorten every provider deadline; execute tool-like prose; repair structured history and terminal handling while scoping the faster budget to first-pass Foresight sessions.
+
+**Chose the scoped repair because:** Tool execution must come from actual provider tool events. Explicit completion/failure events should not wait for transport EOF. Standard sessions retain their existing budget; Foresight's explicit first-pass profile gets a 180-second hard call limit and at most one sequential retry per session. This is a total-call deadline, not an idle timeout. Trusted declared entries restore progress reporting and recovery without granting the shared WASM relay broad permissions. Existing published Session capabilities and current token tracking remain preserved.
+
+**Where:** paw-agent provider_caller, Session spec/CSDL/policy and provider runtime tests; Foresight launcher configuration and recovery entries; PR #526.
+
+## D28 — Keep recovery and workspace reuse within trusted boundaries
+
+**Decision:** Permit tenant-scoped Workspace read/list only for declared system workers, normalize a zero sampling budget to one, and leave the world usable when a stale phase-fenced cascade report is rejected.
+
+**Came up because:** Review confirmed that the spawners' workspace lookup had no matching permit in the complete installed closure, so it fell back to duplicate creation. A zero endpoint budget created no future and left the UI waiting. The new phase guard could reject an old first-pass report after deepening began; compensating that rejection with World.Fail would incorrectly stop newer work.
+
+**Options:** Broaden agent/operator workspace access; preserve denied lookups; accept an empty exploration; fail the world on every cascade error; grant only trusted lookup access and retain bounded retryable progress.
+
+**Chose the narrow changes because:** System workers can reuse workspaces without giving model sessions or operators browse/management rights. Every accepted sampling request starts at least one future. A rejected stale cascade stays recorded as an integration failure and cannot kill newer exploration; the world's existing timeout can retry a genuine failed cascade.
+
+**Where:** Foresight Cedar, sample_endpoints, World cascade trigger, and focused negative/positive budget and policy tests; PR #526.
+
+
+## D29 — Finish the first pass only after every future has attached its claims
+
+**Decision:** Require all sampled futures to have a durable, fully listed claim set before marking the first pass complete; failed or discarded futures remain explicit exceptions.
+
+**Came up because:** A real-WASM regression showed that one future's settled claim could trigger PathsScored while a second future was still decomposing and had no attached claims. The new background pass would then capture an incomplete claim set.
+
+**Options:** Rely on decomposers usually being faster than path evaluation; hold every prediction until all futures finish; check endpoint claim attachments only at the pass-completion boundary.
+
+**Chose the completion barrier because:** Individual accepted paths still publish immediately. The world cannot declare a complete first pass or start background exploration until every active future's attached claims are included in the terminal claim set. Collection omissions defer completion instead of silently excluding work.
+
+**Where:** aggregate_costs world cascade and actual-WASM progressive exploration regression; PR #526.
+
+## D30 — Keep changed agent modules’ build inputs separate from published consumers
+
+**Decision:** Package private build-library copies for `provider_caller` and `context_preparer`, while preserving the published agent’s other libraries, module sources, and WASMs byte for byte.
+
+**Came up because:** The tested provider and context changes use newer library APIs than published `paw-agent@b72f5d6`. Replacing the shared libraries globally made the unchanged published sandbox consumer fail compilation with eight errors, including missing sandbox helpers and incompatible SDK context types.
+
+**Options:** Replace the shared libraries and migrate unrelated consumers; ship changed WASMs without their complete source inputs; or include private library copies used only by the two changed modules.
+
+**Chose private copies over global replacement because:** It supplies the actual inputs needed to rebuild these two modules without removing published sandbox behavior or expanding this effort into an agent-wide migration. The copies match the owning worktree’s library bytes; the receipt records each source path, hash, dependency edge, and Cargo path change. The tradeoff is four duplicated library inputs confined to these modules. The resulting candidate preserves 170 original files, including every unchanged WASM. Verification passed 40 provider unit tests, 18 context unit tests, five tests against the rebuilt provider WASM, and compilation of the unchanged sandbox consumer. The rebuilt context WASM still requires the final live closure acceptance; these checks do not establish external-provider success.
+
+**Where:** Candidate `paw-agent/wasm/provider-context-libs/`; the two modules’ `Cargo.toml` and lockfiles; source mapping and evidence in `/private/tmp/arn518-agent-isolated-proof/source-closure.json` and `verification.json`. This is an unpublished candidate pending final source reconciliation and live acceptance.
+
+## D31 — Preserve provider limits and stop futile retries
+
+**Decision:** Treat an OpenAI Codex `usage_limit_reached` HTTP 429 as terminal for the current provider invocation, and retain only its bounded error type, code, message, and numeric reset times.
+
+**Came up because:** A real Foresight seed received `usage_limit_reached` from an exhausted preview account. The provider module discarded the useful body, sent five immediate requests, then incorrectly reported that no HTTP response had arrived. The provider account was corrected separately under the existing temporary-credential authorization; retrying did not restore quota.
+
+**Options:** Keep the generic retry/error path; change all provider retry policies; or classify this terminal response and preserve the observed response boundary.
+
+**Chose the narrow classification over a retry redesign because:** It reports an actionable HTTP 429 and ends a request sequence that cannot restore account quota, while preserving the existing five-attempt budget for transient rate limits. Stream failures also retain a received HTTP status, so final errors distinguish a failed response from failure before a response. Messages are limited to 512 characters, identifiers to 64, and only the declared fields from a bounded JSON body are retained. Session-level recovery is unchanged: a Foresight session may still perform its one sequential outer retry, giving two terminal requests across two invocations rather than five per invocation. No model, provider, credential, or account reset behavior changes in this module.
+
+**Where:** `os-apps/paw-agent/wasm/provider_caller/src/lib.rs`; `crates/temperpaw/tests/foresight_provider_profile/mod.rs`. The same final test binary exercised frozen old and new WASMs: four new cases failed on the old module and passed on the new module; the five existing profile cases passed on both. All 41 module unit tests passed. Packaging and source mappings are in `/private/tmp/arn518-provider-429-proof/verification.json` and `source-closure.json`.
+
+## D32 — Make failed research retryable from its visible session
+
+**Decision:** Show “Retry research” only for a Seeding world whose linked research Session has been read successfully and is Failed or Cancelled, and invoke the existing World.ResumeSeed action.
+
+**Came up because:** The fresh observed-world run encountered a provider quota rejection before its first research turn. Activity correctly displayed the failed Session, but the user had no recovery control: the alternatives were an operator API call or the existing 20-minute Seeding timeout.
+
+**Options:** Keep recovery API-only; retry automatically from the dashboard; expose an unrestricted research restart; or provide a button guarded by the selected world and its verified linked Session.
+
+**Chose the guarded button because:** It makes the failure recoverable through the same UI that explains it, without starting duplicate research automatically or treating an unavailable Session read as a confirmed failure. The page marks the failed Session ID before dispatch and blocks further requests for that ID until a replacement Session is recorded, including during delayed refreshes and world switching. A definite HTTP client rejection releases the guard; a transport failure or timeout retains it while the user checks the world. HTTP status is carried as structured error metadata rather than parsed from prose. The guard is per-page, avoiding a persistent browser lock that could strand recovery after an unsent request. Existing authentication, World action rules, and the ResearchSessionStarted attempt fence remain the backend authority.
+
+**Where:** `dashboard/src/lib/foresight.ts:77` (eligibility and duplicate guard), `dashboard/src/routes/foresight/+page.svelte:179` and `:489` (action and visible control), `dashboard/src/lib/api.ts:126` (HTTP status metadata), `dashboard/tests/foresight-session.test.mjs` and `dashboard/tests/foresight-transport.test.mjs` (eligibility, concurrent requests, old-session reuse, transport uncertainty, and real HTTP rejection).

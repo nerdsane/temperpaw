@@ -4,6 +4,329 @@ use std::collections::BTreeMap;
 use temper_jit::TransitionTable;
 
 #[test]
+fn recovery_reenters_through_declared_system_actions() {
+    for (source, source_action, target, states) in [
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/path.ioa.toml"),
+            "ResumeRepair",
+            "StartRepair",
+            &["Solving"][..],
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/path.ioa.toml"),
+            "ResumeCosting",
+            "EvaluateChallenge",
+            &["Challenged"][..],
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/claim.ioa.toml"),
+            "ResumeBridge",
+            "EvaluateRoutes",
+            &["Bridging"][..],
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/world.ioa.toml"),
+            "ResumeWorldCascade",
+            "EvaluateWorldCascade",
+            &["Active", "RegisteringForecasts"][..],
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/endpoint.ioa.toml"),
+            "ResumeWriter",
+            "StartWriter",
+            &["Sampled"][..],
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/endpoint.ioa.toml"),
+            "ResumeEndpointScoring",
+            "EvaluateEndpointScoring",
+            &["UnderRepair"][..],
+        ),
+    ] {
+        let table = TransitionTable::from_ioa_source(source);
+        let spec: toml::Value = toml::from_str(source).unwrap();
+        let action = spec["action"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"].as_str() == Some(source_action))
+            .unwrap();
+        let trigger = &action["triggers"].as_array().unwrap()[0];
+        assert_eq!(trigger["kind"].as_str(), Some("entity"));
+        assert_eq!(trigger["principal"].as_str(), Some("system"));
+        assert_eq!(trigger["target_action"].as_str(), Some(target));
+        assert_eq!(trigger["resolve_target"]["type"].as_str(), Some("same_id"));
+        for state in states {
+            for step in [source_action, target] {
+                let result = table.evaluate(state, 0, step).unwrap();
+                assert!(result.success, "{step} from {state}");
+                assert_eq!(result.new_state, *state);
+            }
+        }
+    }
+}
+
+#[test]
+fn background_claim_search_reopens_once_and_retains_first_pass_routes() {
+    use std::sync::Arc;
+    use temper_runtime::scheduler::SimActorHandler;
+    use temper_server::entity_actor::sim_handler::EntityActorHandler;
+    for terminal in ["Settle", "MarkUnreachable"] {
+        let table = TransitionTable::from_ioa_source(include_str!(
+            "../../../os-apps/paw-foresight/specs/claim.ioa.toml"
+        ));
+        let mut claim = EntityActorHandler::new("Claim", "claim-background", Arc::new(table));
+        claim.init().unwrap();
+        claim.handle_message("SubmitForBridge", "{}").unwrap();
+        claim
+            .handle_message(
+                "RoutesAttached",
+                r#"{"path_ids":"[\"path-first\"]","route_count":"1"}"#,
+            )
+            .unwrap();
+        let params = if terminal == "Settle" {
+            r#"{"settled_route_id":"path-first","best_route_cost":"50","classification":"reachable"}"#
+        } else {
+            r#"{"unreachable_reason":"first-pass budget"}"#
+        };
+        claim.handle_message(terminal, params).unwrap();
+        let deep = claim
+            .handle_message("BeginDeepening", r#"{"settled_route_id":""}"#)
+            .unwrap();
+        assert_eq!(deep["status"], "Bridging");
+        assert_eq!(deep["fields"]["path_ids"], "[\"path-first\"]");
+        assert_eq!(deep["fields"]["route_count"], "1");
+        assert_eq!(deep["fields"]["settled_route_id"], "");
+        assert_eq!(deep["booleans"]["deepening_started"], true);
+        claim.handle_message(terminal, params).unwrap();
+        assert!(
+            claim
+                .handle_message("BeginDeepening", r#"{"settled_route_id":""}"#)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn durable_path_and_claim_verdicts_drive_world_progress() {
+    let cases = [
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/path.ioa.toml"),
+            "ClassifyCanonical",
+            "RequestForecastRegistration",
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/path.ioa.toml"),
+            "ClassifyTail",
+            "RequestForecastRegistration",
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/claim.ioa.toml"),
+            "Settle",
+            "ResumeWorldCascade",
+        ),
+        (
+            include_str!("../../../os-apps/paw-foresight/specs/claim.ioa.toml"),
+            "MarkUnreachable",
+            "ResumeWorldCascade",
+        ),
+    ];
+    for (source, name, target) in cases {
+        let spec: toml::Value = toml::from_str(source).unwrap();
+        let action = spec["action"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"].as_str() == Some(name))
+            .unwrap();
+        let matches = |a: &toml::Value| {
+            a.get("triggers")
+                .and_then(toml::Value::as_array)
+                .is_some_and(|ts| {
+                    ts.iter().any(|t| {
+                        t.get("kind").and_then(toml::Value::as_str) == Some("entity")
+                            && t.get("principal").and_then(toml::Value::as_str) == Some("system")
+                            && t.get("target_entity").and_then(toml::Value::as_str) == Some("World")
+                            && t.get("target_action").and_then(toml::Value::as_str) == Some(target)
+                            && t["resolve_target"]["field"].as_str() == Some("world_id")
+                    })
+                })
+        };
+        assert!(
+            matches(action),
+            "{name} must notify after its durable commit"
+        );
+        let mut missing = action.clone();
+        missing.as_table_mut().unwrap().remove("triggers");
+        assert!(!matches(&missing));
+    }
+    let table = TransitionTable::from_ioa_source(include_str!(
+        "../../../os-apps/paw-foresight/specs/world.ioa.toml"
+    ));
+    for status in ["Active", "RegisteringForecasts"] {
+        let result = table.evaluate(status, 0, "ResumeWorldCascade").unwrap();
+        assert!(result.success);
+        assert_eq!(
+            result.new_state, status,
+            "claim completion must not interrupt registration"
+        );
+    }
+}
+
+#[test]
+fn progressive_registration_coalesces_requests_and_rejects_stale_batches() {
+    use std::sync::Arc;
+    use temper_runtime::scheduler::SimActorHandler;
+    use temper_server::entity_actor::sim_handler::EntityActorHandler;
+    let table = TransitionTable::from_ioa_source(include_str!(
+        "../../../os-apps/paw-foresight/specs/world.ioa.toml"
+    ));
+    let spec: toml::Value = toml::from_str(include_str!(
+        "../../../os-apps/paw-foresight/specs/world.ioa.toml"
+    ))
+    .unwrap();
+    for trigger in spec["action"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|action| action.get("triggers").and_then(toml::Value::as_array))
+        .flatten()
+    {
+        if matches!(trigger.get("module").and_then(toml::Value::as_str), Some("register_forecasts" | "aggregate_costs")) {
+            assert!(
+                trigger.get("on_failure").is_none(),
+                "a refused old callback must not compensate the current batch"
+            );
+        }
+    }
+    let mut world = EntityActorHandler::new("World", "world-progressive", Arc::new(table));
+    world.init().unwrap();
+    world.handle_message("Seed", "{}").unwrap();
+    world.handle_message("SeedComplete", "{}").unwrap();
+    let requested = world
+        .handle_message("RequestForecastRegistration", "{}")
+        .unwrap();
+    assert_eq!(requested["status"], "Active");
+    assert_eq!(requested["booleans"]["forecast_registration_pending"], true);
+    let start = r#"{"forecast_registration_key":""}"#;
+    let first = world
+        .handle_message("StartForecastRegistration", start)
+        .unwrap();
+    assert_eq!(first["counters"]["registration_attempt"], 1);
+    assert_eq!(first["booleans"]["forecast_registration_pending"], false);
+    assert!(
+        world
+            .handle_message("StartForecastRegistration", start)
+            .is_err()
+    );
+    for _ in 0..3 {
+        let queued = world
+            .handle_message("RequestForecastRegistration", "{}")
+            .unwrap();
+        assert_eq!(queued["status"], "RegisteringForecasts");
+        assert_eq!(queued["booleans"]["forecast_registration_pending"], true);
+    }
+    // Final world weighting may settle while an earlier path's forecasts commit.
+    let settled = world
+        .handle_message(
+            "PathsScored",
+            r#"{"canonical_path_id":"path-final","exploration_phase":"first_pass","expected_exploration_phase":"first_pass"}"#,
+        )
+        .unwrap();
+    assert_eq!(settled["status"], "RegisteringForecasts");
+    assert_eq!(settled["booleans"]["first_pass_complete"], true);
+    world
+        .handle_message(
+            "ForecastRegistrationComplete",
+            r#"{"expected_registration_attempt":1,"error_message":"","learning_mode":"observed"}"#,
+        )
+        .unwrap();
+    let next = world
+        .handle_message("StartForecastRegistration", start)
+        .unwrap();
+    assert_eq!(next["counters"]["registration_attempt"], 2);
+    assert_eq!(next["booleans"]["forecast_registration_pending"], false);
+    for (action, payload) in [
+        (
+            "RegistrationSnapshotPrepared",
+            json!({"expected_registration_attempt":1,"registration_nodes_json":"[]"}),
+        ),
+        (
+            "CommitForecastSnapshot",
+            json!({"expected_registration_attempt":1}),
+        ),
+        (
+            "ForecastPrepared",
+            json!({"expected_registration_attempt":1,"forecast_id":"late"}),
+        ),
+        (
+            "ForecastRegistrationComplete",
+            json!({"expected_registration_attempt":1,"error_message":"","learning_mode":"observed"}),
+        ),
+        (
+            "ForecastRegistrationFailed",
+            json!({"expected_registration_attempt":1,"error_message":"old"}),
+        ),
+    ] {
+        assert!(
+            world.handle_message(action, &payload.to_string()).is_err(),
+            "{action}"
+        );
+        assert_eq!(world.current_status(), "RegisteringForecasts");
+        // The exact same payload passes validation only when its attempt fence
+        // is removed: unrelated strict-parameter errors cannot mask this test.
+        let mut mutant = TransitionTable::from_ioa_source(include_str!(
+            "../../../os-apps/paw-foresight/specs/world.ioa.toml"
+        ));
+        mutant
+            .action_contracts
+            .get_mut(action)
+            .unwrap()
+            .constraints
+            .retain(|c| c.param() != "expected_registration_attempt");
+        assert!(
+            mutant
+                .validate_action_params(
+                    action,
+                    &payload,
+                    &json!({}),
+                    &BTreeMap::from([("registration_attempt".into(), 2)]),
+                    &BTreeMap::new()
+                )
+                .is_ok()
+        );
+    }
+    assert!(
+        world
+            .handle_message("ForecastRegistered", r#"{"registration_key":"old-key"}"#)
+            .is_err()
+    );
+    world
+        .handle_message(
+            "ForecastRegistrationComplete",
+            r#"{"expected_registration_attempt":2,"error_message":"","learning_mode":"observed"}"#,
+        )
+        .unwrap();
+    assert!(
+        world
+            .handle_message("StartForecastRegistration", start)
+            .is_err(),
+        "drained requests must not spin"
+    );
+    let deep =
+        r#"{"deepening_claim_ids":"[]","deepening_cursor":"0","exploration_phase":"deepening"}"#;
+    world.handle_message("BeginDeepening", deep).unwrap();
+    assert!(world.handle_message("PathsScored", r#"{"canonical_path_id":"stale","exploration_phase":"first_pass","expected_exploration_phase":"first_pass"}"#).is_err(), "late first-pass callbacks must not rewind deepening");
+    let completed = world.handle_message("PathsScored", r#"{"canonical_path_id":"final","exploration_phase":"complete","expected_exploration_phase":"deepening"}"#).unwrap();
+    assert_eq!(completed["fields"]["exploration_phase"], "complete");
+
+    assert!(
+        world.handle_message("BeginDeepening", deep).is_err(),
+        "background exploration starts once"
+    );
+}
+
+#[test]
 fn strict_forecast_initializes_only_through_declared_register() {
     let source = include_str!("../../../os-apps/paw-foresight/specs/forecast.ioa.toml");
     let table = TransitionTable::from_ioa_source(source);
@@ -142,7 +465,33 @@ fn changed_action_metadata_matches_ioa_and_detects_missing_parameters() {
                 "ForecastPrepared",
                 "ForecastRegistrationComplete",
                 "ForecastRegistrationFailed",
+                "PathsScored",
+                "RequestForecastRegistration",
+                "StartForecastRegistration",
+                "ForecastRegistrationTimedOut",
+                "MaybeDeepen",
+                "BeginDeepening",
+                "ContinueDeepening",
+                "DeepeningClaimPrepared",
+                "EvaluateWorldCascade",
+                "RegistrationSnapshotPrepared",
+                "CommitForecastSnapshot",
             ][..],
+        ),
+        (
+            "Path",
+            include_str!("../../../os-apps/paw-foresight/specs/path.ioa.toml"),
+            &["StartRepair"][..],
+        ),
+        (
+            "Claim",
+            include_str!("../../../os-apps/paw-foresight/specs/claim.ioa.toml"),
+            &["EvaluateRoutes", "BeginDeepening"][..],
+        ),
+        (
+            "Endpoint",
+            include_str!("../../../os-apps/paw-foresight/specs/endpoint.ioa.toml"),
+            &["StartWriter", "EvaluateEndpointScoring"][..],
         ),
         (
             "Forecast",
@@ -197,6 +546,18 @@ fn changed_action_metadata_matches_ioa_and_detects_missing_parameters() {
             "expected_research_attempt",
         ),
         ("World", "ForecastPrepared", "registration_model_json"),
+        ("World", "ForecastPrepared", "registration_nodes_json"),
+        ("World", "ForecastPrepared", "expected_registration_attempt"),
+        (
+            "World",
+            "StartForecastRegistration",
+            "forecast_registration_key",
+        ),
+        (
+            "World",
+            "DeepeningClaimPrepared",
+            "expected_deepening_cursor",
+        ),
         ("World", "ForecastPrepared", "learning_mode"),
         ("World", "ForecastRegistrationComplete", "learning_mode"),
         ("World", "ForecastRegistrationFailed", "error_message"),

@@ -237,7 +237,7 @@ fn repairer_prompt(
          exists. Do NOT create Files, Directories, or Workspaces yourself, and do NOT invent a \
          file-creation API: temper.create is for EventNodes only, never for files. Call \
          temper.write exactly like this:\n\
-         result = temper.write(\"/repair-log.md\", \"<your markdown repair log>\")\n\
+         result = temper.write(\"/repair-log-{path_id}.md\", \"<your markdown repair log>\")\n\
          temper.write returns {{\"file_id\": \"...\", \"path\": \"...\", \"workspace_id\": \
          \"...\"}}. Use result[\"file_id\"] as repair_log_file_id below, then self-report:\n\
          temper.action(\"Paths\", \"{path_id}\", \"RepairComplete\", {{\"repair_log_file_id\": \
@@ -384,6 +384,7 @@ fn start_session(
     max_turns: &str,
     user_message: &str,
     workspace_id: &str,
+    latency_profile: &str,
 ) -> Result<String, String> {
     let session_resp = ctx.http_call(
         "POST",
@@ -414,6 +415,7 @@ fn start_session(
         "agent_name": role,
         "tools_enabled": tools,
         "tool_choice": "required",
+        "provider_latency_profile": latency_profile,
         "max_turns": max_turns,
         "user_message": message,
         "sandbox_url": "none",
@@ -454,7 +456,10 @@ fn revise_route(
     let world_id = get("world_id");
     let revision_brief = get("revision_brief");
     if claim_id.is_empty() {
-        return Err("RevisionRequested on a path without claim_id (legacy routes do not revise)".to_string());
+        return Err(
+            "RevisionRequested on a path without claim_id (legacy routes do not revise)"
+                .to_string(),
+        );
     }
 
     let api = ctx
@@ -538,6 +543,11 @@ fn revise_route(
         "50",
         &repairer_msg,
         &workspace_id,
+        if entity_field(&world, "exploration_phase", "ExplorationPhase") == "first_pass" {
+            "foresight_first_pass"
+        } else {
+            "standard"
+        },
     )?;
     ctx.log(
         "info",
@@ -567,7 +577,10 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         // - Path.RevisionRequested: the triggering entity is the Path itself;
         //   spawn a repairer against the SAME route, briefed on the
         //   objections it must answer.
-        if ctx.trigger_action == "RevisionRequested" || ctx.trigger_action == "ResumeRepair" {
+        if matches!(
+            ctx.trigger_action.as_str(),
+            "RevisionRequested" | "ResumeRepair" | "StartRepair"
+        ) {
             // ResumeRepair (self-heal): re-spawn a repairer for this same route
             // after its session died; same path as a revision, just no new brief.
             return revise_route(&ctx, &fields, &get);
@@ -768,13 +781,22 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             "50",
             &repairer_msg,
             &workspace_id,
+            if entity_field(&world, "exploration_phase", "ExplorationPhase") == "first_pass" {
+                "foresight_first_pass"
+            } else {
+                "standard"
+            },
         )?;
 
+        // Retain prior routes when background exploration opens another alternative.
+        let mut path_ids: Vec<String> = serde_json::from_str(&get("path_ids"))
+            .map_err(|e| format!("invalid claim path ids: {e}"))?;
+        path_ids.push(path_id.clone());
         // 4. Record the attached route on the claim.
         set_success_result(
             "RoutesAttached",
             &json!({
-                "path_ids": format!("[\"{path_id}\"]"),
+                "path_ids": serde_json::to_string(&path_ids).map_err(|e| e.to_string())?,
                 "route_count": (route_index + 1).to_string(),
             }),
         );
@@ -797,6 +819,50 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_paths_are_owned_and_retry_stable() {
+        let output_paths = |id: &str| {
+            let prompt = repairer_prompt(
+                id,
+                "c-1",
+                "claim",
+                "w-1",
+                "a-1",
+                "bundle",
+                "lags",
+                "2026-12-31",
+                "",
+                false,
+            );
+            prompt
+                .split('"')
+                .filter(|part| part.starts_with('/') && part.ends_with(".md"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let first = output_paths("owner-a");
+        let second = output_paths("owner-b");
+        assert_eq!(first.len(), 1, "each saved artifact needs an explicit path");
+        assert_eq!(
+            first,
+            output_paths("owner-a"),
+            "a retry reuses its own files"
+        );
+        assert_eq!(second.len(), first.len());
+        assert!(first.iter().all(|path| path.contains("owner-a")));
+        assert!(second.iter().all(|path| path.contains("owner-b")));
+        assert!(
+            first.iter().all(|path| !second.contains(path)),
+            "workers sharing a workspace must never overwrite another worker's file"
+        );
+        let distinct: std::collections::BTreeSet<_> = first.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            first.len(),
+            "one worker's artifacts have different purposes"
+        );
+    }
 
     // Prompt-contract tests: the generated prompts must reference the exact
     // entity sets, action names, and parameter names the specs declare.
@@ -842,7 +908,7 @@ mod tests {
         // Files/Directories/Workspaces only.)
         let p = prompt(false);
         assert!(
-            p.contains("temper.write(\"/repair-log.md\""),
+            p.contains("temper.write(\"/repair-log-p-1.md\""),
             "repairer prompt must show the literal temper.write call"
         );
         assert!(
@@ -895,7 +961,10 @@ mod tests {
         ] {
             assert!(p.contains(needle), "repairer prompt missing: {needle}");
         }
-        assert!(!p.contains("temper.read("), "bundles are inlined, never temper.read");
+        assert!(
+            !p.contains("temper.read("),
+            "bundles are inlined, never temper.read"
+        );
     }
 
     #[test]
@@ -977,7 +1046,16 @@ mod tests {
         // No lag table for the world: the repairer is told so explicitly and
         // still must justify dates from cited durations — never a silent pass.
         let p = repairer_prompt(
-            "p-1", "c-1", "claim", "w-1", "a-1", "bundle", "", "2026-12-13", "", false,
+            "p-1",
+            "c-1",
+            "claim",
+            "w-1",
+            "a-1",
+            "bundle",
+            "",
+            "2026-12-13",
+            "",
+            false,
         );
         assert!(p.contains("No lag table was provided"));
         assert!(p.contains("DATE DISCIPLINE"));
@@ -1029,7 +1107,10 @@ mod tests {
 
         // An empty snake_case value falls through to PascalCase.
         let empty_snake = json!({ "AgentModel": "m2", "fields": { "agent_model": "" } });
-        assert_eq!(entity_field(&empty_snake, "agent_model", "AgentModel"), "m2");
+        assert_eq!(
+            entity_field(&empty_snake, "agent_model", "AgentModel"),
+            "m2"
+        );
 
         let neither = json!({});
         assert_eq!(entity_field(&neither, "agent_model", "AgentModel"), "");

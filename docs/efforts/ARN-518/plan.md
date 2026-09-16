@@ -15,3 +15,7 @@ ARN-518 adds actual continuous learning and an understandable UI to the existing
 ## Delivery priority
 
 Complete one usable learning and observation flow first. Keep presentation simple and readable using the existing dashboard plus the Galley design tokens. Defer decorative refinement, not required behavior or correctness.
+
+## Approved delivery acceleration
+
+Publish accepted path predictions as they become available. Reduce the initial exploration to three futures with up to three key claims each, followed by one repair-and-challenge pass per claim. Start bounded deeper searches after the first result is usable. Preserve saved paths and prediction history. Repair provider protocol and recovery failures before timing a fresh complete run; report actual first-prediction and first-pass elapsed times separately from implementation time.

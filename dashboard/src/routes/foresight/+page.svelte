@@ -4,10 +4,10 @@
   import { base } from '$app/paths';
   import { replaceState } from '$app/navigation';
   import { page } from '$app/stores';
-  import { createEntity, postEntityAction, queryEntities, getEntity, fetchSetupStatus, getSecret, listSecretKeys } from '$lib/api';
+  import { apiFetch, createEntity, postEntityAction, queryEntities, getEntity, fetchSetupStatus, getSecret, listSecretKeys } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    loadResearchSession, researchSessionProblem, type ResearchSessionState, forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    loadResearchSession, researchSessionProblem, canRetryResearch, retryForesightResearch, type ResearchSessionState, forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, outcomeFormDefaults, researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, requiredEvents, loadFutureBundle, type FutureBundleState, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
@@ -25,11 +25,13 @@
   let endpoints = $state<ReturnType<typeof parseEndpoint>[]>([]);
   let endpointsAvailable = $state(false);
   let explorationRequests = $state<Record<string, boolean>>({});
+  let futureBundles = $state<Record<string, FutureBundleState>>({});
   let paths = $state<ReturnType<typeof parsePath>[]>([]);
   let claims = $state<ReturnType<typeof parseClaim>[]>([]);
   let runs = $state<LearningRun[]>([]);
   let activity = $state<StateChangeEvent[]>([]);
   let researchSession = $state<ResearchSessionState>({kind:'unlinked'});
+  let researchRetryRequests = $state<Record<string, string>>({});
   let showCreate = $state(false);
   let newName = $state('');
   let newDomain = $state('');
@@ -50,7 +52,7 @@
   let outcomeForecast = $state('');
   let outcome = $state('yes');
   let outcomeSources = $state('');
-  let outcomeTime = $state(new Date().toISOString().slice(0, 16));
+  let outcomeTime = $state('');
   let loadGeneration = 0;
   let disposed = false;
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -60,6 +62,9 @@
   const futures = $derived(futureProgress(endpoints));
   const explorationRequested = $derived(explorationRequests[selectedId] === true);
   const researchProblem = $derived(researchSessionProblem(researchSession, world?.status ?? ''));
+  const researchRetryEligible = $derived(canRetryResearch(world, researchSession));
+  const researchRetryPending = $derived(Boolean(world && world.status === 'Seeding'
+    && researchRetryRequests[world.id] === world.researchSessionId));
   const failures = $derived([
     ...(researchProblem ? [researchProblem] : []),
     ...(world?.error ? [world.error] : []),
@@ -171,6 +176,15 @@
       message = action === 'RegisterForecasts' ? 'Prediction registration requested.' : 'World research started.';
     });
   }
+  async function retryResearch() {
+    if (!world || busy || loading || !canRetryResearch(world, researchSession, researchRetryRequests[world.id])) return;
+    const selectedWorld = world;
+    const failedSession = researchSession;
+    await perform(async () => {
+      await retryForesightResearch(selectedWorld, failedSession, researchRetryRequests, {postEntityAction});
+      message = 'Research retry accepted. Waiting for its new session.';
+    });
+  }
   async function exploreFutures() {
     if (!world || busy || loading || !endpointsAvailable || explorationRequested) return;
     const selectedWorld = world;
@@ -188,6 +202,13 @@
         tab = 'world';
       }
     });
+  }
+  async function readFutureBundle(fileId: string) {
+    const existing = futureBundles[fileId];
+    if (existing?.kind === 'loading' || existing?.kind === 'ready') return;
+    futureBundles[fileId] = {kind:'loading'};
+    const result = await loadFutureBundle(fileId, apiFetch);
+    if (!disposed) futureBundles[fileId] = result;
   }
   async function startLearning() {
     await perform(async () => {
@@ -220,6 +241,19 @@
       message = 'Question added and prediction registration requested.';
       showQuestion = false;
     });
+  }
+  function openOutcome(id: string) {
+    if (!world) return;
+    try {
+      const draft = outcomeFormDefaults(world.mode, asOf);
+      outcomeTime = draft.time;
+      outcome = draft.outcome;
+      outcomeSources = draft.sources;
+      outcomeForecast = id;
+      actionError = '';
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : 'Could not prepare the outcome form.';
+    }
   }
   async function recordOutcome() {
     await perform(async () => {
@@ -343,10 +377,50 @@
         {:else if endpoints.length}<p aria-live="polite">{futures.completed} completed · {futures.pending} in progress · {futures.discarded} discarded · {futures.failed} failed</p>
         {:else if explorationRequested}<p class="notice" role="status">Exploration was requested. Waiting for the first future record.</p>
         {:else}<p class="empty">No alternative futures yet. Use “Explore possible futures” to develop scenarios from this world's research.</p>{/if}
-        <div class="future-grid">{#each endpoints as endpoint}<article class="future"><p class="eyebrow">{endpoint.status}</p><h3>{endpoint.summary || 'Future being developed'}</h3>{#if endpoint.error}<p class="error">{endpoint.error}</p>{/if}{#if endpoint.discardReason}<p>{endpoint.discardReason}</p>{/if}<a href={recordHref('Endpoint',endpoint.id)}>Future record ↗</a>
-          <details><summary>Assumptions and routes</summary><pre>{endpoint.assumptions || 'No driver assumptions recorded.'}</pre>{#each paths.filter(path => path.endpointId === endpoint.id) as path}<div class="route"><p><strong>{path.classification || path.status}</strong> · Repair cost {path.cost ?? 'unmeasured'}</p><p>{path.note}</p><pre>{path.nodes}</pre><a href={recordHref('Path',path.id)}>Route evidence ↗</a></div>{/each}
-            {#each claims.filter(claim => claim.endpointId === endpoint.id) as claim}<p><strong>{claim.classification || claim.status}:</strong> {claim.statement} {claim.reason}</p>{/each}
-          </details></article>{/each}</div>
+        <div class="future-grid">{#each endpoints as endpoint}
+          {@const bundle = futureBundles[endpoint.bundleFileId]}
+          <article class="future"><p class="eyebrow">{endpoint.status}</p><h3>{endpoint.summary || 'Future being developed'}</h3>
+            {#if endpoint.error}<p class="error">{endpoint.error}</p>{/if}
+            {#if endpoint.discardReason}<p>{endpoint.discardReason}</p>{/if}
+            <a href={recordHref('Endpoint',endpoint.id)}>Future record ↗</a>
+            {#if endpoint.bundleFileId}
+              <details ontoggle={(event) => { if (event.currentTarget.open) void readFutureBundle(endpoint.bundleFileId); }}>
+                <summary>Read the full future story</summary>
+                <p class="small">Scenario documents written from inside this possible future.</p>
+                {#if bundle?.kind === 'ready'}<div class="future-story">{bundle.text || 'The saved story file is empty.'}</div>
+                {:else if bundle?.kind === 'unavailable'}<p class="error" role="alert">{bundle.error}</p><button onclick={() => void readFutureBundle(endpoint.bundleFileId)}>Retry reading story</button>
+                {:else}<p role="status">Loading the saved story…</p>{/if}
+              </details>
+            {:else}<p class="small">No future story file has been recorded yet.</p>{/if}
+            <details><summary>Routes and requirements</summary>
+              {#if !paths.some(path => path.endpointId === endpoint.id)}<p>No routes have been recorded for this future.</p>{/if}
+              {#each paths.filter(path => path.endpointId === endpoint.id) as path}
+                {@const requirements = requiredEvents(path.nodes, events)}
+                {@const supportedClaim = claims.find(claim => claim.id === path.claimId)}
+                <div class="route">
+                  {#if supportedClaim}<p><strong>Supports:</strong> {supportedClaim.statement}</p>{/if}
+                  <p><strong>{path.classification || path.status}</strong> · Repair cost {path.cost ?? 'unmeasured'}</p>
+                  {#if path.note}<p>{path.note}</p>{/if}
+                  {#if path.error}<p class="error">{path.error}</p>{/if}
+                  <p><strong>Required events</strong></p><p class="small">Events this route requires, in recorded order.</p>
+                  {#if requirements.error}<p class="error">{requirements.error}</p>
+                  {:else if !requirements.items.length}<p class="small">No required events have been recorded for this route.</p>
+                  {:else}<ul class="required-events">{#each requirements.items as requirement}
+                    {@const prediction = groupedForecasts.find(group => group.eventId === requirement.id)?.latest}
+                    <li><p>{requirement.event?.statement || 'Event not loaded in this view.'}</p>
+                      {#if requirement.event}<p class="small">{date(requirement.event.date)} · Input probability {percent(requirement.event.probability)} · {requirement.event.status}</p>{/if}
+                      <a href={recordHref('EventNode',requirement.id)}>Event record ↗</a>
+                      {#if prediction}<a href={recordHref('Forecast',prediction.id)}>Prediction {percent(prediction.probability)} ↗</a>{/if}
+                    </li>
+                  {/each}</ul>{/if}
+                  <a href={recordHref('Path',path.id)}>Route evidence ↗</a>
+                </div>
+              {/each}
+              {#each claims.filter(claim => claim.endpointId === endpoint.id) as claim}<p><strong>{claim.classification || claim.status}:</strong> {claim.statement} {claim.reason}</p>{/each}
+              <details><summary>Driver settings</summary><pre>{endpoint.assumptions || 'No driver assumptions recorded.'}</pre></details>
+            </details>
+          </article>
+        {/each}</div>
       </section>
     {:else if tab === 'predictions'}
       <section class="panel"><p class="eyebrow">Beliefs with a record</p><h2>What the system expects</h2>{#if world.status === 'Active'}<button onclick={() => showQuestion = !showQuestion}>{showQuestion ? 'Close question form' : 'Add question'}</button>{/if}<p class="small">Earlier predictions remain visible when evidence or the model changes. Model in use: <strong>{activeModel}</strong>.</p>
@@ -357,7 +431,7 @@
           <p>Input {percent(group.latest.baseProbability)} → Prediction {percent(group.latest.probability)} <span class="small">/ {group.latest.model || 'Model not recorded'}</span></p>
           {#if group.latest.error}<p class="error">{group.latest.error}</p>{/if}
           {#if group.latest.outcome}<p><strong>Outcome: {group.latest.outcome}</strong> · {group.latest.outcomeEvidence || 'Outcome provenance not recorded'} · Score {measure(group.latest.score)} <span class="small">(Brier score; lower is better)</span></p>{/if}
-          <div class="inline-actions"><a href={recordHref('Forecast',group.latest.id)}>Prediction record ↗</a>{#if group.latest.learningRunId}<a href={recordHref('LearningRun',group.latest.learningRunId)}>Learning behind this prediction ↗</a>{/if}{#if group.latest.status === 'Preregistered'}<button disabled={busy} onclick={() => outcomeForecast = group.latest.id}>Record outcome</button>{/if}</div>
+          <div class="inline-actions"><a href={recordHref('Forecast',group.latest.id)}>Prediction record ↗</a>{#if group.latest.learningRunId}<a href={recordHref('LearningRun',group.latest.learningRunId)}>Learning behind this prediction ↗</a>{/if}{#if group.latest.status === 'Preregistered'}<button disabled={busy} onclick={() => openOutcome(group.latest.id)}>Record outcome</button>{/if}</div>
           <details><summary>{group.revisions.length} recorded {group.revisions.length === 1 ? 'prediction' : 'revisions'} · evidence and history</summary>{#each group.revisions as revision}<div class="revision"><p><strong>{percent(revision.probability)}</strong> · {date(revision.registered)} · {revision.model || 'Model unrecorded'}</p><p class="small">Input {percent(revision.baseProbability)} · {revision.status} · {revision.outcome || 'Unresolved'}{#if revision.outcome} · {revision.outcomeEvidence || 'Outcome provenance not recorded'}{/if}</p><pre>{revision.sources || revision.marketRef || 'No outcome evidence recorded.'}</pre>{#each sourceLinks(revision.sources || revision.marketRef) as link}<a href={link} target="_blank" rel="noreferrer">{link} ↗</a>{/each}<a class="small" href={recordHref('Forecast',revision.id)}>{revision.id}</a></div>{/each}</details>
         </article>{/each}
       </section>
@@ -369,7 +443,7 @@
         <label>Evidence references, one per line<textarea bind:value={questionSources} rows="2" required placeholder={world.mode === 'simulated' ? 'fixture:foresight-calibration-mechanics-v1' : 'https://source.example/evidence'}></textarea></label>
         <button class="primary" disabled={busy}>Add and predict</button>
       </form>{/if}
-      {#if outcomeForecast}<form class="panel outcome-form" onsubmit={(e) => { e.preventDefault(); void recordOutcome(); }}><h2>Record an outcome</h2><p>{forecasts.find(item => item.id === outcomeForecast)?.question}</p><label>Did the event happen?<select bind:value={outcome}><option value="yes">Yes</option><option value="no">No</option></select></label><label>Resolved at (UTC)<input type="datetime-local" bind:value={outcomeTime} required /></label><label>Sources, one per line<textarea bind:value={outcomeSources} required rows="3" placeholder="https://source.example/evidence"></textarea></label><div class="inline-actions"><button class="primary" disabled={busy}>Record and learn</button><button type="button" onclick={() => outcomeForecast = ''}>Cancel</button></div></form>{/if}
+      {#if outcomeForecast}<form class="panel outcome-form" onsubmit={(e) => { e.preventDefault(); void recordOutcome(); }}><h2>Record an outcome</h2><p>{forecasts.find(item => item.id === outcomeForecast)?.question}</p><label>Did the event happen?<select bind:value={outcome}><option value="yes">Yes</option><option value="no">No</option></select></label><label>Resolved at (UTC)<input type="datetime-local" step="1" bind:value={outcomeTime} required /></label><label>Sources, one per line<textarea bind:value={outcomeSources} required rows="3" placeholder="https://source.example/evidence"></textarea></label><div class="inline-actions"><button class="primary" disabled={busy}>Record and learn</button><button type="button" onclick={() => outcomeForecast = ''}>Cancel</button></div></form>{/if}
     {:else if tab === 'learning'}
       <section class="panel learning-intro"><p class="eyebrow">Learning from experience</p><h2>What changed, and why</h2><p>The learner adjusts how confidently it predicts events. Each candidate is tested against the previous model on the same held-out examples.</p><p class="small">This is learned calibration. It does not establish causal laws or guarantee future accuracy.</p><p class="small">Each run accepts up to 512 experiences. A model can use up to 512 events over its lifetime; a run that would exceed this limit fails visibly and keeps the previous model.</p><div class="model"><span>Current model</span><strong>{activeModel}</strong>{#if world.model}<span>Slope {measure(world.model.slope)} · Intercept {measure(world.model.intercept)}</span>{/if}</div>
         <form onsubmit={(e) => { e.preventDefault(); void startLearning(); }}>
@@ -411,7 +485,20 @@
         {:else}
           <p class="error">No research session is linked to this world. Its research status and failures cannot be verified from this page.</p>
         {/if}
+        {#if researchRetryEligible}
+          <button onclick={retryResearch} disabled={busy || loading || researchRetryPending}>Retry research</button>
+        {/if}
+        {#if researchRetryPending}
+          <p class="small" role="status">Waiting to verify a new research session. Refresh to check its status.</p>
+        {/if}
         <h3>Possible futures</h3>
+        {#if endpoints.length && world.explorationPhase === 'first_pass'}
+          <p>First pass: evaluating up to three key claims per future. Accepted paths publish predictions as they finish.</p>
+        {:else if world.explorationPhase === 'deepening'}
+          <p>First pass ready. The engine is exploring additional paths in the background; existing predictions remain available.</p>
+        {:else if world.explorationPhase === 'complete'}
+          <p>This exploration pass is complete. Predictions remain open for evidence and outcomes.</p>
+        {/if}
         {#if endpoints.length}
           <p>{futures.completed} completed · {futures.pending} in progress · {futures.discarded} discarded · {futures.failed} failed</p>
           {#each endpoints as endpoint}<p><strong>{endpoint.status}</strong> · <a href={recordHref('Endpoint',endpoint.id)}>{endpoint.summary || endpoint.id}</a></p>{/each}
@@ -469,6 +556,8 @@
   .future { border-top:2px solid var(--rule); padding-top:17px; }.foresight details { margin-top:17px; }.foresight summary { cursor:pointer; font-size:15px; font-weight:500; padding:8px 0; }
   .foresight pre { color:#101010; background:#ece7dc; padding:13px; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.55 'IBM Plex Mono',monospace; max-height:320px; overflow:auto; margin:8px 0; }
   .foresight details>a { display:block; margin:8px 0; }.route,.revision { margin:17px 0; padding:0 0 17px 17px; border-left:2px solid var(--rule); }.revision>a { display:block; }
+  .future-story { white-space:pre-wrap; overflow-wrap:anywhere; margin:17px 0; font:17px/1.55 'IBM Plex Sans',sans-serif; }
+  .required-events { padding-left:22px; }.required-events li { margin:17px 0; }.required-events a { display:block; font-size:15px; }
   .inline-actions { display:flex; flex-wrap:wrap; align-items:center; gap:17px; font-size:15px; }.create-form { display:grid; grid-template-columns:repeat(2,1fr); gap:17px; }.create-form h2,.wide { grid-column:1/-1; }
   .model { display:flex; flex-wrap:wrap; gap:17px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); padding:17px 0; margin:22px 0; }
   .comparison { display:grid; grid-template-columns:repeat(3,1fr); gap:17px; margin:22px 0; }.comparison span,.comparison strong { display:block; }.comparison strong { font:500 38px/1.3 'Cormorant Garamond',serif; }

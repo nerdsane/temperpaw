@@ -346,7 +346,16 @@
         <Property Name="ForecastEngineVersion" Type="Edm.String"/>
         <Property Name="ForecastRegisteredAt" Type="Edm.String"/>
         <Property Name="RegistrationModelJson" Type="Edm.String"/>
-      </EntityType>
+        <Property Name="RegistrationNodesJson" Type="Edm.String"/>
+              <Property Name="ForecastRegistrationPending" Type="Edm.Boolean"/>
+        <Property Name="RegistrationAttempt" Type="Edm.Int64"/>
+        <Property Name="FirstPassComplete" Type="Edm.Boolean"/>
+        <Property Name="ExplorationPhase" Type="Edm.String"/>
+        <Property Name="DeepeningStarted" Type="Edm.Boolean"/>
+        <Property Name="DeepeningClaimIds" Type="Edm.String"/>
+        <Property Name="DeepeningCursor" Type="Edm.String"/>
+        <Property Name="DeepeningClaimId" Type="Edm.String"/>
+</EntityType>
 
       <EntityType Name="EventNode">
         <Key><PropertyRef Name="Id"/></Key>
@@ -407,6 +416,7 @@
         <Property Name="Classification" Type="Edm.String"/>
         <Property Name="UnreachableReason" Type="Edm.String"/>
         <Property Name="ErrorMessage" Type="Edm.String"/>
+              <Property Name="DeepeningStarted" Type="Edm.Boolean"/>
       </EntityType>
 
       <EntityType Name="Path">
@@ -579,6 +589,8 @@
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
         <Parameter Name="canonical_path_id" Type="Edm.String" Nullable="true"/>
         <ReturnType Type="TemperPaw.Foresight.World"/>
+              <Parameter Name="exploration_phase" Type="Edm.String"/>
+              <Parameter Name="expected_exploration_phase" Type="Edm.String"/>
       </Action>
       <Action Name="IngestEvidence" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
@@ -672,6 +684,10 @@
         <ReturnType Type="TemperPaw.Foresight.EventNode"/>
       </Action>
 
+      <Action Name="CheckDiversityBarrier" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Endpoint"/>
+        <ReturnType Type="TemperPaw.Foresight.Endpoint"/>
+      </Action>
       <Action Name="BundleWritten" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Endpoint"/>
         <Parameter Name="bundle_file_id" Type="Edm.String" Nullable="true"/>
@@ -696,6 +712,10 @@
       <Action Name="ClaimsAttached" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Endpoint"/>
         <Parameter Name="claim_ids" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.Endpoint"/>
+      </Action>
+      <Action Name="PrepareClaims" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Endpoint"/>
         <ReturnType Type="TemperPaw.Foresight.Endpoint"/>
       </Action>
       <Action Name="DecompositionComplete" IsBound="true">
@@ -733,9 +753,14 @@
         <ReturnType Type="TemperPaw.Foresight.Endpoint"/>
       </Action>
 
+      <Action Name="PrepareBridge" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Claim"/>
+        <ReturnType Type="TemperPaw.Foresight.Claim"/>
+      </Action>
       <Action Name="SubmitForBridge" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Claim"/>
         <ReturnType Type="TemperPaw.Foresight.Claim"/>
+              <Parameter Name="revision_brief" Type="Edm.String" Nullable="true"/>
       </Action>
       <Action Name="RoutesAttached" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Claim"/>
@@ -790,6 +815,26 @@
         <ReturnType Type="TemperPaw.Foresight.Path"/>
       </Action>
       <Action Name="ResumeCosting" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+        <ReturnType Type="TemperPaw.Foresight.Path"/>
+      </Action>
+      <Action Name="EvaluateRepair" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+        <ReturnType Type="TemperPaw.Foresight.Path"/>
+      </Action>
+      <Action Name="EvaluateChallenge" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+        <ReturnType Type="TemperPaw.Foresight.Path"/>
+      </Action>
+      <Action Name="RelayScoredRoute" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+        <ReturnType Type="TemperPaw.Foresight.Path"/>
+      </Action>
+      <Action Name="RelayPrunedRoute" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+        <ReturnType Type="TemperPaw.Foresight.Path"/>
+      </Action>
+      <Action Name="StartChallenge" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
         <ReturnType Type="TemperPaw.Foresight.Path"/>
       </Action>
@@ -1166,7 +1211,9 @@
         <Parameter Name="forecast_engine_version" Type="Edm.String"/>
         <Parameter Name="forecast_registered_at" Type="Edm.String"/>
         <Parameter Name="registration_model_json" Type="Edm.String"/>
+        <Parameter Name="registration_nodes_json" Type="Edm.String"/>
               <Parameter Name="learning_mode" Type="Edm.String"/>
+              <Parameter Name="expected_registration_attempt" Type="Edm.Int64"/>
       </Action>
       <Action Name="ForecastRegistered" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
@@ -1176,14 +1223,80 @@
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
         <Parameter Name="error_message" Type="Edm.String"/>
               <Parameter Name="learning_mode" Type="Edm.String"/>
+              <Parameter Name="expected_registration_attempt" Type="Edm.Int64"/>
       </Action>
       <Action Name="ForecastRegistrationFailed" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
         <Parameter Name="error_message" Type="Edm.String"/>
+              <Parameter Name="expected_registration_attempt" Type="Edm.Int64"/>
       </Action>
       <Action Name="ScoreBatch" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
         <Parameter Name="brier" Type="Edm.String"/>
+      </Action>
+      <Action Name="RequestForecastRegistration" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+      </Action>
+      <Action Name="StartForecastRegistration" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="forecast_registration_key" Type="Edm.String"/>
+      </Action>
+      <Action Name="ForecastRegistrationTimedOut" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="error_message" Type="Edm.String"/>
+      </Action>
+      <Action Name="MaybeDeepen" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+      </Action>
+      <Action Name="BeginDeepening" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="deepening_claim_ids" Type="Edm.String"/>
+        <Parameter Name="deepening_cursor" Type="Edm.String"/>
+        <Parameter Name="exploration_phase" Type="Edm.String"/>
+      </Action>
+      <Action Name="ContinueDeepening" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+      </Action>
+      <Action Name="DeepeningClaimPrepared" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="deepening_claim_id" Type="Edm.String"/>
+        <Parameter Name="deepening_cursor" Type="Edm.String"/>
+        <Parameter Name="expected_deepening_cursor" Type="Edm.String"/>
+      </Action>
+      <Action Name="BeginDeepening" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Claim"/>
+        <Parameter Name="settled_route_id" Type="Edm.String"/>
+      </Action>
+      <Action Name="ResumeWorldCascade" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+      </Action>
+      <Action Name="EvaluateWorldCascade" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+      </Action>
+      <Action Name="StartWriter" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Endpoint"/>
+      </Action>
+      <Action Name="EvaluateEndpointScoring" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Endpoint"/>
+      </Action>
+      <Action Name="StartRepair" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+      </Action>
+      <Action Name="EvaluateRoutes" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Claim"/>
+      </Action>
+      <Action Name="RegistrationSnapshotPrepared" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="registration_nodes_json" Type="Edm.String"/>
+        <Parameter Name="registration_model_json" Type="Edm.String"/>
+        <Parameter Name="forecast_learning_run_id" Type="Edm.String"/>
+        <Parameter Name="forecast_registered_at" Type="Edm.String"/>
+        <Parameter Name="learning_mode" Type="Edm.String"/>
+        <Parameter Name="expected_registration_attempt" Type="Edm.Int64"/>
+      </Action>
+      <Action Name="CommitForecastSnapshot" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="expected_registration_attempt" Type="Edm.Int64"/>
       </Action>
     </Schema>
   </edmx:DataServices>
