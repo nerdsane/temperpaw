@@ -193,3 +193,27 @@
 **Chose the exact identity because:** It repairs the existing session pipeline while preserving authentication and denying unrelated identities, transcript updates and deletes. Rita explicitly approved this narrow permission after the reproduced denial. The change belongs to paw-agent and must be published with that dependency before the Foresight app is installed.
 
 **Where:** os-apps/paw-agent/policies/session_entry.cedar; crates/temperpaw/tests/session_entry_runtime_policy.rs; PR #526. The new regression failed on transcript creation before the permission was added.
+
+## D17 — Record the world's research session explicitly
+
+**Decision:** Store the last reported research session ID on World through a declared seed_world callback and show that exact Session's durable status and error in Foresight Activity.
+
+**Came up because:** A real provider run left World in Seeding after its surveyor Session failed, while Activity said no failures were recorded. seed_world discarded the Session ID and returned the Agent ID from its spawn helper. No durable World-to-Session association existed; matching agent names or prompt text would make the display unreliable.
+
+**Options:** Infer a session from names or prompts; add a general session-monitoring service; record the exact ID returned by Session creation through the existing WASM callback path.
+
+**Chose the explicit callback because:** It adds one association field, one attempt counter and one trusted callback without changing the kernel or the world's research lifecycle. Only the named WASM runtime can report the association, and callers cannot forge it during World creation. The callback preserves every post-seeding state, including a completed or archived world, so a late callback cannot undo progress. Seed and ResumeSeed increment the attempt counter. The callback carries the attempt captured in its WASM context and must equal the current counter, so an older callback cannot overwrite a newer session after ResumeSeed. The current kernel does not supply an originating-invocation guard; the existing app constraint provides it atomically. The reverse-order regression uses the app's pinned runtime evaluator, including world completion before the stale callback, and fails when the equality constraint is removed. Existing worlds without a pointer remain explicitly unverified; no names or prompts are treated as identity. The current IOA has no string-clear effect, so a retry keeps the last recorded session visible until the new callback arrives; the UI labels that limit explicitly. Authenticated Session detail routes are reachable before first-run setup completes, so the diagnostic link can open; the login guard and other agent setup routes are unchanged.
+
+**Where:** os-apps/paw-foresight/wasm/seed_world/src/lib.rs; os-apps/paw-foresight/specs/world.ioa.toml and model.csdl.xml; os-apps/paw-foresight/policies/foresight.cedar; dashboard/src/lib/foresight.ts; dashboard/src/routes/foresight/+page.svelte; focused dashboard, Cedar, transition-contract and real-WASM tests; PR #526.
+
+## D18 — Use bounded background continuations from the kernel
+
+**Decision:** Pin this app release to the reviewed Temper kernel fix that separates inline callback depth from total background callback hops.
+
+**Came up because:** The real-provider preview completed two OpenAI responses and an Exa search, then stopped at the kernel's eight-callback depth limit despite a forty-turn Session budget. A detached task retained the previous inline depth. Rita explicitly approved the scoped kernel fix after this failure was reported.
+
+**Options:** Reduce research to fewer callbacks; raise or remove the existing recursion limit; retain the inline limit and separately bound background continuation.
+
+**Chose separate bounds because:** The existing inline limit of eight still stops recursion, while a finite 512-hop internal context-lineage budget allows ordinary research to progress. Detaching resets only inline depth. The kernel change preserves authentication, principal propagation, reaction limits and application turn and spending bounds. It does not claim aggregate fanout accounting or persistence of this budget across restarts.
+
+**Where:** nerdsane/temper PR #473 and docs/efforts/ARN-518 in that repository; the two Temper dependency manifests and Cargo.lock in this PR. Delivery requires the reviewed kernel revision, a rebuilt app, and a successful real-provider preview before release.

@@ -313,6 +313,8 @@
         <Property Name="TokenBudgetCents" Type="Edm.String"/>
         <Property Name="AgentModel" Type="Edm.String"/>
         <Property Name="AgentProvider" Type="Edm.String"/>
+        <Property Name="ResearchSessionId" Type="Edm.String"/>
+        <Property Name="ResearchAttempt" Type="Edm.Int64"/>
         <Property Name="HindcastMode" Type="Edm.String"/>
         <Property Name="SkeletonNodeCount" Type="Edm.String"/>
         <Property Name="UncertaintyAxes" Type="Edm.String"/>
@@ -541,6 +543,12 @@
       </Action>
       <Action Name="Seed" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <ReturnType Type="TemperPaw.Foresight.World"/>
+      </Action>
+      <Action Name="ResearchSessionStarted" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="research_session_id" Type="Edm.String" Nullable="false"/>
+        <Parameter Name="expected_research_attempt" Type="Edm.Int64" Nullable="false"/>
         <ReturnType Type="TemperPaw.Foresight.World"/>
       </Action>
       <Action Name="SeedComplete" IsBound="true">

@@ -639,3 +639,55 @@ fn dashboard_research_can_create_workspace_without_workspace_management_access()
             .is_allowed()
     );
 }
+
+#[test]
+fn research_session_callback_cannot_be_forged_by_operators_or_plain_agents() {
+    let engine = engine();
+    let resource = attrs(&[("id", serde_json::json!("world-1"))]);
+    let admin = SecurityContext::from_verified_jwt(
+        "dashboard-owner",
+        temper_authz::PrincipalKind::Admin,
+        None,
+        None,
+        None,
+        None,
+    );
+    for caller in [
+        admin.clone(),
+        ctx("ordinary-session", "agent"),
+        ctx("human-operator", "human"),
+        ctx("unrelated-system", "system"),
+        SecurityContext::anonymous(),
+    ] {
+        assert!(
+            !engine
+                .authorize(&caller, "ResearchSessionStarted", "World", &resource)
+                .is_allowed(),
+            "Only the named WASM callback may record the research session"
+        );
+    }
+    assert!(
+        engine
+            .authorize(
+                &ctx("service:wasm-runtime", "agent"),
+                "ResearchSessionStarted",
+                "World",
+                &resource
+            )
+            .is_allowed()
+    );
+    let forged = attrs(&[
+        ("id", serde_json::json!("world-1")),
+        ("ResearchSessionId", serde_json::json!("unrelated-session")),
+    ]);
+    assert!(
+        !engine
+            .authorize(&admin, "create", "World", &forged)
+            .is_allowed()
+    );
+    assert!(
+        engine
+            .authorize(&admin, "create", "World", &resource)
+            .is_allowed()
+    );
+}

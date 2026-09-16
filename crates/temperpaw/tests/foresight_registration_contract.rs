@@ -138,6 +138,7 @@ fn changed_action_metadata_matches_ioa_and_detects_missing_parameters() {
             include_str!("../../../os-apps/paw-foresight/specs/world.ioa.toml"),
             &[
                 "Configure",
+                "ResearchSessionStarted",
                 "ForecastPrepared",
                 "ForecastRegistrationComplete",
                 "ForecastRegistrationFailed",
@@ -189,6 +190,12 @@ fn changed_action_metadata_matches_ioa_and_detects_missing_parameters() {
     // Exercise each changed contract's missing-parameter failure with the real parser.
     for (entity, name, parameter) in [
         ("World", "Configure", "last_ingest_date"),
+        ("World", "ResearchSessionStarted", "research_session_id"),
+        (
+            "World",
+            "ResearchSessionStarted",
+            "expected_research_attempt",
+        ),
         ("World", "ForecastPrepared", "registration_model_json"),
         ("World", "ForecastPrepared", "learning_mode"),
         ("World", "ForecastRegistrationComplete", "learning_mode"),
@@ -211,5 +218,112 @@ fn changed_action_metadata_matches_ioa_and_detects_missing_parameters() {
             !matches(&mutant),
             "{entity}.{name} missing {parameter} escaped the check"
         );
+    }
+}
+
+#[test]
+fn research_session_callback_preserves_world_progress_and_is_declared_on_each_seed() {
+    let source = include_str!("../../../os-apps/paw-foresight/specs/world.ioa.toml");
+    let table = TransitionTable::from_ioa_source(source);
+    for state in [
+        "Seeding",
+        "Active",
+        "Updating",
+        "RegisteringForecasts",
+        "Archived",
+        "Failed",
+    ] {
+        let result = table.evaluate(state, 0, "ResearchSessionStarted").unwrap();
+        assert!(result.success, "{state}");
+        assert_eq!(result.new_state, state);
+    }
+    for state in ["Created", "OpeningReplay"] {
+        assert!(
+            !table
+                .evaluate(state, 0, "ResearchSessionStarted")
+                .is_some_and(|r| r.success)
+        );
+    }
+    assert!(
+        table
+            .validate_initial_fields(&json!({"research_session_id":"forged"}))
+            .is_err()
+    );
+    let spec: toml::Value = toml::from_str(source).unwrap();
+    for name in ["Seed", "ResumeSeed"] {
+        let action = spec["action"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["name"].as_str() == Some(name))
+            .unwrap();
+        let trigger = action["triggers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|trigger| trigger["module"].as_str() == Some("seed_world"))
+            .unwrap();
+        assert_eq!(
+            trigger.get("on_success").and_then(toml::Value::as_str),
+            Some("ResearchSessionStarted")
+        );
+    }
+}
+
+#[test]
+fn older_research_attempt_cannot_replace_the_current_session() {
+    use std::sync::Arc;
+    use temper_runtime::scheduler::SimActorHandler;
+    use temper_server::entity_actor::sim_handler::EntityActorHandler;
+
+    fn reverse_callbacks(
+        table: TransitionTable,
+        completed: bool,
+    ) -> Result<serde_json::Value, String> {
+        let mut world = EntityActorHandler::new("World", "world-1", Arc::new(table));
+        world.init().unwrap();
+        let first = world.handle_message("Seed", "{}").unwrap();
+        assert_eq!(first["counters"]["research_attempt"], 1);
+        let second = world.handle_message("ResumeSeed", "{}").unwrap();
+        assert_eq!(second["counters"]["research_attempt"], 2);
+        let current = world
+            .handle_message(
+                "ResearchSessionStarted",
+                &json!({"research_session_id":"session-current","expected_research_attempt":2})
+                    .to_string(),
+            )
+            .unwrap();
+        assert_eq!(current["fields"]["research_session_id"], "session-current");
+        if completed {
+            let current = world.handle_message("SeedComplete",
+                &json!({"skeleton_node_count":"1","graph_snapshot_file_id":"","uncertainty_axes":"[]"}).to_string()).unwrap();
+            assert_eq!(current["status"], "Active");
+        }
+        let delayed = world.handle_message(
+            "ResearchSessionStarted",
+            &json!({"research_session_id":"session-old","expected_research_attempt":1}).to_string(),
+        );
+        assert_eq!(
+            world.current_status(),
+            if completed { "Active" } else { "Seeding" }
+        );
+        delayed
+    }
+
+    let source = include_str!("../../../os-apps/paw-foresight/specs/world.ioa.toml");
+    for completed in [false, true] {
+        assert!(reverse_callbacks(TransitionTable::from_ioa_source(source), completed).is_err());
+        // Removing the guard must reproduce the overwrite with the same actor driver.
+        let mut mutant = TransitionTable::from_ioa_source(source);
+        let constraints = &mut mutant
+            .action_contracts
+            .get_mut("ResearchSessionStarted")
+            .unwrap()
+            .constraints;
+        let before = constraints.len();
+        constraints.retain(|constraint| constraint.param() != "expected_research_attempt");
+        assert_eq!(constraints.len() + 1, before);
+        let overwritten = reverse_callbacks(mutant, completed).unwrap();
+        assert_eq!(overwritten["fields"]["research_session_id"], "session-old");
     }
 }

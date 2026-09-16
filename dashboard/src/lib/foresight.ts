@@ -45,9 +45,44 @@ export function parseWorld(row: Row) {
     model: parseModel(text(row, 'model_json')), adoptedRunId: text(row, 'adopted_learning_run_id'),
     error: text(row, 'error_message'), corpusId: text(row, 'corpus_file_id'),
     agentProvider: text(row, 'agent_provider'), agentModel: text(row, 'agent_model'),
+    researchSessionId: text(row, 'research_session_id'),
   };
 }
 export type World = ReturnType<typeof parseWorld>;
+export type ResearchSessionState =
+  | { kind: 'unlinked' }
+  | { kind: 'loading'; id: string }
+  | { kind: 'unavailable'; id: string; error: string }
+  | { kind: 'ready'; id: string; status: string; error: string; turns: number | null; heartbeat: string };
+
+export async function loadResearchSession(
+  id: string,
+  fetchEntity: (set: string, id: string) => Promise<unknown>,
+): Promise<ResearchSessionState> {
+  if (!id) return { kind: 'unlinked' };
+  try {
+    const row = record(await fetchEntity('Sessions', id));
+    if (!row || identity(row).id !== id || !identity(row).status) {
+      throw new Error('The linked research session returned an incomplete or mismatched record.');
+    }
+    return { kind: 'ready', ...identity(row), error: text(row, 'error_message'),
+      turns: number(field(row, 'turn_count')), heartbeat: text(row, 'last_heartbeat_at') };
+  } catch (error) {
+    return { kind: 'unavailable', id, error: error instanceof Error ? error.message : 'Could not load the linked research session.' };
+  }
+}
+
+export function researchSessionProblem(session: ResearchSessionState, worldStatus: string): string {
+  if (session.kind === 'unavailable') return `Research session ${session.id}: ${session.error}`;
+  if (session.kind !== 'ready') return '';
+  if (session.error) return `Research session ${session.status}: ${session.error}`;
+  if (['Failed', 'Cancelled'].includes(session.status)) return `Research session ${session.status}; no error details were recorded.`;
+  if (session.status === 'Completed' && worldStatus === 'Seeding') {
+    return 'The last reported research session completed. The world is still Seeding; a retry may be starting or waiting to report its session.';
+  }
+  return '';
+}
+
 export function parseForecast(row: Row) {
   return {
     ...identity(row), error:text(row,'error_message'), eventId: text(row, 'event_node_id'), worldId: text(row, 'world_id'),

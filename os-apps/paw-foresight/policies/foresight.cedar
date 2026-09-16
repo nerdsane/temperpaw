@@ -592,3 +592,12 @@ permit(
   action in [Action::"create", Action::"Create"],
   resource is Workspace
 );
+
+// Only seed_world's runtime callback records the current research session.
+// Explicit denies constrain the broad World Admin permit and generic creation.
+permit(principal == Agent::"service:wasm-runtime",
+  action == Action::"ResearchSessionStarted", resource is World);
+forbid(principal, action == Action::"ResearchSessionStarted", resource is World)
+unless { principal == Agent::"service:wasm-runtime" };
+forbid(principal, action == Action::"create", resource is World)
+when { resource has ResearchSessionId && resource.ResearchSessionId != "" };

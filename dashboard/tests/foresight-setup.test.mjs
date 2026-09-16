@@ -19,3 +19,12 @@ test('other agent pages still require setup and welcome never redirects to itsel
 test('cold users can reach authenticated provider settings before creating an agent',()=>{
   assert.equal(requiresAgentSetup('/settings',empty),false);
 });
+
+test('cold authenticated users can inspect a linked session without opening other agent routes',()=>{
+  for (const path of ['/sessions/ss-01a0aaa4-5d00-7823-8714-61e66535818c','/sessions/ss-01a0aaa4-5d00-7823-8714-61e66535818c/']) {
+    assert.equal(requiresAgentSetup(path,empty),false,path);
+  }
+  for (const path of ['/sessions','/sessions/','/sessions/id/tools','/sessions-other/id','/sessions/id%2Fother','/sessions?id=one']) {
+    assert.equal(requiresAgentSetup(path,empty),true,path);
+  }
+});

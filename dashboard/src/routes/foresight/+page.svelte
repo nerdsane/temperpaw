@@ -4,10 +4,10 @@
   import { base } from '$app/paths';
   import { replaceState } from '$app/navigation';
   import { page } from '$app/stores';
-  import { createEntity, postEntityAction, queryEntities, fetchSetupStatus, getSecret, listSecretKeys } from '$lib/api';
+  import { createEntity, postEntityAction, queryEntities, getEntity, fetchSetupStatus, getSecret, listSecretKeys } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, researchConfiguration, createForesightWorld, startForesightResearch, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    loadResearchSession, researchSessionProblem, type ResearchSessionState, forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, researchConfiguration, createForesightWorld, startForesightResearch, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
@@ -27,6 +27,7 @@
   let claims = $state<ReturnType<typeof parseClaim>[]>([]);
   let runs = $state<LearningRun[]>([]);
   let activity = $state<StateChangeEvent[]>([]);
+  let researchSession = $state<ResearchSessionState>({kind:'unlinked'});
   let showCreate = $state(false);
   let newName = $state('');
   let newDomain = $state('');
@@ -54,7 +55,9 @@
 
   const world = $derived(worlds.find((item) => item.id === selectedId) ?? null);
   const groupedForecasts = $derived(forecastGroups(forecasts));
+  const researchProblem = $derived(researchSessionProblem(researchSession, world?.status ?? ''));
   const failures = $derived([
+    ...(researchProblem ? [researchProblem] : []),
     ...(world?.error ? [world.error] : []),
     ...endpoints.flatMap((item) => item.error ? [item.error] : []),
     ...paths.flatMap((item) => item.error ? [item.error] : []),
@@ -92,8 +95,14 @@
     if (!selectedId || disposed || generation !== loadGeneration) { loading = false; return; }
     const filter = `world_id eq '${escape(selectedId)}'`;
     const sets = ['EventNodes','Endpoints','Paths','Claims','Forecasts','LearningRuns'];
-    const results = await Promise.allSettled(sets.map((set) => queryEntities(set, filter, 'Id desc', 501)));
+    const researchSessionId = worlds.find((item) => item.id === selectedId)?.researchSessionId ?? '';
+    researchSession = researchSessionId ? {kind:'loading', id:researchSessionId} : {kind:'unlinked'};
+    const [results, session] = await Promise.all([
+      Promise.allSettled(sets.map((set) => queryEntities(set, filter, 'Id desc', 501))),
+      loadResearchSession(researchSessionId, getEntity),
+    ]);
     if (disposed || generation !== loadGeneration) return;
+    researchSession = session;
     const rows = results.map((result, index) => {
       if (result.status === 'rejected') {
         errors.push(`${sets[index]}: ${result.reason instanceof Error ? result.reason.message : 'Could not load records'}`);
@@ -108,7 +117,7 @@
     loading = false;
   }
   async function chooseWorld() {
-    dataset = ''; outcomeForecast = ''; message = ''; activity = [];
+    dataset = ''; outcomeForecast = ''; message = ''; activity = []; researchSession = {kind:'unlinked'};
     forecasts = []; events = []; endpoints = []; paths = []; claims = []; runs = [];
     await load();
   }
@@ -206,8 +215,10 @@
     void load();
     void loadResearchConfiguration();
     const stream = createSSEConnection('foresight', undefined, undefined, (event) => {
-      if (!['World','EventNode','Endpoint','Path','Claim','Forecast','LearningRun'].includes(event.entity_type)) return;
-      const known = [selectedId, ...events.map(e => e.id), ...endpoints.map(e => e.id), ...paths.map(e => e.id), ...forecasts.map(e => e.id), ...runs.map(e => e.id)];
+      if (event.entity_type === 'Session') {
+        if (event.entity_id !== world?.researchSessionId) return;
+      } else if (!['World','EventNode','Endpoint','Path','Claim','Forecast','LearningRun'].includes(event.entity_type)) return;
+      const known = [selectedId, world?.researchSessionId, ...events.map(e => e.id), ...endpoints.map(e => e.id), ...paths.map(e => e.id), ...forecasts.map(e => e.id), ...runs.map(e => e.id)];
       if (known.includes(event.entity_id)) activity = [event, ...activity].slice(0, 40);
       if (!refreshTimer) refreshTimer = setTimeout(() => { refreshTimer = undefined; void load(); }, 300);
     });
@@ -347,11 +358,26 @@
       </article>{/each}
     {:else}
       <section class="panel"><p class="eyebrow">Current work</p><h2>What is happening</h2><p>World: <strong>{world.status}</strong> · Live connection: {streamStatus}</p>
+        <h3>Last recorded research session</h3>
+        <p class="small">A retry may still be starting until its new session is reported here.</p>
+        {#if researchSession.kind === 'ready'}
+          <p><strong>{researchSession.status}</strong> · <a href={`${base}/sessions/${encodeURIComponent(researchSession.id)}`}>{researchSession.id}</a></p>
+          <p class="small">Turns: {researchSession.turns ?? 'Not recorded'} · Last heartbeat: {date(researchSession.heartbeat)}</p>
+        {:else if researchSession.kind === 'loading'}
+          <p>Loading the linked research session…</p>
+        {:else if researchSession.kind === 'unavailable'}
+          <p>Research status could not be verified. <a href={`${base}/sessions/${encodeURIComponent(researchSession.id)}`}>Open the linked session</a>.</p>
+        {:else if world.status === 'Created'}
+          <p class="small">Research has not started for this world.</p>
+        {:else if world.mode !== 'observed'}
+          <p class="small">No research session is linked. Replay worlds can use supplied events without a research session.</p>
+        {:else}
+          <p class="error">No research session is linked to this world. Its research status and failures cannot be verified from this page.</p>
+        {/if}
         {#each runs.filter(run => ['Created','Preparing','Training','Evaluating','Adopting'].includes(run.status)) as run}<p><strong>{run.status}</strong> — Learning run <a href={recordHref('LearningRun',run.id)}>{run.id}</a></p>{/each}
         {#each failures as failure}<p class="error">{failure}</p>{/each}
-        {#if !failures.length}<p class="small">No failure messages in the loaded records.</p>{/if}
         <h3>State changes observed in this session</h3>{#if !activity.length}<p class="empty">New changes will appear here while this page is open. Entity records preserve the full history.</p>{/if}
-        <ol class="activity">{#each activity as event}<li><strong>{event.entity_type} · {event.action}</strong><span>{event.status}</span><a href={recordHref(event.entity_type,event.entity_id)}>{event.entity_id}</a></li>{/each}</ol>
+        <ol class="activity">{#each activity as event}<li><strong>{event.entity_type} · {event.action}</strong><span>{event.status}</span><a href={event.entity_type === 'Session' ? `${base}/sessions/${encodeURIComponent(event.entity_id)}` : recordHref(event.entity_type,event.entity_id)}>{event.entity_id}</a></li>{/each}</ol>
       </section>
     {/if}
   {:else if !loading}

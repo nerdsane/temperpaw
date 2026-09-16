@@ -315,7 +315,7 @@ fn spawn_session(
         "info",
         &format!("seed_world: spawned {role} agent {agent_id} session {session_id}"),
     );
-    Ok(agent_id)
+    Ok(session_id)
 }
 
 /// Entry point.
@@ -323,6 +323,13 @@ fn spawn_session(
 pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
     let result = (|| -> Result<(), String> {
         let ctx = Context::from_host()?;
+        let research_attempt = ctx
+            .entity_state
+            .get("counters")
+            .and_then(|counters| counters.get("research_attempt"))
+            .and_then(Value::as_u64)
+            .filter(|attempt| *attempt > 0)
+            .ok_or("World research attempt is missing")?;
         let fields = ctx.entity_state.get("fields").cloned().unwrap_or(json!({}));
         let get = |k: &str| -> String {
             fields
@@ -371,7 +378,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             &corpus_inline,
             hindcast,
         );
-        spawn_session(
+        let research_session_id = spawn_session(
             &ctx,
             &api,
             &headers,
@@ -389,9 +396,13 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             "info",
             "seed_world: done (surveyor will report SeedComplete; bookmaker disabled)",
         );
-        // A successful run with nothing to dispatch must still set a
-        // result: the host treats an empty result as failure.
-        set_success_result("", &json!({}));
+        set_success_result(
+            "ResearchSessionStarted",
+            &json!({
+                "research_session_id": research_session_id,
+                "expected_research_attempt": research_attempt,
+            }),
+        );
         Ok(())
     })();
 

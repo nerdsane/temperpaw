@@ -324,3 +324,45 @@ async fn legacy_hindcast_registers_at_explicit_clock_then_prepares_historical_le
     assert_eq!(report["validation"].as_array().unwrap().len(), 1);
     assert_eq!(report["training"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn seed_world_records_research_session_from_the_create_response() {
+    let host = SimWasmHost::new()
+        .with_default_response(404, "unexpected request")
+        .with_response(
+            "https://temper.test/tdata/Workspaces",
+            201,
+            r#"{"entity_id":"workspace-1"}"#,
+        )
+        .with_response(
+            "https://temper.test/tdata/Agents",
+            201,
+            r#"{"entity_id":"agent-1"}"#,
+        )
+        .with_response(
+            "https://temper.test/tdata/Sessions",
+            201,
+            r#"{"entity_id":"session-1"}"#,
+        )
+        .with_response(
+            "https://temper.test/tdata/Sessions('session-1')/TemperPaw.Configure",
+            200,
+            "{}",
+        );
+    let mut ctx = context(
+        "seed_world",
+        "Seed",
+        json!({"agent_model":"fixture-model","agent_provider":"fixture-provider"}),
+    );
+    ctx.entity_state["status"] = json!("Seeding");
+    ctx.entity_state["counters"] = json!({"research_attempt":7});
+    let result = invoke("seed_world", ctx, host).await;
+    assert!(result.success, "{result:?}");
+    assert_eq!(
+        result.callback_action, "ResearchSessionStarted",
+        "{result:?}"
+    );
+    assert_eq!(result.callback_params["research_session_id"], "session-1");
+    assert_ne!(result.callback_params["research_session_id"], "agent-1");
+    assert_eq!(result.callback_params["expected_research_attempt"], 7);
+}

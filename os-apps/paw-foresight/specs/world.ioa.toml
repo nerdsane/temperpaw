@@ -123,6 +123,18 @@ name = "agent_provider"
 type = "string"
 initial = ""
 
+# Current surveyor session, recorded only by seed_world's trusted callback.
+[[state]]
+name = "research_session_id"
+type = "string"
+initial = ""
+
+# Correlate callbacks with the Seed/ResumeSeed invocation that created them.
+[[state]]
+name = "research_attempt"
+type = "counter"
+initial = "0"
+
 # Hindcast worlds run from a frozen past vantage: web tools are stripped from
 # every spawned session and evidence_ingest reads only the frozen corpus.
 [[state]]
@@ -212,16 +224,36 @@ from = ["Created"]
 to = "Seeding"
 params = []
 hint = "Begin skeleton construction. Spawns surveyor and bookmaker sessions."
-effect = [{ type = "trigger", name = "seed_world" }]
+effect = [{ type = "increment", var = "research_attempt" }, { type = "trigger", name = "seed_world" }]
 
 [[action.triggers]]
 name = "seed_world"
 kind = "wasm"
 module = "seed_world"
+on_success = "ResearchSessionStarted"
 on_failure = "Fail"
 
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
+
+
+# The configured session may already have completed before its spawn callback
+# arrives. Preserve the current state, including terminal states.
+[[action]]
+name = "ResearchSessionStarted"
+kind = "input"
+from = ["Seeding", "Active", "Updating", "RegisteringForecasts", "Archived", "Failed"]
+params = [{ name = "research_session_id", type = "string" }, { name = "expected_research_attempt", type = "counter" }]
+hint = "Record the exact surveyor Session returned by seed_world without changing world progress."
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_research_attempt"
+field = "research_attempt"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "research_session_id"
 
 
 [[action]]
@@ -239,12 +271,13 @@ from = ["Seeding"]
 to = "Seeding"
 params = []
 hint = "Self-heal: re-spawn the surveyor/bookmaker batch when Seeding did not receive SeedComplete. System principals only."
-effect = [{ type = "trigger", name = "seed_world" }]
+effect = [{ type = "increment", var = "research_attempt" }, { type = "trigger", name = "seed_world" }]
 
 [[action.triggers]]
 name = "seed_world"
 kind = "wasm"
 module = "seed_world"
+on_success = "ResearchSessionStarted"
 on_failure = "Fail"
 
 [action.triggers.config]
