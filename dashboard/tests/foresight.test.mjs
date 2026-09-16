@@ -7,7 +7,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const { parseForecast, forecastGroups, parseLearningRun, probability, sourceLinks, parseDataset, parseWorld } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 test('unknown and malformed probabilities never look like zero certainty', () => {
-  for (const value of [null, undefined, '', 'NaN', 'Infinity', -0.1, 1.01]) assert.equal(probability(value), null);
+  for (const value of [null, undefined, '', '  ', 'NaN', 'Infinity', -0.1, 1.01]) assert.equal(probability(value), null);
   assert.equal(probability('0'), 0);
   assert.equal(probability(1), 1);
 });
@@ -45,4 +45,19 @@ test('dataset validation rejects non-arrays, oversize and malformed JSON before 
   assert.throws(() => parseDataset('{}'), /array/i);
   assert.throws(() => parseDataset('oops'), /JSON/i);
   assert.throws(() => parseDataset(JSON.stringify(Array.from({length:513},()=>({})))), /512/);
+});
+
+test('simulation loader supplies dated inputs, never fitted models or evaluation results', () => {
+  const values=JSON.parse(readFileSync(new URL('../src/lib/foresight-simulated.json', import.meta.url), 'utf8'));
+  assert.ok(values.length >= 24 && values.length <= 512);
+  assert.equal(parseDataset(JSON.stringify(values)), JSON.stringify(values));
+  for (const value of values) {
+    assert.equal(value.evidence_kind, 'simulated');
+    assert.ok(value.registered_at < value.resolved_at);
+    assert.ok(value.resolved_at <= '2025-03-01T00:00:00Z');
+    assert.notEqual(probability(value.base_probability), null);
+    assert.ok(value.outcome === 0 || value.outcome === 1);
+    assert.ok(value.source_refs.every(ref => ref.startsWith('fixture:')));
+    for (const key of ['model_json','report_json','candidate_brier','slope','intercept']) assert.equal(key in value,false);
+  }
 });

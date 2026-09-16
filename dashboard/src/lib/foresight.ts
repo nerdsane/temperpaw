@@ -9,7 +9,7 @@ function text(row: Row, name: string): string {
   return typeof value === 'string' ? value : '';
 }
 function number(value: unknown): number | null {
-  if ((typeof value !== 'number' && typeof value !== 'string') || value === '') return null;
+  if ((typeof value !== 'number' && typeof value !== 'string') || (typeof value === 'string' && value.trim() === '')) return null;
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
 }

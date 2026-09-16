@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import simulatedExamples from '$lib/foresight-simulated.json';
   import { base } from '$app/paths';
   import { createEntity, postEntityAction, queryEntities } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
@@ -32,6 +33,11 @@
   let newBudget = $state(100);
   let asOf = $state(new Date().toISOString().slice(0, 16));
   let dataset = $state('');
+  let showQuestion = $state(false);
+  let questionText = $state('');
+  let questionProbability = $state(55);
+  let questionDeadline = $state('');
+  let questionSources = $state('');
   let outcomeForecast = $state('');
   let outcome = $state('yes');
   let outcomeSources = $state('');
@@ -145,6 +151,25 @@
       message = 'Learning requested. Its progress and evaluation will appear below.';
     });
   }
+  async function addQuestion() {
+    await perform(async () => {
+      if (!questionText.trim()) throw new Error('Enter a prediction question.');
+      if (!Number.isFinite(questionProbability) || questionProbability < 0 || questionProbability > 100) throw new Error('Probability must be between 0 and 100.');
+      const refs = questionSources.split('\n').map((value) => value.trim()).filter(Boolean);
+      if (!refs.length) throw new Error('Include the evidence or fixture supporting this question.');
+      const registeredAt = world?.mode === 'observed' ? new Date().toISOString() : utc(asOf);
+      const deadline = utc(questionDeadline);
+      if (deadline <= registeredAt) throw new Error('The question must resolve after the prediction time.');
+      await createEntity('EventNodes', {
+        world_id:selectedId, statement:questionText.trim(), probability:String(questionProbability / 100),
+        provenance:'authored', source_refs:JSON.stringify(refs), resolve_by:deadline, layer:'fast',
+        author_agent_id:'dashboard',
+      });
+      await postEntityAction('Worlds', selectedId, 'RegisterForecasts', {last_ingest_date:registeredAt});
+      message = 'Question added and prediction registration requested.';
+      showQuestion = false;
+    });
+  }
   async function recordOutcome() {
     await perform(async () => {
       const refs = outcomeSources.split('\n').map((source) => source.trim()).filter(Boolean);
@@ -238,7 +263,7 @@
           </details></article>{/each}</div>
       </section>
     {:else if tab === 'predictions'}
-      <section class="panel"><p class="eyebrow">Beliefs with a record</p><h2>What the system expects</h2><p class="small">Earlier predictions remain visible when evidence or the model changes. Model in use: <strong>{activeModel}</strong>.</p>
+      <section class="panel"><p class="eyebrow">Beliefs with a record</p><h2>What the system expects</h2>{#if world.status === 'Active'}<button onclick={() => showQuestion = !showQuestion}>{showQuestion ? 'Close question form' : 'Add question'}</button>{/if}<p class="small">Earlier predictions remain visible when evidence or the model changes. Model in use: <strong>{activeModel}</strong>.</p>
         {#if !groupedForecasts.length}<p class="empty">No predictions registered yet.{#if world.status === 'Active'} Use “Update predictions” to register eligible events.{/if}</p>{/if}
         {#each groupedForecasts as group}<article class="prediction">
           <div class="event-title"><h3>{group.latest.question || 'Untitled prediction'}</h3><strong class="prediction-number">{percent(group.latest.probability)}</strong></div>
@@ -250,11 +275,20 @@
           <details><summary>{group.revisions.length} recorded {group.revisions.length === 1 ? 'prediction' : 'revisions'} · evidence and history</summary>{#each group.revisions as revision}<div class="revision"><p><strong>{percent(revision.probability)}</strong> · {date(revision.registered)} · {revision.model || 'Model unrecorded'}</p><p class="small">Input {percent(revision.baseProbability)} · {revision.status} · {revision.outcome || 'Unresolved'}</p><pre>{revision.sources || revision.marketRef || 'No outcome evidence recorded.'}</pre>{#each sourceLinks(revision.sources || revision.marketRef) as link}<a href={link} target="_blank" rel="noreferrer">{link} ↗</a>{/each}<a class="small" href={recordHref('Forecast',revision.id)}>{revision.id}</a></div>{/each}</details>
         </article>{/each}
       </section>
+      {#if showQuestion}<form class="panel" onsubmit={(e) => { e.preventDefault(); void addQuestion(); }}>
+        <h2>A question to predict</h2><p class="small">State an event whose outcome can be verified. The adopted calibration transforms your input probability into a registered prediction.</p>
+        <label>Question<textarea bind:value={questionText} required rows="2" placeholder="Will this event happen by the resolution date?"></textarea></label>
+        <label>Input probability (%)<input type="number" min="0" max="100" step="0.1" bind:value={questionProbability} required /></label>
+        <label>Resolves by (UTC)<input type="datetime-local" bind:value={questionDeadline} required /></label>
+        <label>Evidence references, one per line<textarea bind:value={questionSources} rows="2" required placeholder={world.mode === 'simulated' ? 'fixture:foresight-calibration-mechanics-v1' : 'https://source.example/evidence'}></textarea></label>
+        <button class="primary" disabled={busy}>Add and predict</button>
+      </form>{/if}
       {#if outcomeForecast}<form class="panel outcome-form" onsubmit={(e) => { e.preventDefault(); void recordOutcome(); }}><h2>Record an outcome</h2><p>{forecasts.find(item => item.id === outcomeForecast)?.question}</p><label>Did the event happen?<select bind:value={outcome}><option value="yes">Yes</option><option value="no">No</option></select></label><label>Resolved at (UTC)<input type="datetime-local" bind:value={outcomeTime} required /></label><label>Sources, one per line<textarea bind:value={outcomeSources} required rows="3" placeholder="https://source.example/evidence"></textarea></label><div class="inline-actions"><button class="primary" disabled={busy}>Record and learn</button><button type="button" onclick={() => outcomeForecast = ''}>Cancel</button></div></form>{/if}
     {:else if tab === 'learning'}
       <section class="panel learning-intro"><p class="eyebrow">Learning from experience</p><h2>What changed, and why</h2><p>The learner adjusts how confidently it predicts events. Each candidate is tested against the previous model on the same held-out examples.</p><p class="small">This is learned calibration. It does not establish causal laws or guarantee future accuracy.</p><div class="model"><span>Current model</span><strong>{activeModel}</strong>{#if world.model}<span>Slope {measure(world.model.slope)} · Intercept {measure(world.model.intercept)}</span>{/if}</div>
         <form onsubmit={(e) => { e.preventDefault(); void startLearning(); }}>
           <label>Learn using evidence available by (UTC)<input type="datetime-local" bind:value={asOf} required /></label>
+          {#if world.mode === 'simulated'}<div class="example-input"><button type="button" onclick={() => { dataset = JSON.stringify(simulatedExamples, null, 2); asOf = '2025-03-01T00:00'; }}>Load simulated examples</button><p class="small">36 fabricated, dated outcomes for demonstrating calibration. The engine computes the training and evaluation results when you run replay.</p></div>{/if}
           {#if world.mode !== 'observed'}<label>Dated {world.mode} experiences (JSON)<textarea bind:value={dataset} rows="7" spellcheck="false" placeholder="Paste a JSON array of dated experiences."></textarea></label><p class="small">Up to 512 experiences. Every item needs an event identity, input probability, outcome, dated registration and resolution, evidence kind and source references. Replay advances through dated evidence without waiting for real time.</p>{:else}<p class="small">This run uses verified outcomes already recorded in this world.</p>{/if}
           {#if world.mode === 'simulated'}<p class="notice">Simulated world: improvements here demonstrate the mechanism using synthetic evidence. They do not update an observed-world model.</p>{/if}
           <button class="primary" disabled={busy || busyRun || world.status !== 'Active'}>{busyRun ? 'Learning in progress…' : world.mode === 'observed' ? 'Learn from outcomes' : 'Run accelerated replay'}</button>
