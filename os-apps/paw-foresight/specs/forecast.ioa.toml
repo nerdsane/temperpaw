@@ -10,6 +10,7 @@
 name = "Forecast"
 states = ["Preregistered", "Resolved", "Resolving", "Revising", "Scored"]
 initial = "Preregistered"
+strict_action_params = true
 
 # ADR-0050: Preregistered lives until its resolve_by date passes; resolution
 # is driven by evidence_ingest reading the deadline as domain data, not by a
@@ -83,7 +84,7 @@ name = "Resolve"
 kind = "input"
 from = ["Preregistered"]
 to = "Resolved"
-params = ["outcome", "outcome_source_refs"]
+params = ["outcome", "outcome_source_refs", "resolved_at", "outcome_evidence_kind"]
 hint = "Reality settled it. Dispatched by evidence_ingest with sources. System principals only (Cedar)."
 
 [[action]]
@@ -93,6 +94,22 @@ from = ["Resolved"]
 to = "Scored"
 params = ["brier"]
 hint = "Grade the registered probability against the outcome. System principals only (Cedar)."
+
+[[action.triggers]]
+name = "learn_from_scored_outcome"
+kind = "entity"
+principal = "system"
+target_entity = "LearningRun"
+target_action = "Start"
+params = {dataset_json = ""}
+guard = {type = "all_of", guards = [{type = "field_in", field = "evidence_kind", values = ["observed","historical","simulated"]}, {type = "not", guard = {type = "field_equals", field = "resolved_at", value = ""}}]}
+[action.triggers.resolve_target]
+type = "create"
+[action.triggers.params_from]
+world_id = "world_id"
+mode = "evidence_kind"
+as_of = "resolved_at"
+
 
 [[action]]
 name = "Void"
@@ -184,7 +201,7 @@ name = "OutcomeVerified"
 kind = "input"
 from = ["Resolving"]
 to = "Scored"
-params = ["brier","error_message"]
+params = ["brier","error_message","outcome_evidence_kind"]
 
 [[action.triggers]]
 name = "score_older_forecast_revision"
@@ -223,7 +240,7 @@ name = "RevisionVerified"
 kind = "input"
 from = ["Revising"]
 to = "Scored"
-params = ["brier","error_message"]
+params = ["brier","error_message","outcome_evidence_kind"]
 
 [[action.triggers]]
 name = "score_previous_forecast_revision"
@@ -259,3 +276,8 @@ state="Revising"
 after_seconds=120
 on_timeout="OutcomeFailed"
 params={error_message="Outcome validation did not complete within 120 seconds."}
+
+[[state]]
+name="outcome_evidence_kind"
+type="string"
+initial=""

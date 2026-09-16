@@ -21,6 +21,7 @@
 name = "World"
 states = ["Created", "Seeding", "Active", "Updating", "OpeningReplay", "Archived", "Failed"]
 initial = "Created"
+strict_action_params = true
 
 # ADR-0050/ADR-007: Created awaits human/agent configuration (no deadline by
 # design). Active is the steady state of a living world — indefinite by

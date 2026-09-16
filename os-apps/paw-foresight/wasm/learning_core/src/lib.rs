@@ -135,7 +135,12 @@ fn invalid_example(e: &Example, mode: &str, as_of: &str) -> Option<&'static str>
     {
         return Some("missing_or_invalid_sources");
     }
-    if mode != "simulated" && e.source_refs.iter().any(|s| !s.starts_with("https://")) {
+    if mode != "simulated"
+        && e.source_refs.iter().any(|s| {
+            !s.starts_with("https://")
+                && !(mode == "historical" && s.starts_with("file:") && s.len() > 5)
+        })
+    {
         return Some("unsupported_source");
     }
     None
@@ -156,12 +161,27 @@ pub fn prepare(
     if data.len() > MAX_EXAMPLES {
         return Err("dataset exceeds 512 examples; no truncation is permitted".into());
     }
+    let mut outcomes: BTreeMap<String, u8> = BTreeMap::new();
+    let mut conflicts = BTreeSet::new();
+    for example in &data {
+        if invalid_example(example, mode, as_of).is_none()
+            && let Some(previous) = outcomes.insert(example.event_id.clone(), example.outcome)
+            && previous != example.outcome
+        {
+            conflicts.insert(example.event_id.clone());
+        }
+    }
     data.sort_by(|a, b| (&a.registered_at, &a.event_id).cmp(&(&b.registered_at, &b.event_id)));
     let mut skipped = BTreeMap::new();
     let mut seen = BTreeSet::new();
     let mut valid = Vec::new();
     for example in data {
-        let reason = invalid_example(&example, mode, as_of).or_else(|| {
+        let reason = if conflicts.contains(&example.event_id) {
+            Some("conflicting_event_outcomes")
+        } else {
+            invalid_example(&example, mode, as_of)
+        }
+        .or_else(|| {
             if !seen.insert(example.event_id.clone()) {
                 Some("duplicate_event")
             } else {
@@ -305,6 +325,61 @@ mod tests {
                 source_refs: vec!["fixture:calibration".into()],
             })
             .collect()
+    }
+
+    #[test]
+    fn shuffled_duplicate_and_delayed_feedback_replays_identically() {
+        let model = Model::identity("simulated");
+        let mut baseline = fixture();
+        baseline.push(baseline[3].clone());
+        let mut delayed = baseline[5].clone();
+        delayed.event_id = "delayed".into();
+        delayed.resolved_at = "2027-01-01T00:00:00Z".into();
+        baseline.push(delayed);
+        let expected = prepare(
+            baseline.clone(),
+            "simulated",
+            "2025-12-31T00:00:00Z",
+            &model,
+        )
+        .unwrap();
+        for seed in 1..=64u64 {
+            let mut schedule = seed;
+            let mut reordered = baseline.clone();
+            for i in (1..reordered.len()).rev() {
+                schedule = schedule.wrapping_mul(6364136223846793005).wrapping_add(1);
+                reordered.swap(i, (schedule as usize) % (i + 1));
+            }
+            let actual = prepare(reordered, "simulated", "2025-12-31T00:00:00Z", &model).unwrap();
+            assert_eq!(actual, expected, "seed {seed}");
+            assert_eq!(
+                fit(&actual, &model, "candidate"),
+                fit(&expected, &model, "candidate"),
+                "seed {seed}"
+            );
+        }
+    }
+    #[test]
+    fn contradictory_truth_is_excluded_in_every_order() {
+        let mut data = fixture();
+        let mut contradiction = data[0].clone();
+        contradiction.outcome = 1 - contradiction.outcome;
+        data.push(contradiction);
+        let prepared = prepare(
+            data,
+            "simulated",
+            "2025-12-31T00:00:00Z",
+            &Model::identity("simulated"),
+        )
+        .unwrap();
+        assert_eq!(prepared.skipped_reasons["conflicting_event_outcomes"], 2);
+        assert!(
+            prepared
+                .training
+                .iter()
+                .chain(&prepared.validation)
+                .all(|e| e.event_id != "event-0")
+        );
     }
     #[test]
     fn actual_fitting_changes_parameters_and_later_prediction() {

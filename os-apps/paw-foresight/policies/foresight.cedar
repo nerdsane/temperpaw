@@ -506,6 +506,20 @@ permit(principal, action == Action::"RecordOutcome", resource is Forecast)
 when { ["human","supervisor","system"].contains(principal.agent_type) };
 permit(principal, action in [Action::"ResolveRevision",Action::"OutcomeVerified",Action::"RevisionVerified",Action::"OutcomeFailed"], resource is Forecast)
 when { principal.agent_type == "system" };
-// Prediction contents and completed evidence change through declared actions only.
+// PATCH and PUT both authorize UPDATE_ACTION = "update" in the OData write handler.
+// The precheck label "patch" is not the Cedar action.
 forbid(principal, action == Action::"update", resource is Forecast);
 forbid(principal, action == Action::"update", resource is LearningRun);
+
+// World model parameters and mode are changed only by declared actions.
+forbid(principal, action == Action::"update", resource is World);
+
+// Immutable history remains available after a world is archived.
+forbid(principal, action == Action::"delete", resource is Forecast);
+forbid(principal, action == Action::"delete", resource is LearningRun);
+forbid(principal, action == Action::"delete", resource is World);
+// A new world begins with the identity model. Learned parameters enter via AdoptModel.
+forbid(principal, action == Action::"create", resource is World)
+when { resource has ModelJson && resource.ModelJson != "" };
+forbid(principal, action == Action::"create", resource is World)
+when { resource has AdoptedLearningRunId && resource.AdoptedLearningRunId != "" };

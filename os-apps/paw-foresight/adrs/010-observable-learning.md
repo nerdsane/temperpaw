@@ -31,3 +31,9 @@ Source references and timestamps are supplied evidence, not independently verifi
 ## Verification
 
 Pure Rust production logic has red/green tests for actual parameter changes, later predictions, temporal separation, duplicate exclusion, provenance rejection, future outcomes, replay determinism, consumed validation, insufficient data and invalid dates/models. Forecast registration tests exercise deterministic identities and finite inputs. Runtime verification must additionally exercise the declared state machine, atomic adoption and duplicate delivery.
+
+## Existing feedback paths
+
+Evidence ingest and historical grading retain their existing orchestration. Their Resolve payloads now carry resolution time and outcome provenance, and Forecast.Score declares the next learning trigger. Market-price threshold resolutions remain proxy evidence, excluded from empirical fitting. Historical grading carries recorded actual timestamps and references, labels approximate matches unverified, and scores every revision of the matched underlying event.
+
+Observed manual resolutions compare their resolution date to the host-recorded action timestamp, so future outcomes cannot enter observed fitting. Conflicting outcomes for one event are excluded. Generic PATCH/PUT authorization uses the kernel UPDATE_ACTION (update); the precheck label patch is not a Cedar action. Strict action parameters also prevent probability/model mutation through extra action fields.

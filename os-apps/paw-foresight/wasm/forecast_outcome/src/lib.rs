@@ -25,6 +25,24 @@ fn execute(ctx: &Context) -> Result<(), String> {
     if !valid_mode(mode) {
         return Err("forecast has no supported evidence provenance".into());
     }
+    if mode == "observed" {
+        let recorded = ctx
+            .entity_state
+            .get("events")
+            .and_then(Value::as_array)
+            .and_then(|events| events.last())
+            .and_then(|event| event.get("timestamp"))
+            .and_then(Value::as_str)
+            .ok_or("Observed resolution needs its host-recorded event timestamp")?;
+        let now = if recorded.len() >= 19 {
+            format!("{}Z", &recorded[..19])
+        } else {
+            String::new()
+        };
+        if !valid_time(&now) || resolved > now.as_str() {
+            return Err("An observed outcome cannot resolve in the future".into());
+        }
+    }
     let sources: Vec<String> = serde_json::from_str(field(fields, "outcome_source_refs"))
         .map_err(|_| "sources must be a JSON array")?;
     if sources.is_empty()
@@ -44,7 +62,7 @@ fn execute(ctx: &Context) -> Result<(), String> {
     };
     set_success_result(
         action,
-        &json!({"brier":(probability-outcome).powi(2).to_string(),"error_message":""}),
+        &json!({"brier":(probability-outcome).powi(2).to_string(),"error_message":"", "outcome_evidence_kind":mode}),
     );
     Ok(())
 }

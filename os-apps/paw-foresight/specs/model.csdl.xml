@@ -472,6 +472,7 @@
         <Property Name="ResolvedAt" Type="Edm.String"/>
         <Property Name="ErrorMessage" Type="Edm.String"/>
         <Property Name="RegistrationKey" Type="Edm.String"/>
+              <Property Name="OutcomeEvidenceKind" Type="Edm.String"/>
       </EntityType>
 
       <EntityType Name="Hindcast">
@@ -894,6 +895,8 @@
 
       <Action Name="Resolve" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="outcome_evidence_kind" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="resolved_at" Type="Edm.String" Nullable="true"/>
         <Parameter Name="outcome" Type="Edm.String" Nullable="true"/>
         <Parameter Name="outcome_source_refs" Type="Edm.String" Nullable="true"/>
         <ReturnType Type="TemperPaw.Foresight.Forecast"/>
@@ -1001,6 +1004,7 @@
 
       <Action Name="OutcomeVerified" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="outcome_evidence_kind" Type="Edm.String" Nullable="true"/>
         <Parameter Name="brier" Type="Edm.String" Nullable="true"/>
         <Parameter Name="error_message" Type="Edm.String" Nullable="true"/>
         <ReturnType Type="TemperPaw.Foresight.Forecast"/>
@@ -1008,6 +1012,7 @@
 
       <Action Name="RevisionVerified" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="outcome_evidence_kind" Type="Edm.String" Nullable="true"/>
         <Parameter Name="brier" Type="Edm.String" Nullable="true"/>
         <Parameter Name="error_message" Type="Edm.String" Nullable="true"/>
         <ReturnType Type="TemperPaw.Foresight.Forecast"/>

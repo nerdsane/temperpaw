@@ -40,24 +40,28 @@ fn execute(ctx: &Context) -> Result<(), String> {
         }
         rows.iter()
             .filter(|r| matches!(field(r, "status"), "Scored" | "Resolved"))
-            .filter_map(|row| {
+            .map(|row| {
                 let outcome = match field(row, "outcome") {
                     "yes" => 1,
                     "no" => 0,
-                    _ => return None,
+                    _ => 2,
                 };
-                let probability = field(row, "base_probability").parse().ok()?;
+                let probability = field(row, "base_probability").parse().unwrap_or(f64::NAN);
                 let source_refs =
                     serde_json::from_str(field(row, "outcome_source_refs")).unwrap_or_default();
-                Some(Example {
+                Example {
                     event_id: field(row, "event_node_id").into(),
                     base_probability: probability,
                     outcome,
                     registered_at: field(row, "registered_at").into(),
                     resolved_at: field(row, "resolved_at").into(),
-                    evidence_kind: field(row, "evidence_kind").into(),
+                    evidence_kind: match field(row, "outcome_evidence_kind") {
+                        "" => field(row, "evidence_kind"),
+                        kind => kind,
+                    }
+                    .into(),
                     source_refs,
-                })
+                }
             })
             .collect()
     } else {
