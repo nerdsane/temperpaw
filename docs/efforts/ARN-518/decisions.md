@@ -1,6 +1,6 @@
 # Decisions and tradeoffs
 
-## Use the existing TemperPaw dashboard
+## D1 — Use the existing TemperPaw dashboard
 
 **Decision**: Add Foresight to the authenticated TemperPaw dashboard.
 
@@ -12,7 +12,7 @@
 
 **Where:** dashboard/src/routes/foresight; PR https://github.com/nerdsane/temperpaw/pull/526.
 
-## Use an isolated worktree on the functioning governed computer
+## D2 — Use an isolated worktree on the functioning governed computer
 
 **Decision**: Work in a dedicated git worktree on Computers('arni-big') while its requested copy remains unresolved.
 
@@ -24,7 +24,7 @@
 
 **Where:** /home/tl-user/worktrees/arn-518-foresight, branch codex/arn-518-learning-foresight, GitHub remote nerdsane/temperpaw.
 
-## 3. Fit a bounded probability calibrator
+## D3 — Fit a bounded probability calibrator
 
 **Decision**: Fit logistic calibration as the first trainable predictive component while retaining the scenario engine.
 
@@ -36,7 +36,7 @@
 
 **Where:** os-apps/paw-foresight/adrs/010-observable-learning.md; backend commit 77539d5.
 
-## 4. Let the authenticated server select the tenant
+## D4 — Let the authenticated server select the tenant
 
 **Decision**: Remove the dashboard's hardcoded default-tenant header.
 
@@ -48,7 +48,7 @@
 
 **Where:** dashboard/src/lib/api.ts and dashboard/tests/foresight-transport.test.mjs.
 
-## 5. Preserve Genesis changes during publication
+## D5 — Preserve Genesis changes during publication
 
 **Decision**: Reconcile existing Genesis fixes before applying the learner delta.
 
@@ -60,7 +60,7 @@
 
 **Where:** os-apps/paw-foresight agents, world specification, policy and reconciled existing WASM modules.
 
-## 6. Reuse the published runtime with identical server source
+## D6 — Reuse the published runtime with identical server source
 
 **Decision**: Diagnose the app and UI integration against the verified published f1b3f892ce652f1355daeabe68ae49cd3de3fa85 runtime before rebuilding the required session adapter.
 
@@ -73,7 +73,7 @@
 **Where:** Local proof on governed arni-big, isolated PostgreSQL database arn518, with evidence retained outside the repository.
 
 
-## 7. Authenticate browser requests through the supported inner API contract
+## D7 — Authenticate browser requests through the supported inner API contract
 
 **Decision**: Translate a verified dashboard session into the server's existing single-use credential scoped to its identity, tenant, method and URI.
 
@@ -86,7 +86,7 @@
 **Where:** crates/temperpaw/src/auth.rs and crates/temperpaw/src/startup.rs; composed-router regression test and live browser acceptance flow.
 
 
-## 8. Continue on the approved replacement computer
+## D8 — Continue on the approved replacement computer
 
 **Decision**: Restore the integration branch on an isolated copy of arni-big-2.
 
