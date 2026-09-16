@@ -121,3 +121,39 @@
 **Chose the complete callback boundary because:** Cedar permits are additive. Explicit denies prevent broader dashboard permissions from bypassing the new integrity contract while retaining create/start, replay, prediction-update and reviewed outcome-entry controls.
 
 **Where:** os-apps/paw-foresight/policies/foresight.cedar; crates/temperpaw/tests/corridor_cedar_matrix.rs.
+
+## D11 — Recover registration and preserve its model snapshot
+
+**Decision**: Return failed forecast registration to an operable world with a visible error, and retain one model snapshot throughout each registration pass.
+
+**Came up because:** Review found that a bad replay date or transient lookup failure permanently failed the world, while concurrent adoption could interrupt or change a registration pass.
+
+**Options:** Keep terminal failure and require a new world; hide invalid dates by adjusting them; preserve the supplied clock, expose the error and allow a retry.
+
+**Chose recovery with a frozen pass model because:** Invalid or unavailable inputs should not destroy the world, and forecasts in one pass need an auditable model identity. Observed registration uses the host event time; replay and hindcast retain explicit logical time. A matching authoritative forecast read advances the loop even if its list projection lags.
+
+**Where:** os-apps/paw-foresight/specs/world.ioa.toml and wasm/register_forecasts/src/lib.rs.
+
+## D12 — Start learning once after a grading batch
+
+**Decision**: Use a separate system-only batch scoring transition and one declared learning trigger after hindcast grading completes.
+
+**Came up because:** The new per-Score trigger would start a competing learning run for every revision in a hindcast batch.
+
+**Options:** Keep every per-revision run; add a background scheduler; preserve existing batch grading and trigger learning once from its completion.
+
+**Chose the batch completion trigger because:** It retains all scores without a new orchestration service or repeated fitting over the same batch. Standalone scoring and reviewed outcome entry retain their automatic feedback paths.
+
+**Where:** os-apps/paw-foresight/specs/forecast.ioa.toml, specs/hindcast.ioa.toml, and wasm/grade_hindcast/src/lib.rs.
+
+## D13 — Use configured research models and the existing settings page
+
+**Decision**: Research creation uses the server's configured provider/model pair and links missing setup to the authenticated settings page.
+
+**Came up because:** The first review found that the new form omitted both fields required by seed_world. The existing welcome flow cannot configure every supported provider or the model.
+
+**Options:** Guess model defaults; build another provider form; reuse non-secret setup metadata and the existing settings controls.
+
+**Chose the existing setup contract because:** It gives the UI a real configured pair without exposing credentials or duplicating model configuration. Settings must remain reachable before initial setup is complete; authentication still applies. Replay remains available independently of provider setup.
+
+**Where:** dashboard/src/routes/foresight/+page.svelte and dashboard setup routing.
