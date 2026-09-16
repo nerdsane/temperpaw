@@ -394,3 +394,16 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the guarded button because:** It makes the failure recoverable through the same UI that explains it, without starting duplicate research automatically or treating an unavailable Session read as a confirmed failure. The page marks the failed Session ID before dispatch and blocks further requests for that ID until a replacement Session is recorded, including during delayed refreshes and world switching. A definite HTTP client rejection releases the guard; a transport failure or timeout retains it while the user checks the world. HTTP status is carried as structured error metadata rather than parsed from prose. The guard is per-page, avoiding a persistent browser lock that could strand recovery after an unsent request. Existing authentication, World action rules, and the ResearchSessionStarted attempt fence remain the backend authority.
 
 **Where:** `dashboard/src/lib/foresight.ts:77` (eligibility and duplicate guard), `dashboard/src/routes/foresight/+page.svelte:179` and `:489` (action and visible control), `dashboard/src/lib/api.ts:126` (HTTP status metadata), `dashboard/tests/foresight-session.test.mjs` and `dashboard/tests/foresight-transport.test.mjs` (eligibility, concurrent requests, old-session reuse, transport uncertainty, and real HTTP rejection).
+
+
+## D33 — Drain queued registration requests after a batch fails
+
+**Decision:** After registration failure or timeout, start a new batch only when a request arrived after the previous batch began.
+
+**Came up because:** Review identified that a pending request survived either recovery transition but had no continuation. That stranded later accepted paths and blocked background exploration even though the world had returned to Active. A new actor regression reproduced the missing continuation before the change.
+
+**Options:** Retry every failed batch automatically; discard pending work on failure; or drain only the existing guarded queue.
+
+**Chose the guarded queue because:** It preserves later work without introducing an unbounded retry loop. Starting a batch consumes the pending flag, and attempt guards still reject stale callbacks. A second failure without another request stops with the error visible. The same rule applies to explicit failure and the sequence-checked timeout.
+
+**Where:** `os-apps/paw-foresight/specs/world.ioa.toml`, `crates/temperpaw/tests/foresight_registration_contract.rs`; PR #526. All 11 registration contract tests pass; the new regression failed on the original missing trigger.

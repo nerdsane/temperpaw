@@ -897,6 +897,19 @@ hint = "Registration did not finish; inspect the error, correct the replay clock
 constraints = [{kind="param_equals_field",param="expected_registration_attempt",field="registration_attempt"}]
 
 
+[[action.triggers]]
+name = "start_queued_registration_after_recovery"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartForecastRegistration"
+to_state = "Active"
+guard = {type="bool_true", field="forecast_registration_pending"}
+params = {forecast_registration_key=""}
+[action.triggers.resolve_target]
+type = "same_id"
+
+
 # The host's sequence-checked state timer interrupts a trapped batch.
 [[action]]
 name = "ForecastRegistrationTimedOut"
@@ -904,6 +917,19 @@ kind = "input"
 from = ["RegisteringForecasts"]
 to = "Active"
 params = ["error_message"]
+
+[[action.triggers]]
+name = "start_queued_registration_after_recovery"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartForecastRegistration"
+to_state = "Active"
+guard = {type="bool_true", field="forecast_registration_pending"}
+params = {forecast_registration_key=""}
+[action.triggers.resolve_target]
+type = "same_id"
+
 
 [[state]]
 name = "first_pass_complete"

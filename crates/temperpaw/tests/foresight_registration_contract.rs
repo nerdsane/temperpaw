@@ -691,3 +691,101 @@ fn older_research_attempt_cannot_replace_the_current_session() {
         assert_eq!(overwritten["fields"]["research_session_id"], "session-old");
     }
 }
+
+#[test]
+fn failed_registration_drains_only_work_queued_after_its_start() {
+    use std::sync::Arc;
+    use temper_runtime::scheduler::SimActorHandler;
+    use temper_server::entity_actor::sim_handler::EntityActorHandler;
+    let source = include_str!("../../../os-apps/paw-foresight/specs/world.ioa.toml");
+    let spec: toml::Value = toml::from_str(source).unwrap();
+    for recovery in ["ForecastRegistrationFailed", "ForecastRegistrationTimedOut"] {
+        let action = spec["action"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["name"].as_str() == Some(recovery))
+            .unwrap();
+        let continuation = action
+            .get("triggers")
+            .and_then(toml::Value::as_array)
+            .and_then(|triggers| {
+                triggers.iter().find(|trigger| {
+                    trigger.get("target_action").and_then(toml::Value::as_str)
+                        == Some("StartForecastRegistration")
+                })
+            })
+            .unwrap_or_else(|| panic!("{recovery} must not strand a later queued request"));
+        assert_eq!(continuation["principal"].as_str(), Some("system"));
+        assert_eq!(continuation["guard"]["type"].as_str(), Some("bool_true"));
+        assert_eq!(
+            continuation["guard"]["field"].as_str(),
+            Some("forecast_registration_pending")
+        );
+        for queued in [false, true] {
+            let mut world = EntityActorHandler::new(
+                "World",
+                "world-recovery",
+                Arc::new(TransitionTable::from_ioa_source(source)),
+            );
+            world.init().unwrap();
+            world.handle_message("Seed", "{}").unwrap();
+            world.handle_message("SeedComplete", "{}").unwrap();
+            world
+                .handle_message("RequestForecastRegistration", "{}")
+                .unwrap();
+            world
+                .handle_message(
+                    "StartForecastRegistration",
+                    r#"{"forecast_registration_key":""}"#,
+                )
+                .unwrap();
+            if queued {
+                world
+                    .handle_message("RequestForecastRegistration", "{}")
+                    .unwrap();
+            }
+            let params = if recovery == "ForecastRegistrationFailed" {
+                r#"{"error_message":"transient","expected_registration_attempt":1}"#
+            } else {
+                r#"{"error_message":"deadline"}"#
+            };
+            let recovered = world.handle_message(recovery, params).unwrap();
+            assert_eq!(recovered["status"], "Active");
+            assert_eq!(
+                recovered["booleans"]["forecast_registration_pending"],
+                queued
+            );
+            let next = world.handle_message(
+                "StartForecastRegistration",
+                r#"{"forecast_registration_key":""}"#,
+            );
+            assert_eq!(
+                next.is_ok(),
+                queued,
+                "a failed batch must not create an unbounded retry loop"
+            );
+            if let Ok(next) = next {
+                assert_eq!(next["counters"]["registration_attempt"], 2);
+                assert_eq!(next["booleans"]["forecast_registration_pending"], false);
+                assert!(
+                    world
+                        .handle_message(
+                            "ForecastRegistrationFailed",
+                            r#"{"error_message":"stale","expected_registration_attempt":1}"#
+                        )
+                        .is_err()
+                );
+                world.handle_message("ForecastRegistrationFailed", r#"{"error_message":"still unavailable","expected_registration_attempt":2}"#).unwrap();
+                assert!(
+                    world
+                        .handle_message(
+                            "StartForecastRegistration",
+                            r#"{"forecast_registration_key":""}"#
+                        )
+                        .is_err()
+                );
+            }
+        }
+    }
+}
