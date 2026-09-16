@@ -328,6 +328,21 @@
               <Property Name="LearningMode" Type="Edm.String"/>
         <Property Name="ModelJson" Type="Edm.String"/>
         <Property Name="AdoptedLearningRunId" Type="Edm.String"/>
+        <Property Name="ForecastId" Type="Edm.String"/>
+        <Property Name="ForecastRegistrationKey" Type="Edm.String"/>
+        <Property Name="ForecastWorldId" Type="Edm.String"/>
+        <Property Name="ForecastEventNodeId" Type="Edm.String"/>
+        <Property Name="ForecastQuestion" Type="Edm.String"/>
+        <Property Name="ForecastProbability" Type="Edm.String"/>
+        <Property Name="ForecastBaseProbability" Type="Edm.String"/>
+        <Property Name="ForecastModelVersion" Type="Edm.String"/>
+        <Property Name="ForecastLearningRunId" Type="Edm.String"/>
+        <Property Name="ForecastPreviousForecastId" Type="Edm.String"/>
+        <Property Name="ForecastEvidenceKind" Type="Edm.String"/>
+        <Property Name="ForecastResolveBy" Type="Edm.String"/>
+        <Property Name="ForecastMarketRef" Type="Edm.String"/>
+        <Property Name="ForecastEngineVersion" Type="Edm.String"/>
+        <Property Name="ForecastRegisteredAt" Type="Edm.String"/>
       </EntityType>
 
       <EntityType Name="EventNode">
@@ -1104,6 +1119,48 @@
         <EntitySet Name="Lenses" EntityType="TemperPaw.Foresight.Lens"/>
         <EntitySet Name="LearningRuns" EntityType="TemperPaw.Foresight.LearningRun"/>
       </EntityContainer>
+      <Action Name="Register" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="registration_key" Type="Edm.String"/>
+        <Parameter Name="world_id" Type="Edm.String"/>
+        <Parameter Name="event_node_id" Type="Edm.String"/>
+        <Parameter Name="question" Type="Edm.String"/>
+        <Parameter Name="probability" Type="Edm.String"/>
+        <Parameter Name="base_probability" Type="Edm.String"/>
+        <Parameter Name="model_version" Type="Edm.String"/>
+        <Parameter Name="learning_run_id" Type="Edm.String"/>
+        <Parameter Name="previous_forecast_id" Type="Edm.String"/>
+        <Parameter Name="evidence_kind" Type="Edm.String"/>
+        <Parameter Name="resolve_by" Type="Edm.String"/>
+        <Parameter Name="market_ref" Type="Edm.String"/>
+        <Parameter Name="engine_version" Type="Edm.String"/>
+        <Parameter Name="registered_at" Type="Edm.String"/>
+      </Action>
+      <Action Name="ForecastPrepared" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="forecast_id" Type="Edm.String"/>
+        <Parameter Name="forecast_registration_key" Type="Edm.String"/>
+        <Parameter Name="forecast_world_id" Type="Edm.String"/>
+        <Parameter Name="forecast_event_node_id" Type="Edm.String"/>
+        <Parameter Name="forecast_question" Type="Edm.String"/>
+        <Parameter Name="forecast_probability" Type="Edm.String"/>
+        <Parameter Name="forecast_base_probability" Type="Edm.String"/>
+        <Parameter Name="forecast_model_version" Type="Edm.String"/>
+        <Parameter Name="forecast_learning_run_id" Type="Edm.String"/>
+        <Parameter Name="forecast_previous_forecast_id" Type="Edm.String"/>
+        <Parameter Name="forecast_evidence_kind" Type="Edm.String"/>
+        <Parameter Name="forecast_resolve_by" Type="Edm.String"/>
+        <Parameter Name="forecast_market_ref" Type="Edm.String"/>
+        <Parameter Name="forecast_engine_version" Type="Edm.String"/>
+        <Parameter Name="forecast_registered_at" Type="Edm.String"/>
+      </Action>
+      <Action Name="ForecastRegistered" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="registration_key" Type="Edm.String"/>
+      </Action>
+      <Action Name="ForecastRegistrationComplete" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+      </Action>
     </Schema>
   </edmx:DataServices>
 </edmx:Edmx>

@@ -4,8 +4,8 @@
 //! probabilistic, non-determined claim resolving inside the world's frontier
 //! becomes a Forecast — preregistered, immutable, graded later by
 //! evidence_ingest. Changed inputs or an adopted model create linked immutable revisions.
-//! Identical registration requests converge to the same stored identity. No follow-up action is dispatched —
-//! registration is a side effect of scoring, not a state transition.
+//! Identical requests converge to the same stored identity. Each invocation computes
+//! the next registration; declared entity triggers commit it and continue the loop.
 //!
 //! Build: `cargo build --target wasm32-unknown-unknown --release`
 
@@ -409,7 +409,6 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         // are collapsed here, before they can become free-resolving forecasts.
         let covered = compute_covered(&ctx, &nodes, &frontier);
 
-        let mut registered = 0usize;
         let mut reconciled = 0usize;
         for node in &nodes {
             let str_of = |k: &str| row_str(node, k);
@@ -501,69 +500,55 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             } else {
                 String::new()
             };
-            let create_body = json!({
-                "Id":forecast_id, "registration_key":registration_key,
-                "world_id": world_id, "event_node_id": node_id,
-                "question": str_of("Statement"), "probability": probability.to_string(),
-                "base_probability":base_probability.to_string(),
-                "model_version":model.version,"learning_run_id":get("adopted_learning_run_id"),
-                "previous_forecast_id":previous_id,"evidence_kind":mode,
-                "resolve_by": str_of("ResolveBy"), "market_ref": market_ref,
-                "engine_version": ENGINE_VERSION, "registered_at": registered_at,
-            });
-            let created = ctx.http_call(
-                "POST",
-                &format!("{api}/tdata/Forecasts"),
+            let existing_identity = ctx.http_call(
+                "GET",
+                &format!("{api}/tdata/Forecasts('{forecast_id}')"),
                 &headers,
-                &create_body.to_string(),
+                "",
             )?;
-            if created.status == 409 {
-                let existing = ctx.http_call(
-                    "GET",
-                    &format!("{api}/tdata/Forecasts('{forecast_id}')"),
-                    &headers,
-                    "",
-                )?;
-                if existing.status != 200 {
-                    return Err(format!(
-                        "Forecast retry conflict could not be verified: HTTP {}",
-                        existing.status
-                    ));
-                }
-                let row: Value = serde_json::from_str(&existing.body).map_err(|e| e.to_string())?;
-                if row_str(&row, "RegistrationKey") != registration_key {
+            if existing_identity.status == 200 {
+                let row: Value =
+                    serde_json::from_str(&existing_identity.body).map_err(|e| e.to_string())?;
+                if row_status(&row) != "Created"
+                    && row_str(&row, "RegistrationKey") != registration_key
+                {
                     return Err("Forecast identity collision or conflicting registration".into());
                 }
-                continue;
-            }
-            if !(200..300).contains(&created.status) {
+            } else if existing_identity.status != 404 {
                 return Err(format!(
-                    "Forecast create failed for {node_id}: HTTP {}",
-                    created.status
+                    "Forecast identity lookup failed: HTTP {}",
+                    existing_identity.status
                 ));
             }
-            registered += 1;
-            ctx.log(
-                "info",
-                &format!(
-                    "register_forecasts: registered forecast for node {node_id} (p={}, resolve_by={})",
-                    str_of("Probability"),
-                    str_of("ResolveBy")
-                ),
+            // A strict Forecast starts with identity only. The host executes the
+            // declared Register transition after this read/compute callback.
+            set_success_result(
+                "ForecastPrepared",
+                &json!({
+                    "forecast_id":forecast_id, "forecast_registration_key":registration_key,
+                    "forecast_world_id": world_id, "forecast_event_node_id": node_id,
+                    "forecast_question": str_of("Statement"), "forecast_probability": probability.to_string(),
+                    "forecast_base_probability":base_probability.to_string(),
+                    "forecast_model_version":model.version,"forecast_learning_run_id":get("adopted_learning_run_id"),
+                    "forecast_previous_forecast_id":previous_id,"forecast_evidence_kind":mode,
+                    "forecast_resolve_by": str_of("ResolveBy"), "forecast_market_ref": market_ref,
+                    "forecast_engine_version": ENGINE_VERSION, "forecast_registered_at": registered_at,
+                }),
             );
+            return Ok(());
         }
 
         ctx.log(
             "info",
             &format!(
-                "register_forecasts: world {world_id} — {registered} forecast(s) registered, \
+                "register_forecasts: world {world_id} — registration complete, \
                  {reconciled} collapsed as determined-restating, from {} node(s)",
                 nodes.len()
             ),
         );
         // A successful run with nothing to dispatch must still set a
         // result: the host treats an empty result as failure.
-        set_success_result("", &json!({}));
+        set_success_result("ForecastRegistrationComplete", &json!({}));
         Ok(())
     })();
 

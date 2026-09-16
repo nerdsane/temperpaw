@@ -423,7 +423,14 @@ fn learning_callbacks_accept_only_the_platform_wasm_service() {
             "LearningRun",
             &["Prepared", "Trained", "CandidatePassed", "Reject", "Fail"][..],
         ),
-        ("World", &["ReplayOpened"][..]),
+        (
+            "World",
+            &[
+                "ReplayOpened",
+                "ForecastPrepared",
+                "ForecastRegistrationComplete",
+            ][..],
+        ),
         (
             "Forecast",
             &["OutcomeVerified", "RevisionVerified", "OutcomeFailed"][..],

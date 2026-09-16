@@ -19,7 +19,7 @@
 
 [automaton]
 name = "World"
-states = ["Created", "Seeding", "Active", "Updating", "OpeningReplay", "Archived", "Failed"]
+states = ["Created", "Seeding", "Active", "Updating", "OpeningReplay", "RegisteringForecasts", "Archived", "Failed"]
 initial = "Created"
 strict_action_params = true
 
@@ -327,6 +327,7 @@ temper_api_url = "{secret:temper_api_url}"
 name = "PathsScored"
 kind = "input"
 from = ["Active"]
+to = "RegisteringForecasts"
 params = ["canonical_path_id"]
 hint = "aggregate_costs classified all paths for this pass. Registers implied near-term forecasts."
 effect = [{ type = "trigger", name = "register_forecasts" }]
@@ -476,7 +477,7 @@ hint = "Retire the world. Read-only thereafter."
 [[action]]
 name = "Fail"
 kind = "input"
-from = ["Created", "Seeding", "Active", "Updating", "OpeningReplay"]
+from = ["Created", "Seeding", "Active", "Updating", "OpeningReplay", "RegisteringForecasts"]
 to = "Failed"
 params = ["error_message"]
 hint = "Unrecoverable error."
@@ -547,7 +548,7 @@ params={error_message="Replay world initialization did not complete within 120 s
 name = "RegisterForecasts"
 kind = "input"
 from = ["Active"]
-to = "Active"
+to = "RegisteringForecasts"
 params = ["last_ingest_date"]
 
 [[action.triggers]]
@@ -585,3 +586,143 @@ target_action = "ConfirmAdoption"
 type = "field"
 field = "adopted_learning_run_id"
 [action.triggers.params_from]
+
+# One durable pending registration; each committed Forecast advances the loop.
+
+[[state]]
+name = "forecast_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_registration_key"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_world_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_event_node_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_question"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_probability"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_base_probability"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_model_version"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_learning_run_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_previous_forecast_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_evidence_kind"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_resolve_by"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_market_ref"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_engine_version"
+type = "string"
+initial = ""
+
+[[state]]
+name = "forecast_registered_at"
+type = "string"
+initial = ""
+
+[[action]]
+name = "ForecastPrepared"
+kind = "input"
+from = ["RegisteringForecasts"]
+to = "RegisteringForecasts"
+params = ["forecast_id", "forecast_registration_key", "forecast_world_id", "forecast_event_node_id", "forecast_question", "forecast_probability", "forecast_base_probability", "forecast_model_version", "forecast_learning_run_id", "forecast_previous_forecast_id", "forecast_evidence_kind", "forecast_resolve_by", "forecast_market_ref", "forecast_engine_version", "forecast_registered_at"]
+constraints = [{kind="param_nonempty",param="forecast_id"}]
+
+[[action.triggers]]
+name = "commit_forecast_registration"
+kind = "entity"
+principal = "system"
+target_entity = "Forecast"
+target_action = "Register"
+[action.triggers.resolve_target]
+type = "create_if_missing"
+id_field = "forecast_id"
+[action.triggers.params_from]
+registration_key = "forecast_registration_key"
+world_id = "forecast_world_id"
+event_node_id = "forecast_event_node_id"
+question = "forecast_question"
+probability = "forecast_probability"
+base_probability = "forecast_base_probability"
+model_version = "forecast_model_version"
+learning_run_id = "forecast_learning_run_id"
+previous_forecast_id = "forecast_previous_forecast_id"
+evidence_kind = "forecast_evidence_kind"
+resolve_by = "forecast_resolve_by"
+market_ref = "forecast_market_ref"
+engine_version = "forecast_engine_version"
+registered_at = "forecast_registered_at"
+
+[[action]]
+name = "ForecastRegistered"
+kind = "input"
+from = ["RegisteringForecasts"]
+to = "RegisteringForecasts"
+params = ["registration_key"]
+constraints = [{kind="param_equals_field",param="registration_key",field="forecast_registration_key"}]
+
+[[action.triggers]]
+name = "prepare_next_forecast"
+kind = "wasm"
+module = "register_forecasts"
+on_failure = "Fail"
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+
+[[action]]
+name = "ForecastRegistrationComplete"
+kind = "input"
+from = ["RegisteringForecasts"]
+to = "Active"
+params = []
+
+[[state_timeout]]
+state = "RegisteringForecasts"
+after_seconds = 120
+on_timeout = "Fail"
+reset_on = ["ForecastPrepared", "ForecastRegistered"]
+params = {error_message="Forecast registration did not complete within 120 seconds."}

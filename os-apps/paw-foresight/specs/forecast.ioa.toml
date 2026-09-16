@@ -8,15 +8,15 @@
 
 [automaton]
 name = "Forecast"
-states = ["Preregistered", "Resolved", "Resolving", "Revising", "Scored"]
-initial = "Preregistered"
+states = ["Created", "Preregistered", "Resolved", "Resolving", "Revising", "Scored"]
+initial = "Created"
 strict_action_params = true
 
 # ADR-0050: Preregistered lives until its resolve_by date passes; resolution
 # is driven by evidence_ingest reading the deadline as domain data, not by a
 # state timeout. Resolved is transient (scored in the same ingest pass, but
 # kept distinct so the outcome and its grading are separately auditable).
-allow_indefinite_states = ["Preregistered", "Resolved"]
+allow_indefinite_states = ["Created", "Preregistered", "Resolved"]
 
 # --- State Variables ---
 
@@ -78,6 +78,28 @@ type = "string"
 initial = ""
 
 # --- Actions ---
+
+# Registration commits once; only this transition accepts prediction inputs.
+[[action]]
+name = "Register"
+kind = "input"
+from = ["Created"]
+to = "Preregistered"
+params = ["registration_key", "world_id", "event_node_id", "question", "probability", "base_probability", "model_version", "learning_run_id", "previous_forecast_id", "evidence_kind", "resolve_by", "market_ref", "engine_version", "registered_at"]
+constraints = [{kind="param_nonempty",param="registration_key"},{kind="param_nonempty",param="world_id"},{kind="param_nonempty",param="event_node_id"}]
+
+[[action.triggers]]
+name = "continue_forecast_registration"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "ForecastRegistered"
+[action.triggers.resolve_target]
+type = "field"
+field = "world_id"
+[action.triggers.params_from]
+registration_key = "registration_key"
+
 
 [[action]]
 name = "Resolve"
