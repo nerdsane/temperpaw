@@ -127,6 +127,13 @@ class TwinAnnotationsTest(unittest.TestCase):
         self.assertEqual(annotations["Temper.Provider"], "cloudflare")
         self.assertEqual(annotations["Temper.Role"], "resource")
 
+    def test_a_monitor_watches_resources_and_is_not_one(self) -> None:
+        # A Datadog monitor is provider-managed like a resource, but it
+        # observes the app rather than serving it; the graph draws it apart.
+        annotations = self.annotations(self.entity("DsfDatadogMonitor"))
+        self.assertEqual(annotations["Temper.Provider"], "datadog")
+        self.assertEqual(annotations["Temper.Role"], "monitor")
+
 
 if __name__ == "__main__":
     unittest.main()

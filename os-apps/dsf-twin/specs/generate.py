@@ -73,6 +73,12 @@ PROVIDER_ANNOTATION = {
     "media": "media",
 }
 # The twin's own record types are provided by Temper; each declares its node role.
+# Provider-managed types whose twin concern is not "resource": a Datadog
+# monitor watches the app rather than serving it, so the graph draws it apart
+# from the things it watches.
+PROVIDER_ROLES = {
+    "DsfDatadogMonitor": "monitor",
+}
 RECORD_ROLES = {
     "DsfObservation": "observation",
     "DsfFlow": "flow",
@@ -988,7 +994,7 @@ def csdl(documents):
                 references.append((f"Dsf.Twin.{name}/{property_label}", *reference))
         # Provider groups nodes by the external system; role groups by twin concern.
         if name in resource_providers:
-            provider, role = resource_providers[name], "resource"
+            provider, role = resource_providers[name], PROVIDER_ROLES.get(name, "resource")
         else:
             provider, role = "temper", RECORD_ROLES[name]
         add(entity, "Annotation", Term="Temper.Provider", String=provider)
