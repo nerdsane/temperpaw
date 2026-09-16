@@ -48,7 +48,7 @@ test('dataset validation rejects non-arrays, oversize and malformed JSON before 
 });
 
 test('simulation loader supplies dated inputs, never fitted models or evaluation results', () => {
-  const values=JSON.parse(readFileSync(new URL('../src/lib/foresight-simulated.json', import.meta.url), 'utf8'));
+  const values=JSON.parse(readFileSync(new URL('../../os-apps/paw-foresight/fixtures/simulated-calibration.json', import.meta.url), 'utf8'));
   assert.ok(values.length >= 24 && values.length <= 512);
   assert.equal(parseDataset(JSON.stringify(values)), JSON.stringify(values));
   for (const value of values) {

@@ -44,6 +44,7 @@ export function parseWorld(row: Row) {
     axes: text(row, 'uncertainty_axes'), mode: text(row, 'learning_mode') || 'observed',
     model: parseModel(text(row, 'model_json')), adoptedRunId: text(row, 'adopted_learning_run_id'),
     error: text(row, 'error_message'), corpusId: text(row, 'corpus_file_id'),
+    agentProvider: text(row, 'agent_provider'), agentModel: text(row, 'agent_model'),
   };
 }
 export type World = ReturnType<typeof parseWorld>;
@@ -172,4 +173,79 @@ export function predictionInputProbability(percent: number): number {
     throw new Error('Use a probability greater than 0 and less than 100 percent.');
   }
   return percent / 100;
+}
+
+export type ResearchConfiguration =
+  | { ready: true; provider: string; model: string }
+  | { ready: false; reason: string };
+
+/** Use credential names only; credentials remain in the server's vault. */
+export function researchConfiguration(providerValue: unknown, modelValue: unknown, keysValue: unknown): ResearchConfiguration {
+  const providerName = typeof providerValue === 'string' ? providerValue.trim().toLowerCase() : '';
+  const model = typeof modelValue === 'string' ? modelValue.trim() : '';
+  const aliases: Record<string, string> = {
+    codex:'openai_codex', 'openai-codex':'openai_codex', open_router:'openrouter',
+    hf:'huggingface', hugging_face:'huggingface', 'hugging-face':'huggingface',
+    fireworks_ai:'fireworks', 'fireworks-ai':'fireworks', sakana:'sakana_fugu',
+    'sakana-fugu':'sakana_fugu', fugu:'sakana_fugu', ollama:'local_openai',
+    local:'local_openai', 'local-openai':'local_openai', 'openai-compatible':'openai_compatible',
+    openai_compat:'openai_compatible', 'openai-compat':'openai_compatible', custom_openai:'openai_compatible',
+  };
+  const provider = aliases[providerName] ?? providerName;
+  if (!provider || !model) return {ready:false, reason:'Configure a research provider and model in Settings.'};
+  const keys = new Set(strings(keysValue));
+  const requirements: Record<string, string[][]> = {
+    anthropic:[['anthropic_api_key']], openai:[['openai_api_key']],
+    openai_codex:[['openai_codex_access_token','openai_codex_token']],
+    openrouter:[['openrouter_api_key']], huggingface:[['huggingface_api_key','hf_token']],
+    fireworks:[['fireworks_api_key']], sakana_fugu:[['sakana_fugu_api_key'],['sakana_fugu_api_url']],
+    local_openai:[['local_openai_api_url']], openai_compatible:[['openai_compatible_api_url']],
+  };
+  const required = requirements[provider];
+  if (!required) return {ready:false, reason:`Configure a supported research provider in Settings; “${provider}” is not supported.`};
+  if (!required.every(alternatives => alternatives.some(key => keys.has(key)))) {
+    return {ready:false, reason:`Configure ${provider} access in Settings before starting research.`};
+  }
+  return {ready:true, provider, model};
+}
+
+interface WorldOperations {
+  createEntity(set: string): Promise<Record<string, unknown>>;
+  postEntityAction(set: string, id: string, action: string, body?: Record<string, unknown>): Promise<unknown>;
+}
+interface WorldCreation {
+  name: string; domain: string; description: string; target: string;
+  mode: string; budget: number; asOf: string;
+}
+function researchFields(configuration: ResearchConfiguration): {agent_provider:string; agent_model:string} {
+  if (!configuration.ready) throw new Error(configuration.reason);
+  return {agent_provider:configuration.provider, agent_model:configuration.model};
+}
+
+/** Validate configuration before creating a durable world. Seed remains an explicit user action. */
+export async function createForesightWorld(input: WorldCreation, research: ResearchConfiguration, api: WorldOperations): Promise<string> {
+  const agent = input.mode === 'observed' ? researchFields(research) : {};
+  const target = utcTime(input.target);
+  const replayClock = input.mode === 'observed' ? '' : utcTime(input.asOf);
+  const created = await api.createEntity('Worlds');
+  const id = text(created, 'Id') || text(created, '_entity_id');
+  if (!id) throw new Error('The world was created without a returned identifier.');
+  await api.postEntityAction('Worlds', id, 'ConfigureLearning', {learning_mode:input.mode});
+  await api.postEntityAction('Worlds', id, 'Configure', {
+    name:input.name.trim(), domain:input.domain.trim(), description:input.description.trim(),
+    target_date:target, frontier_date:target, horizon_months:'12', endpoint_budget:'3',
+    token_budget_cents:String(input.budget), hindcast_mode:input.mode === 'historical' ? 'true' : 'false',
+    ...agent,
+  });
+  if (input.mode !== 'observed') {
+    await api.postEntityAction('Worlds', id, 'OpenReplay', {
+      learning_mode:input.mode, domain:input.domain.trim(), frontier_date:target, last_ingest_date:replayClock,
+    });
+  }
+  return id;
+}
+
+export async function startForesightResearch(id: string, research: ResearchConfiguration, api: WorldOperations): Promise<void> {
+  await api.postEntityAction('Worlds', id, 'Configure', researchFields(research));
+  await api.postEntityAction('Worlds', id, 'Seed', {});
 }

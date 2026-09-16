@@ -3,6 +3,7 @@ WORKDIR /app/dashboard
 COPY dashboard/package*.json ./
 RUN npm install
 COPY dashboard ./
+COPY os-apps/paw-foresight/fixtures/simulated-calibration.json /app/os-apps/paw-foresight/fixtures/simulated-calibration.json
 RUN npm run build
 
 FROM rust:1.94-bookworm AS rust-build

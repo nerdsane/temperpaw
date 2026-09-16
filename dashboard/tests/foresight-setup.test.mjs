@@ -11,7 +11,11 @@ test('authenticated Foresight replay is reachable without unrelated agent/provid
   assert.equal(requiresAgentSetup('/foresight',empty),false);
 });
 test('other agent pages still require setup and welcome never redirects to itself',()=>{
-  for(const path of ['/','/sessions','/agents','/settings']) assert.equal(requiresAgentSetup(path,empty),true);
+  for(const path of ['/','/sessions','/agents']) assert.equal(requiresAgentSetup(path,empty),true);
   assert.equal(requiresAgentSetup('/welcome',empty),false);
   assert.equal(requiresAgentSetup('/sessions',{has_anthropic_key:true,has_agents:true,has_personalized_soul:true}),false);
+});
+
+test('cold users can reach authenticated provider settings before creating an agent',()=>{
+  assert.equal(requiresAgentSetup('/settings',empty),false);
 });

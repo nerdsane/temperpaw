@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import simulatedExamples from '$lib/foresight-simulated.json';
+  import simulatedExamples from '../../../../os-apps/paw-foresight/fixtures/simulated-calibration.json';
   import { base } from '$app/paths';
   import { replaceState } from '$app/navigation';
   import { page } from '$app/stores';
-  import { createEntity, postEntityAction, queryEntities } from '$lib/api';
+  import { createEntity, postEntityAction, queryEntities, fetchSetupStatus, getSecret, listSecretKeys } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, researchConfiguration, createForesightWorld, startForesightResearch, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
@@ -34,6 +34,9 @@
   let newTarget = $state('');
   let newMode = $state('observed');
   let newBudget = $state(100);
+  let researchLoading = $state(true);
+  let researchKeys = $state<string[]>([]);
+  let configuredResearch = $state<ResearchConfiguration>({ready:false, reason:'Checking research configuration…'});
   let asOf = $state(new Date().toISOString().slice(0, 16));
   let dataset = $state('');
   let showQuestion = $state(false);
@@ -61,6 +64,8 @@
   const busyRun = $derived(runs.some((run) => ['Preparing','Training','Evaluating','Adopting'].includes(run.status)));
   const sortedRuns = $derived([...runs].sort((a, b) => b.id.localeCompare(a.id)));
   const activeModel = $derived(world?.model?.version || 'Uncalibrated baseline');
+  const worldResearch = $derived(world?.agentProvider && world.agentModel
+    ? researchConfiguration(world.agentProvider, world.agentModel, researchKeys) : configuredResearch);
 
   $effect(() => {
     if (!locationReady) return;
@@ -114,23 +119,25 @@
     catch (err) { actionError = err instanceof Error ? err.message : 'The action failed.'; }
     finally { busy = false; await load(); }
   }
+  async function loadResearchConfiguration(): Promise<ResearchConfiguration> {
+    researchLoading = true;
+    try {
+      const [setup, model, keys] = await Promise.all([fetchSetupStatus(), getSecret('llm_model'), listSecretKeys()]);
+      researchKeys = keys;
+      configuredResearch = researchConfiguration(setup.llm_provider, model, keys);
+    } catch (err) {
+      researchKeys = [];
+      configuredResearch = {ready:false, reason:err instanceof Error ? err.message : 'Could not read research configuration.'};
+    } finally { researchLoading = false; }
+    return configuredResearch;
+  }
   async function createWorld() {
     await perform(async () => {
-      const created = await createEntity('Worlds');
-      const id = String(created.Id ?? created._entity_id ?? '');
-      if (!id) throw new Error('The world was created without a returned identifier.');
-      selectedId = id;
-      await postEntityAction('Worlds', id, 'ConfigureLearning', { learning_mode: newMode });
-      await postEntityAction('Worlds', id, 'Configure', {
-        name:newName.trim(), domain:newDomain.trim(), description:newDescription.trim(),
-        target_date:utcTime(newTarget), frontier_date:utcTime(newTarget), horizon_months:'12', endpoint_budget:'3',
-        token_budget_cents:String(newBudget), hindcast_mode:newMode === 'historical' ? 'true' : 'false',
-      });
-      if (newMode !== 'observed') {
-        await postEntityAction('Worlds', id, 'OpenReplay', {
-          learning_mode:newMode, domain:newDomain.trim(), frontier_date:utcTime(newTarget), last_ingest_date:utcTime(asOf),
-        });
-      }
+      const research = newMode === 'observed' ? await loadResearchConfiguration() : configuredResearch;
+      selectedId = await createForesightWorld({
+        name:newName, domain:newDomain, description:newDescription, target:newTarget,
+        mode:newMode, budget:newBudget, asOf,
+      }, research, {createEntity, postEntityAction});
       message = newMode === 'observed' ? 'World configured. Start research when you are ready.' : 'Replay world opened. Add dated experiences in “What it learned”.';
       if (newMode !== 'observed') tab = 'learning';
       showCreate = false;
@@ -138,7 +145,12 @@
   }
   async function worldAction(action: string) {
     await perform(async () => {
-      await postEntityAction('Worlds', selectedId, action, action === 'RegisterForecasts' ? {last_ingest_date:world?.mode === 'observed' ? utcTime(new Date().toISOString()) : utcTime(asOf)} : {});
+      if (action === 'Seed') {
+        await loadResearchConfiguration();
+        await startForesightResearch(selectedId, worldResearch, {createEntity, postEntityAction});
+      } else {
+        await postEntityAction('Worlds', selectedId, action, action === 'RegisterForecasts' ? {last_ingest_date:world?.mode === 'observed' ? utcTime(new Date().toISOString()) : utcTime(asOf)} : {});
+      }
       message = action === 'RegisterForecasts' ? 'Prediction registration requested.' : 'World research started.';
     });
   }
@@ -192,6 +204,7 @@
     tab = saved.tab;
     locationReady = true;
     void load();
+    void loadResearchConfiguration();
     const stream = createSSEConnection('foresight', undefined, undefined, (event) => {
       if (!['World','EventNode','Endpoint','Path','Claim','Forecast','LearningRun'].includes(event.entity_type)) return;
       const known = [selectedId, ...events.map(e => e.id), ...endpoints.map(e => e.id), ...paths.map(e => e.id), ...forecasts.map(e => e.id), ...runs.map(e => e.id)];
@@ -216,7 +229,7 @@
   </header>
   <div class="world-picker">
     <label>World<select bind:value={selectedId} onchange={chooseWorld} disabled={busy}><option value="">Choose a world</option>{#each worlds as item}<option value={item.id}>{item.title} · {item.status}</option>{/each}</select></label>
-    <button class="primary" onclick={() => showCreate = !showCreate}>{showCreate ? 'Close' : 'New world'}</button>
+    <button class="primary" onclick={() => { showCreate = !showCreate; if (showCreate) void loadResearchConfiguration(); }}>{showCreate ? 'Close' : 'New world'}</button>
   </div>
   {#if showCreate}
     <form class="panel create-form" onsubmit={(e) => { e.preventDefault(); void createWorld(); }}>
@@ -227,8 +240,17 @@
       <label>Target date<input type="date" bind:value={newTarget} required /></label>
       <label>Experience source<select bind:value={newMode}><option value="observed">Observed outcomes</option><option value="historical">Historical replay</option><option value="simulated">Simulated demonstration</option></select></label>
       {#if newMode !== 'observed'}<label>Replay starts at (UTC)<input type="datetime-local" bind:value={asOf} required /></label>{/if}
+      {#if newMode === 'observed'}
+        <div class="wide research-setup">
+          {#if researchLoading}<p>Checking research configuration…</p>
+          {:else if configuredResearch.ready}<p>Research model: <strong>{configuredResearch.model}</strong> · {configuredResearch.provider}</p>
+          {:else}<p class="notice">{configuredResearch.reason}</p>{/if}
+          <a href="{base}/settings">Configure research in Settings ↗</a>
+          <button type="button" disabled={researchLoading} onclick={() => void loadResearchConfiguration()}>Refresh configuration</button>
+        </div>
+      {/if}
       <label>Research budget (cents)<input type="number" min="1" max="10000" bind:value={newBudget} required /></label>
-      <div class="wide"><p class="small">Each world's evidence source stays distinct. Simulated learning demonstrates mechanics and does not establish real-world accuracy.</p><button class="primary" disabled={busy}>{busy ? 'Creating…' : 'Create world'}</button></div>
+      <div class="wide"><p class="small">Each world's evidence source stays distinct. Simulated learning demonstrates mechanics and does not establish real-world accuracy.</p><button class="primary" disabled={busy || (newMode === 'observed' && (researchLoading || !configuredResearch.ready))}>{busy ? 'Creating…' : 'Create world'}</button></div>
     </form>
   {/if}
   <div aria-live="polite">
@@ -241,7 +263,13 @@
     <section class="world-intro">
       <div><p class="eyebrow">{world.status} / {world.mode === 'simulated' ? 'Simulated demonstration' : world.mode === 'historical' ? 'Historical replay' : 'Observed evidence'}</p><h2>{world.title}</h2>{#if world.description}<p>{world.description}</p>{/if}<p>Target {world.target || 'not set'} · Prediction frontier {world.frontier || 'not set'}</p></div>
       <div class="world-actions">
-        {#if world.status === 'Created'}<button class="primary" disabled={busy} onclick={() => worldAction('Seed')}>Start research</button>{/if}
+        {#if world.status === 'Created'}
+          {#if worldResearch.ready}<p class="small">Research model: {worldResearch.model} · {worldResearch.provider}</p>
+          {:else}<p class="small">{worldResearch.reason}</p>{/if}
+          <button class="primary" disabled={busy || researchLoading || !worldResearch.ready} onclick={() => worldAction('Seed')}>Start research</button>
+          <a href="{base}/settings">Configure research ↗</a>
+          <button disabled={researchLoading} onclick={() => void loadResearchConfiguration()}>Refresh configuration</button>
+        {/if}
         {#if world.status === 'Active'}<button disabled={busy} onclick={() => worldAction('RegisterForecasts')}>Update predictions</button>{/if}
         <a class="record-link" href={recordHref('World',world.id)}>World record ↗</a>
       </div>
