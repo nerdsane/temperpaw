@@ -19,7 +19,7 @@
 
 [automaton]
 name = "World"
-states = ["Created", "Seeding", "Active", "Updating", "Archived", "Failed"]
+states = ["Created", "Seeding", "Active", "Updating", "OpeningReplay", "Archived", "Failed"]
 initial = "Created"
 
 # ADR-0050/ADR-007: Created awaits human/agent configuration (no deadline by
@@ -33,7 +33,7 @@ allow_indefinite_states = ["Created", "Active", "Updating"]
 state = "Seeding"
 after_seconds = 1200
 on_timeout = "ResumeSeed"
-reset_on = ["SeedComplete", "Fail"]
+reset_on = ["SeedComplete", "Fail", "ResumeSeed"]
 
 # Self-heal (ADR-007): when every claim is terminal but canonical_path_id is still
 # empty — e.g. the last claim resolved off the Bridging settle path (operator
@@ -475,7 +475,7 @@ hint = "Retire the world. Read-only thereafter."
 [[action]]
 name = "Fail"
 kind = "input"
-from = ["Created", "Seeding", "Active", "Updating"]
+from = ["Created", "Seeding", "Active", "Updating", "OpeningReplay"]
 to = "Failed"
 params = ["error_message"]
 hint = "Unrecoverable error."
@@ -491,3 +491,96 @@ assert = "no_further_transitions"
 name = "FailedIsFinal"
 when = ["Failed"]
 assert = "no_further_transitions"
+
+[[state]]
+name = "learning_mode"
+type = "string"
+initial = "observed"
+
+[[state]]
+name = "model_json"
+type = "string"
+initial = ""
+
+[[state]]
+name = "adopted_learning_run_id"
+type = "string"
+initial = ""
+
+[[action]]
+name = "ConfigureLearning"
+kind = "input"
+from = ["Created"]
+to = "Created"
+params = ["learning_mode"]
+
+[[action]]
+name = "OpenReplay"
+kind = "input"
+from = ["Created"]
+to = "OpeningReplay"
+params = ["learning_mode","domain","frontier_date","last_ingest_date"]
+
+[[action.triggers]]
+name = "replay_open"
+kind = "wasm"
+module = "replay_open"
+on_failure = "Fail"
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+
+[[action]]
+name = "ReplayOpened"
+kind = "input"
+from = ["OpeningReplay"]
+to = "Active"
+params = []
+
+[[state_timeout]]
+state="OpeningReplay"
+after_seconds=120
+on_timeout="Fail"
+params={error_message="Replay world initialization did not complete within 120 seconds."}
+
+[[action]]
+name = "RegisterForecasts"
+kind = "input"
+from = ["Active"]
+to = "Active"
+params = ["last_ingest_date"]
+
+[[action.triggers]]
+name = "learning_register_forecasts"
+kind = "wasm"
+module = "register_forecasts"
+on_failure = "Fail"
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+
+[[action]]
+name = "AdoptModel"
+kind = "input"
+from = ["Active"]
+to = "Active"
+params = ["expected_model_json","model_json","adopted_learning_run_id","learning_mode"]
+
+[[action.constraints]]
+kind="param_equals_field"
+param="expected_model_json"
+field="model_json"
+[[action.constraints]]
+kind="param_equals_field"
+param="learning_mode"
+field="learning_mode"
+
+[[action.triggers]]
+name = "confirm_model_adoption"
+kind = "entity"
+principal = "system"
+target_entity = "LearningRun"
+target_action = "ConfirmAdoption"
+
+[action.triggers.resolve_target]
+type = "field"
+field = "adopted_learning_run_id"
+[action.triggers.params_from]

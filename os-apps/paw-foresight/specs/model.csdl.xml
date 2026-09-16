@@ -325,6 +325,9 @@
         <Property Name="LastIngestDate" Type="Edm.String"/>
         <Property Name="UpdateCauseNodeId" Type="Edm.String"/>
         <Property Name="ErrorMessage" Type="Edm.String"/>
+              <Property Name="LearningMode" Type="Edm.String"/>
+        <Property Name="ModelJson" Type="Edm.String"/>
+        <Property Name="AdoptedLearningRunId" Type="Edm.String"/>
       </EntityType>
 
       <EntityType Name="EventNode">
@@ -461,6 +464,14 @@
         <Property Name="Outcome" Type="Edm.String"/>
         <Property Name="OutcomeSourceRefs" Type="Edm.String"/>
         <Property Name="Brier" Type="Edm.String"/>
+              <Property Name="BaseProbability" Type="Edm.String"/>
+        <Property Name="ModelVersion" Type="Edm.String"/>
+        <Property Name="LearningRunId" Type="Edm.String"/>
+        <Property Name="PreviousForecastId" Type="Edm.String"/>
+        <Property Name="EvidenceKind" Type="Edm.String"/>
+        <Property Name="ResolvedAt" Type="Edm.String"/>
+        <Property Name="ErrorMessage" Type="Edm.String"/>
+        <Property Name="RegistrationKey" Type="Edm.String"/>
       </EntityType>
 
       <EntityType Name="Hindcast">
@@ -937,6 +948,139 @@
         <ReturnType Type="TemperPaw.Foresight.Lens"/>
       </Action>
 
+      <Action Name="ConfigureLearning" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="learning_mode" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.World"/>
+      </Action>
+
+      <Action Name="OpenReplay" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="learning_mode" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="domain" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="frontier_date" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="last_ingest_date" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.World"/>
+      </Action>
+
+      <Action Name="ReplayOpened" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <ReturnType Type="TemperPaw.Foresight.World"/>
+      </Action>
+
+      <Action Name="RegisterForecasts" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="last_ingest_date" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.World"/>
+      </Action>
+
+      <Action Name="AdoptModel" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="expected_model_json" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="model_json" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="adopted_learning_run_id" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="learning_mode" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.World"/>
+      </Action>
+
+      <Action Name="RecordOutcome" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="outcome" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="outcome_source_refs" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="resolved_at" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.Forecast"/>
+      </Action>
+
+      <Action Name="ResolveRevision" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="outcome" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="outcome_source_refs" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="resolved_at" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.Forecast"/>
+      </Action>
+
+      <Action Name="OutcomeVerified" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="brier" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="error_message" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.Forecast"/>
+      </Action>
+
+      <Action Name="RevisionVerified" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="brier" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="error_message" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.Forecast"/>
+      </Action>
+
+      <Action Name="OutcomeFailed" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>
+        <Parameter Name="error_message" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.Forecast"/>
+      </Action>
+
+      <EntityType Name="LearningRun">
+        <Key><PropertyRef Name="Id"/></Key>
+        <Property Name="Id" Type="Edm.String" Nullable="false"/>
+        <Property Name="Status" Type="Edm.String"/>
+        <Property Name="WorldId" Type="Edm.String"/>
+        <Property Name="Mode" Type="Edm.String"/>
+        <Property Name="AsOf" Type="Edm.String"/>
+        <Property Name="DatasetJson" Type="Edm.String"/>
+        <Property Name="PreparedJson" Type="Edm.String"/>
+        <Property Name="IncumbentModelJson" Type="Edm.String"/>
+        <Property Name="ExpectedModelJson" Type="Edm.String"/>
+        <Property Name="CandidateModelJson" Type="Edm.String"/>
+        <Property Name="ReportJson" Type="Edm.String"/>
+        <Property Name="ErrorMessage" Type="Edm.String"/>
+      </EntityType>
+
+      <Action Name="Start" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.LearningRun"/>
+        <Parameter Name="world_id" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="mode" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="as_of" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="dataset_json" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
+      </Action>
+
+      <Action Name="Prepared" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.LearningRun"/>
+        <Parameter Name="prepared_json" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="incumbent_model_json" Type="Edm.String" Nullable="true"/>
+        <Parameter Name="expected_model_json" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
+      </Action>
+
+      <Action Name="Trained" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.LearningRun"/>
+        <Parameter Name="candidate_model_json" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
+      </Action>
+
+      <Action Name="CandidatePassed" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.LearningRun"/>
+        <Parameter Name="report_json" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
+      </Action>
+
+      <Action Name="ConfirmAdoption" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.LearningRun"/>
+        <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
+      </Action>
+
+      <Action Name="Reject" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.LearningRun"/>
+        <Parameter Name="report_json" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
+      </Action>
+
+      <Action Name="Fail" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.LearningRun"/>
+        <Parameter Name="error_message" Type="Edm.String" Nullable="true"/>
+        <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
+      </Action>
+
       <EntityContainer Name="Service">
         <EntitySet Name="ForesightModels" EntityType="TemperPaw.Foresight.ForesightModel"/>
         <EntitySet Name="Projections" EntityType="TemperPaw.Foresight.Projection"/>
@@ -953,6 +1097,7 @@
         <EntitySet Name="Forecasts" EntityType="TemperPaw.Foresight.Forecast"/>
         <EntitySet Name="Hindcasts" EntityType="TemperPaw.Foresight.Hindcast"/>
         <EntitySet Name="Lenses" EntityType="TemperPaw.Foresight.Lens"/>
+        <EntitySet Name="LearningRuns" EntityType="TemperPaw.Foresight.LearningRun"/>
       </EntityContainer>
     </Schema>
   </edmx:DataServices>

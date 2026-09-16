@@ -414,7 +414,7 @@ permit(
   ["seed_world", "sample_endpoints", "decompose_endpoint", "spawn_repairers",
    "spawn_adversaries", "aggregate_costs", "evidence_ingest",
    "register_forecasts", "render_artifacts", "consistency_gate",
-   "grade_hindcast", "animate_dwellers", "adjudicate_nodes"].contains(context.module)
+   "grade_hindcast", "animate_dwellers", "adjudicate_nodes", "learning_prepare", "learning_train", "learning_evaluate", "forecast_outcome", "replay_open"].contains(context.module)
 };
 
 permit(
@@ -425,7 +425,7 @@ permit(
   ["seed_world", "sample_endpoints", "decompose_endpoint", "spawn_repairers",
    "spawn_adversaries", "aggregate_costs", "evidence_ingest",
    "register_forecasts", "render_artifacts", "consistency_gate",
-   "grade_hindcast", "animate_dwellers", "adjudicate_nodes"].contains(context.module)
+   "grade_hindcast", "animate_dwellers", "adjudicate_nodes", "learning_prepare", "learning_train", "learning_evaluate", "forecast_outcome", "replay_open"].contains(context.module)
 };
 
 // ── Session relay (v1 trust model) ─────────────────────────────
@@ -477,9 +477,11 @@ permit(
   resource is Artifact
 );
 
+// Corridor sessions create skeleton EventNodes via temper.create in monty.
 permit(
   principal == Agent::"service:wasm-runtime",
-  action in [Action::"Confirm", Action::"UpdateEdges", Action::"AdjudicationVerdict"],
+  action in [Action::"create", Action::"read", Action::"list", Action::"Confirm",
+             Action::"UpdateEdges", Action::"AdjudicationVerdict"],
   resource is EventNode
 );
 
@@ -488,3 +490,22 @@ permit(
   action in [Action::"RecordTraversal", Action::"RecordContradiction"],
   resource is Dweller
 );
+
+ // ARN-518: continuous learning and reviewed human outcome entry.
+permit(principal is Admin, action, resource is LearningRun);
+permit(principal, action in [Action::"read", Action::"list"], resource is LearningRun);
+permit(principal, action in [Action::"create", Action::"Start"], resource is LearningRun)
+when { ["human","supervisor","system"].contains(principal.agent_type) };
+permit(principal, action in [Action::"Prepared",Action::"Trained",Action::"CandidatePassed",Action::"ConfirmAdoption",Action::"Reject",Action::"Fail"], resource is LearningRun)
+when { principal.agent_type == "system" };
+permit(principal, action in [Action::"ConfigureLearning",Action::"OpenReplay",Action::"RegisterForecasts"], resource is World)
+when { ["human","supervisor","system"].contains(principal.agent_type) };
+permit(principal, action in [Action::"ReplayOpened",Action::"AdoptModel"], resource is World)
+when { principal.agent_type == "system" };
+permit(principal, action == Action::"RecordOutcome", resource is Forecast)
+when { ["human","supervisor","system"].contains(principal.agent_type) };
+permit(principal, action in [Action::"ResolveRevision",Action::"OutcomeVerified",Action::"RevisionVerified",Action::"OutcomeFailed"], resource is Forecast)
+when { principal.agent_type == "system" };
+// Prediction contents and completed evidence change through declared actions only.
+forbid(principal, action == Action::"update", resource is Forecast);
+forbid(principal, action == Action::"update", resource is LearningRun);

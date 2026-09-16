@@ -3,13 +3,14 @@
 //! On World.PathsScored: every EventNode that is a live, genuinely
 //! probabilistic, non-determined claim resolving inside the world's frontier
 //! becomes a Forecast — preregistered, immutable, graded later by
-//! evidence_ingest. Nodes already carrying a Forecast are skipped: one
-//! registration per node, ever. No follow-up action is dispatched —
+//! evidence_ingest. Changed inputs or an adopted model create linked immutable revisions.
+//! Identical registration requests converge to the same stored identity. No follow-up action is dispatched —
 //! registration is a side effect of scoring, not a state transition.
 //!
 //! Build: `cargo build --target wasm32-unknown-unknown --release`
 
 use corridor_embed::{build_embed_request, nearest, parse_embeddings};
+use foresight_learning_core::Model;
 use temper_wasm_sdk::prelude::*;
 
 // --- Reconcile / dedup (D2 grounding, ADR-005) -------------------------------
@@ -90,9 +91,7 @@ fn fetch_embeddings(ctx: &Context, texts: &[String]) -> Option<Vec<Vec<f32>>> {
 fn normalize(s: &str) -> String {
     let lowered = s.to_lowercase();
     let collapsed = lowered.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed
-        .trim_end_matches(['.', '!', '?', ' '])
-        .to_string()
+    collapsed.trim_end_matches(['.', '!', '?', ' ']).to_string()
 }
 
 /// Per candidate, the nearest determined node (index, distance) when it is
@@ -271,7 +270,28 @@ fn row_id(row: &Value) -> &str {
 }
 
 /// Engine version stamped on every registration.
-const ENGINE_VERSION: &str = "0.2.0";
+const ENGINE_VERSION: &str = "0.3.0";
+/// Stable event/input/model identity makes retries converge at the storage boundary.
+fn registration_id(key: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in key.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("forecast-{hash:016x}")
+}
+fn registration_time(raw: &str) -> Result<String, String> {
+    let value = if raw.len() == 10 {
+        format!("{raw}T00:00:00Z")
+    } else {
+        raw.to_string()
+    };
+    if foresight_learning_core::valid_time(&value) {
+        Ok(value)
+    } else {
+        Err("Registration requires an as-of UTC date or timestamp".into())
+    }
+}
 
 /// Pure selection rule: is this node a registrable forecast?
 ///
@@ -297,7 +317,7 @@ fn should_register(
         Ok(p) => p,
         Err(_) => return false,
     };
-    if p <= 0.0 || p >= 1.0 {
+    if !p.is_finite() || p <= 0.0 || p >= 1.0 {
         return false;
     }
     !resolve_by.is_empty() && !frontier.is_empty() && resolve_by <= frontier
@@ -332,7 +352,25 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         let frontier = get("frontier_date");
         // The as-of date of the most recent evidence ingest, if any: WASM has
         // no clock, so registered_at can only be as fresh as the last ingest.
-        let registered_at = get("last_ingest_date");
+        let registered_at = registration_time(&get("last_ingest_date"))?;
+        let mode = match get("learning_mode").as_str() {
+            "" => "observed".to_string(),
+            mode => mode.to_string(),
+        };
+        let raw_model = get("model_json");
+        let model: Model = if raw_model.is_empty() {
+            Model::identity(&mode)
+        } else {
+            serde_json::from_str(&raw_model).map_err(|e| e.to_string())?
+        };
+        model.validate()?;
+        if model.mode != mode
+            || (!model.evaluated_through.is_empty() && model.evaluated_through >= registered_at)
+        {
+            return Err(
+                "Model provenance or evaluation time is incompatible with this registration".into(),
+            );
+        }
 
         let api = ctx
             .config
@@ -349,7 +387,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         ];
 
         // 1. Load every EventNode in this world.
-        let nodes_url = format!("{api}/tdata/EventNodes?$filter=world_id eq '{world_id}'");
+        let nodes_url = format!("{api}/tdata/EventNodes?$filter=world_id eq '{world_id}'&$top=513");
         let resp = ctx.http_call("GET", &nodes_url, &headers, "")?;
         if resp.status < 200 || resp.status >= 300 {
             return Err(format!("failed to list EventNodes (HTTP {})", resp.status));
@@ -360,6 +398,12 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
+
+        if nodes.len() > 512 || body.get("@odata.nextLink").is_some() {
+            return Err(
+                "EventNode query exceeded 512 rows; refusing incomplete registration".into(),
+            );
+        }
 
         // Reconcile (D2): authored nodes that merely restate a determined fact
         // are collapsed here, before they can become free-resolving forecasts.
@@ -379,7 +423,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
                 continue;
             }
             if !should_register(
-                str_of("Status"),
+                row_status(node),
                 str_of("Probability"),
                 str_of("Provenance"),
                 str_of("ResolveBy"),
@@ -394,47 +438,78 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
                 continue;
             }
 
-            // 2. One Forecast per node, ever: skip nodes already registered.
+            // Each input/model pair has one immutable identity, including concurrent retries.
             let existing_url =
-                format!("{api}/tdata/Forecasts?$filter=event_node_id eq '{node_id}'");
+                format!("{api}/tdata/Forecasts?$filter=event_node_id eq '{node_id}'&$top=513");
             let existing = ctx.http_call("GET", &existing_url, &headers, "")?;
-            if existing.status < 200 || existing.status >= 300 {
-                ctx.log(
-                    "warn",
-                    &format!(
-                        "register_forecasts: Forecast lookup for node {node_id} failed (HTTP {}); skipping",
-                        existing.status
-                    ),
+            if !(200..300).contains(&existing.status) {
+                return Err(format!(
+                    "Forecast lookup failed for {node_id}: HTTP {}",
+                    existing.status
+                ));
+            }
+            let existing_body: Value =
+                serde_json::from_str(&existing.body).map_err(|e| e.to_string())?;
+            let revisions = existing_body
+                .get("value")
+                .and_then(Value::as_array)
+                .ok_or("Forecast response missing value")?;
+            if revisions.len() > 512 || existing_body.get("@odata.nextLink").is_some() {
+                return Err(
+                    "Forecast revision query exceeded 512 rows; refusing incomplete history".into(),
                 );
+            }
+            if revisions
+                .iter()
+                .any(|r| matches!(row_str(r, "Outcome"), "yes" | "no"))
+            {
+                continue; // Resolution is known: no new prediction can be preregistered.
+            }
+            let base_probability: f64 = str_of("Probability")
+                .parse()
+                .map_err(|_| "invalid base probability")?;
+            let probability = model.predict(base_probability);
+            let registration_key = json!([
+                world_id,
+                node_id,
+                base_probability.to_string(),
+                model.version,
+                str_of("Statement"),
+                str_of("ResolveBy")
+            ])
+            .to_string();
+            if revisions
+                .iter()
+                .any(|r| row_str(r, "RegistrationKey") == registration_key)
+            {
                 continue;
             }
-            let has_forecast = serde_json::from_str::<Value>(&existing.body)
-                .ok()
-                .and_then(|v| {
-                    v.get("value")
-                        .and_then(|x| x.as_array())
-                        .map(|a| !a.is_empty())
+            let previous = revisions
+                .iter()
+                .filter(|r| {
+                    let id = row_id(r);
+                    !revisions
+                        .iter()
+                        .any(|other| row_str(other, "PreviousForecastId") == id)
                 })
-                .unwrap_or(false);
-            if has_forecast {
-                continue;
-            }
+                .max_by_key(|r| (row_str(r, "RegisteredAt"), row_id(r)));
+            let previous_id = previous.map(row_id).unwrap_or("");
+            let forecast_id = registration_id(&registration_key);
 
-            // 3. Preregister.
             let market_ref = if str_of("Provenance") == "market" {
                 first_source_ref(str_of("SourceRefs"))
             } else {
                 String::new()
             };
             let create_body = json!({
-                "world_id": world_id,
-                "event_node_id": node_id,
-                "question": str_of("Statement"),
-                "probability": str_of("Probability"),
-                "resolve_by": str_of("ResolveBy"),
-                "market_ref": market_ref,
-                "engine_version": ENGINE_VERSION,
-                "registered_at": registered_at,
+                "Id":forecast_id, "registration_key":registration_key,
+                "world_id": world_id, "event_node_id": node_id,
+                "question": str_of("Statement"), "probability": probability.to_string(),
+                "base_probability":base_probability.to_string(),
+                "model_version":model.version,"learning_run_id":get("adopted_learning_run_id"),
+                "previous_forecast_id":previous_id,"evidence_kind":mode,
+                "resolve_by": str_of("ResolveBy"), "market_ref": market_ref,
+                "engine_version": ENGINE_VERSION, "registered_at": registered_at,
             });
             let created = ctx.http_call(
                 "POST",
@@ -442,15 +517,30 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
                 &headers,
                 &create_body.to_string(),
             )?;
-            if created.status < 200 || created.status >= 300 {
-                ctx.log(
-                    "warn",
-                    &format!(
-                        "register_forecasts: Forecast create for node {node_id} failed (HTTP {})",
-                        created.status
-                    ),
-                );
+            if created.status == 409 {
+                let existing = ctx.http_call(
+                    "GET",
+                    &format!("{api}/tdata/Forecasts('{forecast_id}')"),
+                    &headers,
+                    "",
+                )?;
+                if existing.status != 200 {
+                    return Err(format!(
+                        "Forecast retry conflict could not be verified: HTTP {}",
+                        existing.status
+                    ));
+                }
+                let row: Value = serde_json::from_str(&existing.body).map_err(|e| e.to_string())?;
+                if row_str(&row, "RegistrationKey") != registration_key {
+                    return Err("Forecast identity collision or conflicting registration".into());
+                }
                 continue;
+            }
+            if !(200..300).contains(&created.status) {
+                return Err(format!(
+                    "Forecast create failed for {node_id}: HTTP {}",
+                    created.status
+                ));
             }
             registered += 1;
             ctx.log(
@@ -602,6 +692,36 @@ mod tests {
         assert_eq!(row_str(&pascal, "RepairCost"), "50.00");
     }
 
+    #[test]
+    fn registration_is_stable_and_model_specific() {
+        assert_eq!(
+            registration_id("event|0.55|model1"),
+            registration_id("event|0.55|model1")
+        );
+        assert_ne!(
+            registration_id("event|0.55|model1"),
+            registration_id("event|0.55|model2")
+        );
+        assert_ne!(
+            registration_id("event|0.55|model1"),
+            registration_id("event|0.56|model1")
+        );
+    }
+    #[test]
+    fn registration_rejects_non_finite_and_invalid_time() {
+        assert!(!should_register(
+            "Proposed",
+            "NaN",
+            "authored",
+            "2026-01-01",
+            "2027-01-01"
+        ));
+        assert!(registration_time("2025-02-30").is_err());
+        assert_eq!(
+            registration_time("2025-03-01").unwrap(),
+            "2025-03-01T00:00:00Z"
+        );
+    }
     // --- Reconcile / dedup (D2) ---
 
     fn v(seed: &[f32]) -> Vec<f32> {
