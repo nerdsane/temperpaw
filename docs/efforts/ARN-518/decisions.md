@@ -484,3 +484,16 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the existing deployment and historical read model because:** It preserves the user's chosen interface and actual observations without changing fiction production or pretending missing stories and events were recovered. Snapshot files and their manifest use existing persistent file storage; the UI does not offer engine mutations for recovered history. New unattended acceptance runs use a separate persistent Railway environment and remain browsable after testing.
 
 **Where:** original UI branch codex/dsf-2 in arni-labs/deep-sci-fi; its focused ARN-518 follow-up; dedicated Foresight Railway project; docs/efforts/ARN-518/plan.md.
+
+
+## D40 — Pin the kernel actually verified in persistent acceptance
+
+**Decision:** Pin the application dependencies to Temper `a40d3795bb5361e645d9a5ffda01cc30c5239518`, the reviewed context-allocation repair used by the acceptance image.
+
+**Came up because:** Large forecast-registration contexts overwrote guest static memory in the earlier runtime. Temper PR #479 merged the repair, and the persistent acceptance run now registers predictions without that crash, but this app branch still referenced the older runtime.
+
+**Options:** Leave the old dependency and rely on an image-only fix; adopt an unverified newer runtime; or pin the exact repaired source used by acceptance.
+
+**Chose the verified source because:** The release source must reproduce the repair rather than silently reverting it during a rebuild. The kernel change was independently reviewed and tested in its owning repository; this app change aligns the two manifests and lockfile with the native image already under live verification. Kernel PR #479 merged as `42e6223c460eb22f24248a98754d3487a7a97808`.
+
+**Where:** `crates/temperpaw/Cargo.toml`, `crates/paw-codex-worker/Cargo.toml`, `Cargo.lock`; acceptance image native source `9836b4bc21b67b02a575fc241050e179ab2022c1`.
