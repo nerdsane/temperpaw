@@ -19,3 +19,12 @@ Complete one usable learning and observation flow first. Keep presentation simpl
 ## Approved delivery acceleration
 
 Publish accepted path predictions as they become available. Reduce the initial exploration to three futures with up to three key claims each, followed by one repair-and-challenge pass per claim. Start bounded deeper searches after the first result is usable. Preserve saved paths and prediction history. Repair provider protocol and recovery failures before timing a fresh complete run; report actual first-prediction and first-pass elapsed times separately from implementation time.
+
+
+## Persistent delivery and original UI
+
+The user requested the original Temper-backed Deep Sci-Fi presentation after inspecting the temporary dashboard. Reuse its existing deployment branch and OData adapter, preserving the separate fiction application. Display real forecasts, calibration runs, durable session status and paginated run history.
+
+Recovered preview exports are dated, read-only snapshots stored through existing persistent file storage. Preserve their original identifiers and known failures, and explicitly identify absent stories/history; do not manufacture engine events or import snapshots as successful live runs.
+
+Run the repaired kernel and final app closure in an isolated persistent Railway acceptance environment with its own PostgreSQL and external file storage. Verify the complete first pass and deeper exploration without manual recovery, then restart and re-read original records and story bytes. Keep the browsable URL and data available. Release the same verified artifact to the dedicated Foresight service after required review, with production and fiction data preserved.

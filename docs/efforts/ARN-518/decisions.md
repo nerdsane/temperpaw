@@ -459,3 +459,28 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the temporal boundary because:** The system preserves honest historical context and immutable audit history while preventing newly published predictions about already elapsed deadlines. Observed mode uses the host-recorded snapshot clock; historical and simulated modes use their explicit logical clocks, so replay remains useful without waiting for real time. Date-only deadlines include their UTC day; exact UTC timestamp deadlines must be strictly later than registration. Invalid deadlines fail visibly through the existing recoverable registration callback. Earlier test records remain preserved and disclosed rather than silently rewritten.
 
 **Where:** `os-apps/paw-foresight/wasm/register_forecasts/src/lib.rs`; actual-WASM clock-boundary tests in `crates/temperpaw/tests/foresight_learning_wasm.rs`; the observed first-pass receipt and its six retrospective records in `/private/tmp/arn518-visible-proof/fresh-background-state.json`.
+
+
+## D38 — Let failure override an old exploration phase
+
+**Decision:** Display the world's Failed status before any saved first-pass or deepening progress message.
+
+**Came up because:** The background registration crash left exploration_phase=deepening, so Activity incorrectly said the engine was still exploring.
+
+**Options:** Clear historical phase data; hide the failure; or make the visible failure status take precedence.
+
+**Chose status precedence because:** It preserves saved progress and predictions while explaining why no further work is running. The same input fails the previous phase-only text test and passes the corrected helper.
+
+**Where:** dashboard/src/lib/foresight.ts, dashboard/src/routes/foresight/+page.svelte and dashboard/tests/foresight-research.test.mjs.
+
+## D39 — Reconnect the original UI and preserve recovered history separately
+
+**Decision:** Reuse the existing Temper-backed Deep Sci-Fi frontend, read current runs from persistent storage, and show recovered preview exports as labeled read-only snapshots.
+
+**Came up because:** The user explicitly requested the original presentation and an always-available interface. Its existing Vercel branch codex/dsf-2 still reads the dedicated Foresight service, while the recent preview database was destroyed and only partial exports survived. This supersedes D1's presentation choice.
+
+**Options:** Keep the temporary dashboard alone; merge the unrelated fiction-to-Temper rewrite into fiction production; fabricate live entities from partial exports; or extend the existing Foresight deployment and use a separate historical read model.
+
+**Chose the existing deployment and historical read model because:** It preserves the user's chosen interface and actual observations without changing fiction production or pretending missing stories and events were recovered. Snapshot files and their manifest use existing persistent file storage; the UI does not offer engine mutations for recovered history. New unattended acceptance runs use a separate persistent Railway environment and remain browsable after testing.
+
+**Where:** original UI branch codex/dsf-2 in arni-labs/deep-sci-fi; its focused ARN-518 follow-up; dedicated Foresight Railway project; docs/efforts/ARN-518/plan.md.

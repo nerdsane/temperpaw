@@ -7,7 +7,7 @@
   import { apiFetch, createEntity, postEntityAction, queryEntities, getEntity, fetchSetupStatus, getSecret, listSecretKeys } from '$lib/api';
   import { createSSEConnection, type StateChangeEvent } from '$lib/sse';
   import { parseWorld, parseForecast, parseEvent, parseEndpoint, parsePath, parseClaim, parseLearningRun,
-    loadResearchSession, researchSessionProblem, canRetryResearch, retryForesightResearch, type ResearchSessionState, forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, outcomeFormDefaults, researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, requiredEvents, loadFutureBundle, type FutureBundleState, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
+    loadResearchSession, researchSessionProblem, canRetryResearch, retryForesightResearch, type ResearchSessionState, forecastGroups, sourceLinks, parseDataset, percent, measure, utcTime, readForesightLocation, writeForesightLocation, predictionInputProbability, outcomeFormDefaults, researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, explorationMessage, requiredEvents, loadFutureBundle, type FutureBundleState, type ResearchConfiguration, type World, type Forecast, type LearningRun } from '$lib/foresight';
 
   let worlds = $state<World[]>([]);
   let selectedId = $state('');
@@ -60,6 +60,7 @@
   const world = $derived(worlds.find((item) => item.id === selectedId) ?? null);
   const groupedForecasts = $derived(forecastGroups(forecasts));
   const futures = $derived(futureProgress(endpoints));
+  const explorationProgress = $derived(world ? explorationMessage(world, endpoints.length > 0) : '');
   const explorationRequested = $derived(explorationRequests[selectedId] === true);
   const researchProblem = $derived(researchSessionProblem(researchSession, world?.status ?? ''));
   const researchRetryEligible = $derived(canRetryResearch(world, researchSession));
@@ -493,13 +494,7 @@
           <p class="small" role="status">Waiting to verify a new research session. Refresh to check its status.</p>
         {/if}
         <h3>Possible futures</h3>
-        {#if endpoints.length && world.explorationPhase === 'first_pass'}
-          <p>First pass: evaluating up to three key claims per future. Accepted paths publish predictions as they finish.</p>
-        {:else if world.explorationPhase === 'deepening'}
-          <p>First pass ready. The engine is exploring additional paths in the background; existing predictions remain available.</p>
-        {:else if world.explorationPhase === 'complete'}
-          <p>This exploration pass is complete. Predictions remain open for evidence and outcomes.</p>
-        {/if}
+        {#if explorationProgress}<p>{explorationProgress}</p>{/if}
         {#if endpoints.length}
           <p>{futures.completed} completed · {futures.pending} in progress · {futures.discarded} discarded · {futures.failed} failed</p>
           {#each endpoints as endpoint}<p><strong>{endpoint.status}</strong> · <a href={recordHref('Endpoint',endpoint.id)}>{endpoint.summary || endpoint.id}</a></p>{/each}

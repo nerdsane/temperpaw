@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/foresight.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, parseWorld, parseEndpoint } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { researchConfiguration, createForesightWorld, startForesightResearch, startForesightExploration, futureProgress, explorationMessage, parseWorld, parseEndpoint } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 function operations() {
   const calls=[];
@@ -95,4 +95,25 @@ test('future progress separates pending work, completed futures, discards and fa
     .map((Status,i)=>parseEndpoint({Id:'future-'+i,Status}));
   assert.deepEqual(futureProgress(rows),{pending:5,completed:1,discarded:1,failed:1});
   assert.deepEqual(futureProgress([]),{pending:0,completed:0,discarded:0,failed:0});
+});
+
+test('a failed world does not advertise running exploration from its saved phase', () => {
+  for (const explorationPhase of ['first_pass','deepening','complete','']) {
+    const message=explorationMessage({status:'Failed',explorationPhase},true);
+    assert.match(message,/failed/i);
+    assert.match(message,/saved.*predictions remain available/i);
+    assert.doesNotMatch(message,/is exploring|evaluating/i);
+  }
+});
+
+test('working exploration retains its phase and prediction availability', () => {
+  assert.match(explorationMessage({status:'Active',explorationPhase:'first_pass'},true),/evaluating/);
+  assert.equal(explorationMessage({status:'Active',explorationPhase:'first_pass'},false),'');
+  for (const status of ['Active','RegisteringForecasts']) {
+    const message=explorationMessage({status,explorationPhase:'deepening'},true);
+    assert.match(message,/is exploring/);
+    assert.match(message,/predictions remain available/);
+    assert.doesNotMatch(message,/failed/i);
+  }
+  assert.match(explorationMessage({status:'Active',explorationPhase:'complete'},true),/complete/);
 });

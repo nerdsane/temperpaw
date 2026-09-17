@@ -334,6 +334,14 @@ export function futureProgress(endpoints: ReturnType<typeof parseEndpoint>[]) {
   return counts;
 }
 
+export function explorationMessage(world: Pick<World, 'status' | 'explorationPhase'>, hasFutures: boolean): string {
+  if (world.status === 'Failed') return 'World processing failed. Saved futures and predictions remain available; see the error below.';
+  if (hasFutures && world.explorationPhase === 'first_pass') return 'First pass: evaluating up to three key claims per future. Accepted paths publish predictions as they finish.';
+  if (world.explorationPhase === 'deepening') return 'First pass ready. The engine is exploring additional paths in the background; existing predictions remain available.';
+  if (world.explorationPhase === 'complete') return 'This exploration pass is complete. Predictions remain open for evidence and outcomes.';
+  return '';
+}
+
 /** Sampling reuses existing endpoints without resetting them, so expose only the first pass. */
 export async function startForesightExploration(
   world: World, endpoints: ReturnType<typeof parseEndpoint>[],
