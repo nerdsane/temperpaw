@@ -165,3 +165,87 @@ newer one, and surfaces any close failure or leftover duplicate as a red run for
 human to resolve. Given up: the run now fails when a legitimate newer bump coexists -
 but that IS an anomaly worth flagging (per the lead's ask).
 **Where:** `temper-pin-bump.yml` (supersede block after `gh pr create`).
+
+
+---
+
+**Decision:** Build `artifact_batch_apply` in both the Docker image and full CI
+WASM lists, and exercise those lists in the existing packaging regression.
+**Came up because:** The isolated PR #528 image boot failed before readiness:
+`paw-fs` declares `artifact_batch_apply` as app-required, but neither build list
+invoked its existing builder. Testing that builder alone had passed.
+**Options:** (a) add the missing invocations and verify packaged required modules
+from the actual build lists; (b) weaken the module's startup requirement;
+(c) replace the build orchestration during this kernel rollout.
+**Chose (a) over (b)/(c) because:** It repairs the demonstrated packaging omission
+and makes the existing regression catch build-list drift without changing runtime
+authorization or introducing another build system. The full candidate image must
+still boot successfully before release.
+**Where:** `Dockerfile`, `.github/workflows/ci.yml`, and
+`scripts/test-wasm-build-artifacts.sh` in PR #528.
+
+---
+
+**Decision:** Include the tested kernel context-memory repair in the approval
+rollout image, and hold production until its kernel PR is merged.
+**Came up because:** Verification of the pinned kernel exposed a large-context
+WASM failure: copying invocation bytes could overwrite module static data. The
+repair at `a40d3795bb5361e645d9a5ffda01cc30c5239518` passes the failing memory
+regressions, the unchanged saved-history replay, and the full kernel pre-push suite.
+**Options:** (a) release the previous pin with this known failure; (b) include the
+reviewed repair and verify the complete image before deployment.
+**Chose (b) over (a) because:** The same runtime executes the application callbacks
+used by remote sessions. Preparing its image while kernel checks run preserves
+the release order without shipping the known failure.
+**Where:** Kernel PR #478; the two Temper dependency manifests and Cargo.lock in
+TemperPaw PR #528.
+
+---
+
+**Decision:** Keep the kernel image based on `c5fd99a` and exclude the separate
+Ask policy change until its governed Genesis installation is resolved.
+**Came up because:** PR #530 can merge while its canonical app installation still
+awaits a human decision. Bundled-policy precedence during boot has not been proven.
+**Options:** (a) silently build the newer main branch containing that policy;
+(b) retain the exact reviewed kernel candidate and its verified image.
+**Chose (b) over (a) because:** A kernel deployment must not become an alternate
+route around the pending app-installation decision. Any later inclusion requires
+confirmed authorization and installation state, followed by image verification.
+**Where:** PR #528 candidate base and immutable deployment image selection;
+coordination with the PR #530 owner.
+
+---
+
+**Decision:** Build the current-main candidate for isolated verification, but hold
+production until the bundled Ask policy has completed its governed Genesis
+installation. This supersedes the earlier candidate-base exclusion.
+**Came up because:** The existing ancestry guard rejected the image build when
+PR #530 advanced main beyond `c5fd99a`. The policy owner agreed to isolated
+verification while retaining the production installation boundary.
+**Options:** (a) disable the ancestry guard or silently revert the policy;
+(b) include current main for the build and require canonical policy installation
+before any production image swap; (c) defer all image preparation.
+**Chose (b) over (a)/(c) because:** It preserves both controls and allows testing
+to continue without applying the pending policy to production.
+**Where:** PR #528 image candidate following failed build `35172975543`; the
+production release remains conditional on PR #478 merge and Genesis installation.
+
+---
+
+**Decision:** Continue the existing runtime PR with the merged read/install
+approval repair and context-memory repair in one kernel pin, then verify the
+new immutable image before production deployment.
+**Came up because:** The previous candidate includes the context-memory repair
+but not the subsequently reproduced explicit-read and installer approval fixes.
+Its successful boot therefore cannot establish that the shared access blocker is
+fixed. The original runtime task became unavailable for continuation.
+**Options:** (a) deploy the earlier candidate and immediately require another
+runtime release; (b) retain PR #528 and update its pin to the integrated, merged
+kernel after the kernel owner's required checks finish; (c) open a competing PR.
+**Chose (b) over (a)/(c) because:** One candidate carries the complete accepted
+repair and keeps a single release owner. The previous image proof remains
+historical evidence; it will not be relabeled as verification of the new image.
+The governed Genesis installation of the bundled Ask policy remains a production
+prerequisite. Existing credentials and permissions are preserved.
+**Where:** PR #528; both kernel dependency manifests and Cargo.lock; isolated
+runtime continuation branch `codex/foundry-unblock-runtime`.
