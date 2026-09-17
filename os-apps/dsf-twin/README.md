@@ -152,7 +152,6 @@ A resource configuration may add `verification.semantic`:
 
 ```json
 {
-  "api_key_secret": "dsf_typesafe_api_key",
   "outcome": "A user can create a story and retrieve the complete saved story afterward."
 }
 ```
@@ -161,7 +160,9 @@ Without this field, existing verification behavior is unchanged. The verifier
 first checks provider identity/revision, the product probe and its correlated
 Datadog span. It then sends an allowlisted set of event facts from the same
 service, environment and revision to TypeSafe's `jev-latest` endpoint. Only
-observations from the last five minutes are eligible. Missing timestamps,
+observations from the last five minutes are eligible. Health-probe spans are
+excluded from semantic input; health alone never calls Jev or verifies the user flow.
+The TypeSafe credential name is fixed in code and cannot be selected by configuration. Missing timestamps,
 empty windows, truncated windows and unavailable inference cannot pass.
 `resource_name`, `status`, `error.message` and `dsf.outcome` are the only event
 text fields sent; each is limited to 1,024 bytes. Enabling this field authorizes

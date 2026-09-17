@@ -133,7 +133,7 @@ async fn run(app: Arc<App>, scenario: String) -> Result<Value, String> {
         "verification":{"application":{"kind":"railway","resource_id":ID,"origin":ORIGIN},
         "flow":{"kind":"provider_configuration"},
         "datadog":{"site":"datadoghq.com","service":"deep-sci-fi-backend","environment":"demo","api_key_secret":"fixture-dd","app_key_secret":"fixture-dd-app"},
-        "semantic":{"api_key_secret":"dsf_typesafe_api_key","outcome":"A user can create a Deep Sci-Fi story and retrieve the complete saved story afterward."}}}).to_string();
+        "semantic":{"outcome":"A user can create a Deep Sci-Fi story and retrieve the complete saved story afterward."}}}).to_string();
     let digest = format!("{:x}", Sha256::digest(&config));
     let mut sim = SimActorSystem::new(SimActorSystemConfig {
         seed: 1,

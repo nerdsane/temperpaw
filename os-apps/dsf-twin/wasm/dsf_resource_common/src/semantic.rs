@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SemanticConfig {
-    pub api_key_secret: String,
     pub outcome: String,
 }
 
@@ -65,7 +64,7 @@ pub fn evaluate_semantic(
     let input = json!({"outcome":config.outcome,"observations":state});
     let input_sha256 = format!("{:x}", Sha256::digest(input.to_string()));
     let response = runtime.bearer_json(
-        &config.api_key_secret,
+        "dsf_typesafe_api_key",
         "POST",
         "https://api.typesafe.ai/v1/systemone".into(),
         json!({
@@ -134,6 +133,58 @@ mod tests {
             "type":"choice", "choice":choice, "probabilities":probabilities, "confidence":confidence
         }}})
     }
+    #[test]
+    fn semantic_config_cannot_select_another_provider_credential() {
+        for name in [
+            "dsf_railway_token",
+            "dsf_datadog_api_key",
+            "dsf_typesafe_api_key",
+        ] {
+            assert!(
+                serde_json::from_value::<SemanticConfig>(json!({
+                    "outcome":"save and retrieve a story", "api_key_secret":name
+                }))
+                .is_err()
+            );
+        }
+        struct ModelHost;
+        impl Host for ModelHost {
+            fn secret(&mut self, name: &str) -> Result<String, Error> {
+                assert_eq!(name, "dsf_typesafe_api_key");
+                Ok("typesafe-test-only".into())
+            }
+            fn request(&mut self, request: &Request) -> Result<Response, Error> {
+                assert_eq!(request.url, "https://api.typesafe.ai/v1/systemone");
+                assert!(
+                    request
+                        .headers
+                        .contains(&("authorization".into(), "Bearer typesafe-test-only".into()))
+                );
+                Ok(Response {
+                    status: 200,
+                    body: response("wait", json!({"pass":0.0,"wait":1.0,"fail":0.0}), 1.0)
+                        .to_string(),
+                })
+            }
+        }
+        let config = SemanticConfig {
+            outcome: "save and retrieve a story".into(),
+        };
+        let mut host = ModelHost;
+        let mut runtime = Runtime {
+            host: &mut host,
+            base: "https://temper.test",
+            tenant: "demo",
+            now_ms: 1,
+        };
+        assert_eq!(
+            evaluate_semantic(&mut runtime, &config, &json!({"events":[]}))
+                .unwrap()
+                .verdict(),
+            Verdict::Wait
+        );
+    }
+
     #[test]
     fn only_decisive_typed_results_advance_or_fail() {
         for (choice, probabilities, verdict) in [

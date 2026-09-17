@@ -371,7 +371,7 @@ fn verify_datadog_with_semantic(
         {
             return Err(Error::Pending("exact probe telemetry is not fresh"));
         }
-        let events = semantic_events(spans, dd, revision, runtime.now_ms)?;
+        let events = semantic_events(spans, dd, revision, runtime.now_ms, health_url)?;
         let judgment = evaluate_semantic(
             runtime,
             config,
@@ -395,6 +395,7 @@ pub fn semantic_events(
     dd: &Datadog,
     revision: &str,
     now_ms: i64,
+    health_url: &str,
 ) -> Result<Vec<Value>, Error> {
     if spans.len() >= 20 {
         return Err(Error::Pending("semantic telemetry window may be truncated"));
@@ -410,6 +411,11 @@ pub fn semantic_events(
                 .pointer("/custom/git/commit/sha")
                 .and_then(Value::as_str)
                 != Some(revision)
+        {
+            continue;
+        }
+        if attrs.pointer("/custom/http/url").and_then(Value::as_str) == Some(health_url)
+            || attrs.get("resource_name").and_then(Value::as_str) == Some("GET /api/health")
         {
             continue;
         }
@@ -441,7 +447,9 @@ pub fn semantic_events(
         events.push(event);
     }
     if events.is_empty() {
-        return Err(Error::Pending("no fresh semantic telemetry"));
+        return Err(Error::Pending(
+            "no fresh user-flow telemetry beyond the health probe",
+        ));
     }
     events.sort_by_key(|event| event["at_ms"].as_i64().unwrap_or_default());
     Ok(events)
@@ -487,12 +495,24 @@ mod tests {
             app_key_secret: "app".into(),
         };
         let now = 1_000_000;
-        let span = json!({"attributes":{"service":"backend","env":"demo","start":"1970-01-01T00:16:39Z","status":"ok","resource_name":"readback","custom":{"git":{"commit":{"sha":"revision"}},"dsf":{"outcome":"saved story read"},"secret":"must not leave"}}});
-        let events = semantic_events(std::slice::from_ref(&span), &dd, "revision", now).unwrap();
+        let span = json!({"attributes":{"service":"backend","env":"demo","start":"1970-01-01T00:16:39Z","status":"ok","resource_name":"readback","custom":{"http":{"url":"https://demo.test/api/stories"},"git":{"commit":{"sha":"revision"}},"dsf":{"outcome":"saved story read"},"secret":"must not leave"}}});
+        let events = semantic_events(
+            std::slice::from_ref(&span),
+            &dd,
+            "revision",
+            now,
+            "https://demo.test/api/health",
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
         assert!(!events[0].to_string().contains("must not leave"));
         for (pointer, value) in [
             ("/attributes/service", "other"),
+            ("/attributes/resource_name", "GET /api/health"),
+            (
+                "/attributes/custom/http/url",
+                "https://demo.test/api/health",
+            ),
             ("/attributes/env", "production"),
             ("/attributes/custom/git/commit/sha", "old"),
             ("/attributes/start", "1970-01-01T00:00:00Z"),
@@ -502,11 +522,27 @@ mod tests {
             let mut changed = span.clone();
             *changed.pointer_mut(pointer).unwrap() = value.into();
             assert!(
-                semantic_events(&[changed], &dd, "revision", now).is_err(),
+                semantic_events(
+                    &[changed],
+                    &dd,
+                    "revision",
+                    now,
+                    "https://demo.test/api/health"
+                )
+                .is_err(),
                 "{pointer}: {value}"
             );
         }
-        assert!(semantic_events(&vec![span; 20], &dd, "revision", now).is_err());
+        assert!(
+            semantic_events(
+                &vec![span; 20],
+                &dd,
+                "revision",
+                now,
+                "https://demo.test/api/health"
+            )
+            .is_err()
+        );
     }
 
     #[test]
