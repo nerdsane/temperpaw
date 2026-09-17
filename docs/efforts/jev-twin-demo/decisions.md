@@ -1,6 +1,6 @@
 # Decisions
 
-## Keep semantic judgment in the twin verifier
+## D1 Keep semantic judgment in the twin verifier
 
 **Decision:** Add an opt-in semantic check to the resource verifier rather than change the agent loop.
 
@@ -12,7 +12,7 @@
 
 **Where:** `os-apps/dsf-twin/wasm/dsf_resource_common/`.
 
-## Use isolated evidence scenarios for repeatable failure demonstrations
+## D2 Use isolated evidence scenarios for repeatable failure demonstrations
 
 **Decision:** Exercise controlled startup, regression and telemetry-gap cases without injecting production failures, and label their provenance in the demo.
 
@@ -24,7 +24,7 @@
 
 **Where:** Demo harness and recording; source integration remains the production-shaped verifier.
 
-## Controlled demo runs the packaged verifier
+## D3 Controlled demo runs the packaged verifier
 
 **Decision:** Use the existing Temper WASM engine and production actor evaluator with a controlled HTTP host for the local walkthrough.
 
@@ -36,7 +36,7 @@
 
 **Where:** `crates/temperpaw/examples/jev_twin.rs`, PR #532.
 
-## Conservative semantic evidence window
+## D4 Conservative semantic evidence window
 
 **Decision:** Keep the existing exact provider and probe gates, then evaluate bounded recent telemetry with an opt-in Jev configuration.
 

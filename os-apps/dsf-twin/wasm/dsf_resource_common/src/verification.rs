@@ -326,7 +326,7 @@ fn verify_datadog_with_semantic(
         )
     };
     let body = json!({"data":{"type":"search_request","attributes":{"filter":{
-        "from":(runtime.now_ms-1_800_000).to_string(), "to":runtime.now_ms.to_string(), "query":query},
+        "from":(runtime.now_ms-if semantic.is_some() { 300_000 } else { 1_800_000 }).to_string(), "to":runtime.now_ms.to_string(), "query":query},
         "page":{"limit":20},"sort":"-timestamp"}}});
     let api_key = runtime.credential(&dd.api_key_secret)?;
     let app_key = runtime.credential(&dd.app_key_secret)?;
@@ -400,6 +400,12 @@ pub fn semantic_events(
     if spans.len() >= 20 {
         return Err(Error::Pending("semantic telemetry window may be truncated"));
     }
+    let health_traces: std::collections::BTreeSet<&str> = spans
+        .iter()
+        .filter_map(|span| span.get("attributes"))
+        .filter(|attrs| is_health_span(attrs, health_url))
+        .filter_map(|attrs| attrs.get("trace_id").and_then(Value::as_str))
+        .collect();
     let mut events = Vec::new();
     for span in spans {
         let Some(attrs) = span.get("attributes") else {
@@ -414,8 +420,11 @@ pub fn semantic_events(
         {
             continue;
         }
-        if attrs.pointer("/custom/http/url").and_then(Value::as_str) == Some(health_url)
-            || attrs.get("resource_name").and_then(Value::as_str) == Some("GET /api/health")
+        if is_health_span(attrs, health_url)
+            || attrs
+                .get("trace_id")
+                .and_then(Value::as_str)
+                .is_some_and(|trace| health_traces.contains(trace))
         {
             continue;
         }
@@ -453,6 +462,11 @@ pub fn semantic_events(
     }
     events.sort_by_key(|event| event["at_ms"].as_i64().unwrap_or_default());
     Ok(events)
+}
+
+fn is_health_span(attrs: &Value, health_url: &str) -> bool {
+    attrs.pointer("/custom/http/url").and_then(Value::as_str) == Some(health_url)
+        || attrs.get("resource_name").and_then(Value::as_str) == Some("GET /api/health")
 }
 
 fn matching_span(
@@ -543,6 +557,43 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn health_trace_children_are_not_user_flow_evidence() {
+        let dd = Datadog {
+            site: "datadoghq.com".into(),
+            service: "backend".into(),
+            environment: "demo".into(),
+            api_key_secret: "api".into(),
+            app_key_secret: "app".into(),
+        };
+        let child = json!({"attributes":{"trace_id":"health-trace","service":"backend","env":"demo","start":"1970-01-01T00:16:39Z","resource_name":"postgres.query","status":"ok","custom":{"git":{"commit":{"sha":"revision"}}}}});
+        let mut root = child.clone();
+        root["attributes"]["resource_name"] = json!("GET /api/health");
+        assert!(
+            semantic_events(
+                &[child.clone(), root.clone()],
+                &dd,
+                "revision",
+                1_000_000,
+                "https://demo.test/api/health"
+            )
+            .is_err()
+        );
+        let mut user = child.clone();
+        user["attributes"]["trace_id"] = json!("user-trace");
+        user["attributes"]["resource_name"] = json!("story.readback");
+        let events = semantic_events(
+            &[child, root, user],
+            &dd,
+            "revision",
+            1_000_000,
+            "https://demo.test/api/health",
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["operation"], "story.readback");
     }
 
     #[test]
