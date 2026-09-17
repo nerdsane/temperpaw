@@ -113,6 +113,8 @@ pub struct Verification {
     pub application: ApplicationBinding,
     pub flow: Flow,
     pub datadog: Datadog,
+    #[serde(default)]
+    pub semantic: Option<crate::SemanticConfig>,
 }
 
 #[derive(Deserialize)]

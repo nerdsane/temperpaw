@@ -104,7 +104,7 @@ def render() -> str:
             provider = module.split("_")[1]
             secrets |= provider_secrets[provider]
             if module.endswith("_verify"):
-                secrets |= telemetry
+                secrets |= telemetry | {"dsf_typesafe_api_key"}
             if provider != "vercel" and module.endswith("_configuration_verify"):
                 secrets.add("dsf_railway_token")
         secret_ids = json.dumps(sorted(secrets))

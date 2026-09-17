@@ -233,11 +233,13 @@ fn compiled_modules_receive_only_their_named_secrets_and_callers_receive_none() 
         )
     };
     assert!(!secret(&ctx, "dsf_railway_token"));
+    assert!(!secret(&ctx, "dsf_typesafe_api_key"));
     ctx.principal.role = Some("wasm_module".into());
     ctx.context_attrs
         .insert("module".into(), json!("dsf_railway_deploy_verify"));
     assert!(secret(&ctx, "dsf_railway_token"));
     assert!(secret(&ctx, "dsf_datadog_api_key"));
+    assert!(secret(&ctx, "dsf_typesafe_api_key"));
     assert!(!secret(&ctx, "temper_api_key"));
     assert!(!secret(&ctx, "github_token"));
     assert!(!secret(&ctx, "dsf_vercel_token"));
@@ -245,6 +247,10 @@ fn compiled_modules_receive_only_their_named_secrets_and_callers_receive_none() 
     ctx.context_attrs
         .insert("module".into(), json!("dsf_railway_collect"));
     assert!(!secret(&ctx, "dsf_datadog_api_key"));
+    assert!(!secret(&ctx, "dsf_typesafe_api_key"));
+    ctx.context_attrs
+        .insert("module".into(), json!("dsf_railway_deploy_execute"));
+    assert!(!secret(&ctx, "dsf_typesafe_api_key"));
     ctx.context_attrs
         .insert("module".into(), json!("dsf_model_collect"));
     assert!(secret(&ctx, "dsf_github_token"));

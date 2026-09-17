@@ -3,11 +3,13 @@
 mod application;
 mod authority;
 mod invocation;
+mod semantic;
 mod transport;
 mod verification;
 
 pub use application::*;
 pub use invocation::*;
+pub use semantic::*;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -34,6 +36,10 @@ pub enum Error {
     ProviderFailed(&'static str),
     #[error("verification pending: {0}")]
     Pending(&'static str),
+    #[error("semantic verification failed: {0}")]
+    SemanticFailed(String),
+    #[error("semantic verification pending: {0}")]
+    SemanticPending(String),
     #[error("provider confirms operation absent")]
     Absent(String),
 }
