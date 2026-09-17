@@ -145,3 +145,66 @@ For upgrades, also supply --installed-record and --installed-model exported from
 the running installation and its pinned Genesis bundle. The record contains
 tenant, app_name, app_ref and model_sha256. A candidate branch or matching namespace
 cannot establish ownership. Existing DsfDeploy and DsfDeploys are outside this app.
+
+## Jev semantic verification (opt-in)
+
+A resource configuration may add `verification.semantic`:
+
+```json
+{
+  "outcome": "A user can create a story and retrieve the complete saved story afterward."
+}
+```
+
+Without this field, existing verification behavior is unchanged. The verifier
+first checks provider identity/revision, the product probe and its correlated
+Datadog span. It then sends an allowlisted set of event facts from the same
+service, environment and revision to TypeSafe's `jev-latest` endpoint. Only
+observations from the last five minutes are eligible. Health-probe spans are
+excluded from semantic input; health alone never calls Jev or verifies the user flow.
+The TypeSafe credential name is fixed in code and cannot be selected by configuration. Missing timestamps,
+empty windows, truncated windows and unavailable inference cannot pass.
+`resource_name`, `status`, `error.message` and `dsf.outcome` are the only event
+text fields sent; each is limited to 1,024 bytes. Enabling this field authorizes
+those telemetry facts to be evaluated by TypeSafe. Instrument completed user
+outcomes in `dsf.outcome`; a health response alone is insufficient.
+
+The typed result must contain pass/wait/fail probabilities and a valid confidence.
+A winning probability below 0.95 or confidence below 0.90 stays pending. These
+are conservative initial thresholds, not a claim of calibration for DSF.
+A decisive failure emits the existing `VerificationFailed` callback. A pass
+retains the model, distribution and input digest in the telemetry reference's
+`jev` fragment. Pending/failure decisions retain that record in `error_message`.
+The runtime still checks the original operation key and sequence.
+
+Only verifier modules receive access to the `dsf_typesafe_api_key` tenant secret.
+Config file hashes must be updated through the existing resource-registration
+workflow when opting in; do not overwrite a bound configuration in place.
+
+### Recordable local demonstration
+
+Place a TypeSafe key in a private file outside Git, then run from the repo root:
+
+```sh
+TYPESAFE_API_KEY_FILE=/path/to/private/key scripts/jev-twin-demo.sh
+```
+
+Open the loopback URL printed by the process. The three tabs demonstrate startup
+recovery, a failed user outcome behind healthy infrastructure, and insufficient
+completion evidence. Each button press runs the compiled deployment-verifier
+WASM, makes one live Jev call, and applies its actual callback using Temper's
+production actor evaluator and the existing DSF IOA specification. Keys stay in
+the process and never enter the browser. The demo host allows real outbound
+requests only to TypeSafe; Railway, Datadog, health, proof and deployment-stage
+inputs are controlled fixtures. It does not deploy DSF or exercise production
+Cedar authorization. Those limitations are visible in the interface.
+
+For machine-readable execution evidence, append `recovery`, `regression` or
+`missing` to the launch command. The JSON includes input observations, model
+request, judgment, WASM digest, transition history and final verification flag.
+The expected final states are Active/true, DeployFailed/false and
+DeployObserved/false respectively. Model calls are live; no answer is cached.
+
+For a 60–90 second Screen Studio walkthrough, run each tab in order, pause on
+its evidence and probability distribution, then finish on the missing-evidence
+case. Keys 1/2/3 select a tab; Enter runs verification when the page has focus.

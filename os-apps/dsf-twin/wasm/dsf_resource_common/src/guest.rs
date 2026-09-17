@@ -92,6 +92,7 @@ fn failure_callback<A: ResourceAction>(
         (Failure::Execution, _) => "ExecutionUncertain",
         (Failure::Observation, _) => "ObservationFailed",
         (Failure::Verification, Error::ProviderFailed(_)) => "VerificationFailed",
+        (Failure::Verification, Error::SemanticFailed(_)) => "VerificationFailed",
         (Failure::Verification, _) => "VerificationPending",
     };
     invocation.callback::<A>(suffix, json!({"error_message":error.to_string()}))

@@ -232,12 +232,13 @@ fn verify_product_at(
         }
         Flow::Media {} => health_url,
     };
-    let telemetry_ref = verify_datadog(
+    let telemetry_ref = verify_datadog_with_semantic(
         runtime,
         &verification.datadog,
         &request_id,
         &revision,
         &format!("{origin}/api/health"),
+        verification.semantic.as_ref(),
     )?;
     Ok((flow_ref, telemetry_ref, revision))
 }
@@ -295,6 +296,17 @@ pub fn verify_datadog(
     revision: &str,
     health_url: &str,
 ) -> Result<String, Error> {
+    verify_datadog_with_semantic(runtime, dd, request_id, revision, health_url, None)
+}
+
+fn verify_datadog_with_semantic(
+    runtime: &mut Runtime<impl Host>,
+    dd: &Datadog,
+    request_id: &str,
+    revision: &str,
+    health_url: &str,
+    semantic: Option<&SemanticConfig>,
+) -> Result<String, Error> {
     datadog_site(&dd.site)?;
     identifier(&dd.service)?;
     identifier(&dd.environment)?;
@@ -302,12 +314,19 @@ pub fn verify_datadog(
     if !full_sha(revision) {
         return Err(Error::Binding("invalid probe revision"));
     }
-    let query = format!(
-        "service:{} env:{} @git.commit.sha:{} @dsf.request_id:{} -status:error",
-        dd.service, dd.environment, revision, request_id
-    );
+    let query = if semantic.is_some() {
+        format!(
+            "service:{} env:{} @git.commit.sha:{}",
+            dd.service, dd.environment, revision
+        )
+    } else {
+        format!(
+            "service:{} env:{} @git.commit.sha:{} @dsf.request_id:{} -status:error",
+            dd.service, dd.environment, revision, request_id
+        )
+    };
     let body = json!({"data":{"type":"search_request","attributes":{"filter":{
-        "from":(runtime.now_ms-1_800_000).to_string(), "to":runtime.now_ms.to_string(), "query":query},
+        "from":(runtime.now_ms-if semantic.is_some() { 300_000 } else { 1_800_000 }).to_string(), "to":runtime.now_ms.to_string(), "query":query},
         "page":{"limit":20},"sort":"-timestamp"}}});
     let api_key = runtime.credential(&dd.api_key_secret)?;
     let app_key = runtime.credential(&dd.app_key_secret)?;
@@ -340,11 +359,114 @@ pub fn verify_datadog(
             .ok_or(Error::Response("Datadog span"))?,
         "trace_id",
     )?;
-    Ok(format!(
-        "https://app.{}/apm/trace/{}",
-        dd.site,
-        encoded(trace_id)
-    ))
+    let trace_url = format!("https://app.{}/apm/trace/{}", dd.site, encoded(trace_id));
+    if let Some(config) = semantic {
+        let probe_time = span
+            .pointer("/attributes/start")
+            .and_then(Value::as_str)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|time| time.timestamp_millis());
+        if !probe_time
+            .is_some_and(|time| time <= runtime.now_ms && time >= runtime.now_ms - 300_000)
+        {
+            return Err(Error::Pending("exact probe telemetry is not fresh"));
+        }
+        let events = semantic_events(spans, dd, revision, runtime.now_ms, health_url)?;
+        let judgment = evaluate_semantic(
+            runtime,
+            config,
+            &json!({
+                "service":dd.service, "environment":dd.environment,
+                "revision":revision, "probe_request_id":request_id,
+                "events":events
+            }),
+        )?;
+        judgment.enforce()?;
+        let record = serde_json::to_string(&judgment).map_err(|_| Error::Response("Jev record"))?;
+        return Ok(format!("{trace_url}#jev={}", encoded(&record)));
+    }
+    Ok(trace_url)
+}
+
+/// Keep only bounded, current-revision event facts; credentials and arbitrary
+/// custom attributes never cross the model boundary. A clipped window waits.
+pub fn semantic_events(
+    spans: &[Value],
+    dd: &Datadog,
+    revision: &str,
+    now_ms: i64,
+    health_url: &str,
+) -> Result<Vec<Value>, Error> {
+    if spans.len() >= 20 {
+        return Err(Error::Pending("semantic telemetry window may be truncated"));
+    }
+    let health_traces: std::collections::BTreeSet<&str> = spans
+        .iter()
+        .filter_map(|span| span.get("attributes"))
+        .filter(|attrs| is_health_span(attrs, health_url))
+        .filter_map(|attrs| attrs.get("trace_id").and_then(Value::as_str))
+        .collect();
+    let mut events = Vec::new();
+    for span in spans {
+        let Some(attrs) = span.get("attributes") else {
+            continue;
+        };
+        if attrs.get("service").and_then(Value::as_str) != Some(&dd.service)
+            || attrs.get("env").and_then(Value::as_str) != Some(&dd.environment)
+            || attrs
+                .pointer("/custom/git/commit/sha")
+                .and_then(Value::as_str)
+                != Some(revision)
+        {
+            continue;
+        }
+        if is_health_span(attrs, health_url)
+            || attrs
+                .get("trace_id")
+                .and_then(Value::as_str)
+                .is_some_and(|trace| health_traces.contains(trace))
+        {
+            continue;
+        }
+        let Some(start) = attrs
+            .get("start")
+            .and_then(Value::as_str)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        else {
+            continue;
+        };
+        let time = start.timestamp_millis();
+        if time > now_ms || time < now_ms - 300_000 {
+            continue;
+        }
+        let mut event = json!({"at_ms":time});
+        for (key, pointer) in [
+            ("operation", "/resource_name"),
+            ("status", "/status"),
+            ("error", "/custom/error/message"),
+            ("outcome", "/custom/dsf/outcome"),
+        ] {
+            if let Some(value) = attrs.pointer(pointer).and_then(Value::as_str) {
+                if value.len() > 1024 {
+                    return Err(Error::Pending("semantic event exceeds bound"));
+                }
+                event[key] = value.into();
+            }
+        }
+        events.push(event);
+    }
+    if events.is_empty() {
+        return Err(Error::Pending(
+            "no fresh user-flow telemetry beyond the health probe",
+        ));
+    }
+    events.sort_by_key(|event| event["at_ms"].as_i64().unwrap_or_default());
+    Ok(events)
+}
+
+fn is_health_span(attrs: &Value, health_url: &str) -> bool {
+    attrs.pointer("/custom/http/url").and_then(Value::as_str) == Some(health_url)
+        || attrs.get("resource_name").and_then(Value::as_str) == Some("GET /api/health")
 }
 
 fn matching_span(
@@ -377,6 +499,103 @@ fn matching_span(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn semantic_window_excludes_wrong_identity_stale_future_and_unknown_time() {
+        let dd = Datadog {
+            site: "datadoghq.com".into(),
+            service: "backend".into(),
+            environment: "demo".into(),
+            api_key_secret: "api".into(),
+            app_key_secret: "app".into(),
+        };
+        let now = 1_000_000;
+        let span = json!({"attributes":{"service":"backend","env":"demo","start":"1970-01-01T00:16:39Z","status":"ok","resource_name":"readback","custom":{"http":{"url":"https://demo.test/api/stories"},"git":{"commit":{"sha":"revision"}},"dsf":{"outcome":"saved story read"},"secret":"must not leave"}}});
+        let events = semantic_events(
+            std::slice::from_ref(&span),
+            &dd,
+            "revision",
+            now,
+            "https://demo.test/api/health",
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].to_string().contains("must not leave"));
+        for (pointer, value) in [
+            ("/attributes/service", "other"),
+            ("/attributes/resource_name", "GET /api/health"),
+            (
+                "/attributes/custom/http/url",
+                "https://demo.test/api/health",
+            ),
+            ("/attributes/env", "production"),
+            ("/attributes/custom/git/commit/sha", "old"),
+            ("/attributes/start", "1970-01-01T00:00:00Z"),
+            ("/attributes/start", "1970-01-01T00:17:00Z"),
+            ("/attributes/start", "unknown"),
+        ] {
+            let mut changed = span.clone();
+            *changed.pointer_mut(pointer).unwrap() = value.into();
+            assert!(
+                semantic_events(
+                    &[changed],
+                    &dd,
+                    "revision",
+                    now,
+                    "https://demo.test/api/health"
+                )
+                .is_err(),
+                "{pointer}: {value}"
+            );
+        }
+        assert!(
+            semantic_events(
+                &vec![span; 20],
+                &dd,
+                "revision",
+                now,
+                "https://demo.test/api/health"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn health_trace_children_are_not_user_flow_evidence() {
+        let dd = Datadog {
+            site: "datadoghq.com".into(),
+            service: "backend".into(),
+            environment: "demo".into(),
+            api_key_secret: "api".into(),
+            app_key_secret: "app".into(),
+        };
+        let child = json!({"attributes":{"trace_id":"health-trace","service":"backend","env":"demo","start":"1970-01-01T00:16:39Z","resource_name":"postgres.query","status":"ok","custom":{"git":{"commit":{"sha":"revision"}}}}});
+        let mut root = child.clone();
+        root["attributes"]["resource_name"] = json!("GET /api/health");
+        assert!(
+            semantic_events(
+                &[child.clone(), root.clone()],
+                &dd,
+                "revision",
+                1_000_000,
+                "https://demo.test/api/health"
+            )
+            .is_err()
+        );
+        let mut user = child.clone();
+        user["attributes"]["trace_id"] = json!("user-trace");
+        user["attributes"]["resource_name"] = json!("story.readback");
+        let events = semantic_events(
+            &[child, root, user],
+            &dd,
+            "revision",
+            1_000_000,
+            "https://demo.test/api/health",
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["operation"], "story.readback");
+    }
+
     #[test]
     fn actual_nested_span_shape_must_match_service_environment_revision_and_probe() {
         let dd = Datadog {
