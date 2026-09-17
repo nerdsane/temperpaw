@@ -213,3 +213,19 @@ route around the pending app-installation decision. Any later inclusion requires
 confirmed authorization and installation state, followed by image verification.
 **Where:** PR #528 candidate base and immutable deployment image selection;
 coordination with the PR #530 owner.
+
+---
+
+**Decision:** Build the current-main candidate for isolated verification, but hold
+production until the bundled Ask policy has completed its governed Genesis
+installation. This supersedes the earlier candidate-base exclusion.
+**Came up because:** The existing ancestry guard rejected the image build when
+PR #530 advanced main beyond `c5fd99a`. The policy owner agreed to isolated
+verification while retaining the production installation boundary.
+**Options:** (a) disable the ancestry guard or silently revert the policy;
+(b) include current main for the build and require canonical policy installation
+before any production image swap; (c) defer all image preparation.
+**Chose (b) over (a)/(c) because:** It preserves both controls and allows testing
+to continue without applying the pending policy to production.
+**Where:** PR #528 image candidate following failed build `35172975543`; the
+production release remains conditional on PR #478 merge and Genesis installation.
