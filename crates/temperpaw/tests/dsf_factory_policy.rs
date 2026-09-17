@@ -52,14 +52,22 @@ fn verified_operator_can_answer_asks_without_other_factory_powers() {
     let operator = SecurityContext::from_resolved_identity("operator", "operator", None);
     assert!(allowed(&engine, &operator, "Ask", "Answer"));
     for (entity, action) in [
-        ("Ask", "create"), ("Ask", "RaiseBlocking"), ("Ask", "Withdraw"),
-        ("Ask", "update"), ("Ask", "delete"), ("Effort", "MarkDeployVerified"),
+        ("Ask", "create"),
+        ("Ask", "RaiseBlocking"),
+        ("Ask", "Withdraw"),
+        ("Ask", "update"),
+        ("Ask", "delete"),
+        ("Effort", "MarkDeployVerified"),
     ] {
-        assert!(!allowed(&engine, &operator, entity, action), "{entity}.{action}");
+        assert!(
+            !allowed(&engine, &operator, entity, action),
+            "{entity}.{action}"
+        );
     }
     for ctx in [
         SecurityContext::anonymous(),
         SecurityContext::anonymous().with_agent_context(Some("operator"), None, Some("operator")),
+        SecurityContext::from_resolved_identity("other", "operator", None),
         SecurityContext::from_resolved_identity("factory", "dsf-factory", None),
     ] {
         assert!(!allowed(&engine, &ctx, "Ask", "Answer"));
