@@ -65,24 +65,33 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           python3 - <<'PY'
-          import json, os, sys, urllib.request, ssl
+          import json, os, sys, urllib.request, urllib.parse, ssl
           key=os.environ.get("TEMPER_API_KEY") or ""
           url=os.environ["TEMPER_URL"].rstrip("/")
           head=os.environ["PR_HEAD"]
           if not key:
               print("::error::TEMPER_API_KEY missing - CI asks Temper, not a PR comment"); sys.exit(1)
-          req=urllib.request.Request(
-              f"{url}/tdata/ReviewRuns",
-              headers={"Authorization":f"Bearer {key}","X-Tenant-Id":"default","Accept":"application/json"},
-          )
+          endpoint=f"{url}/tdata/ReviewRuns"
+          page_url=endpoint+"?"+urllib.parse.urlencode({"$filter":f"commit eq '{head}'"})
+          rows=[]; seen=set()
           try:
-              with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=60) as resp:
-                  body=json.loads(resp.read().decode())
+              while page_url:
+                  parsed=urllib.parse.urlsplit(page_url)
+                  expected=urllib.parse.urlsplit(endpoint)
+                  if (parsed.scheme,parsed.netloc,parsed.path)!=(expected.scheme,expected.netloc,expected.path) or page_url in seen:
+                      raise ValueError("invalid or repeated ReviewRuns continuation")
+                  seen.add(page_url)
+                  req=urllib.request.Request(page_url, headers={"Authorization":f"Bearer {key}","X-Tenant-Id":"default","Accept":"application/json"})
+                  with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=60) as resp:
+                      body=json.loads(resp.read().decode())
+                  page=body.get("value") if isinstance(body,dict) else body
+                  if not isinstance(page,list):
+                      raise ValueError("Temper ReviewRuns response is not a list")
+                  rows.extend(page)
+                  continuation=body.get("@odata.nextLink") if isinstance(body,dict) else None
+                  page_url=urllib.parse.urljoin(page_url,continuation) if continuation else None
           except Exception as e:
               print(f"::error::Temper ReviewRuns read failed: {e}"); sys.exit(1)
-          rows=body.get("value") if isinstance(body, dict) else body
-          if not isinstance(rows, list):
-              print("::error::Temper ReviewRuns response is not a list"); sys.exit(1)
           models={"grok","codex","fable"}
           fix_it_rows=[]
           ran=set(); usable=[]
