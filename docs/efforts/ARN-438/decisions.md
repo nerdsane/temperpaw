@@ -229,3 +229,23 @@ before any production image swap; (c) defer all image preparation.
 to continue without applying the pending policy to production.
 **Where:** PR #528 image candidate following failed build `35172975543`; the
 production release remains conditional on PR #478 merge and Genesis installation.
+
+---
+
+**Decision:** Continue the existing runtime PR with the merged read/install
+approval repair and context-memory repair in one kernel pin, then verify the
+new immutable image before production deployment.
+**Came up because:** The previous candidate includes the context-memory repair
+but not the subsequently reproduced explicit-read and installer approval fixes.
+Its successful boot therefore cannot establish that the shared access blocker is
+fixed. The original runtime task became unavailable for continuation.
+**Options:** (a) deploy the earlier candidate and immediately require another
+runtime release; (b) retain PR #528 and update its pin to the integrated, merged
+kernel after the kernel owner's required checks finish; (c) open a competing PR.
+**Chose (b) over (a)/(c) because:** One candidate carries the complete accepted
+repair and keeps a single release owner. The previous image proof remains
+historical evidence; it will not be relabeled as verification of the new image.
+The governed Genesis installation of the bundled Ask policy remains a production
+prerequisite. Existing credentials and permissions are preserved.
+**Where:** PR #528; both kernel dependency manifests and Cargo.lock; isolated
+runtime continuation branch `codex/foundry-unblock-runtime`.
