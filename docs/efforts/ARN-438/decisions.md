@@ -183,3 +183,33 @@ authorization or introducing another build system. The full candidate image must
 still boot successfully before release.
 **Where:** `Dockerfile`, `.github/workflows/ci.yml`, and
 `scripts/test-wasm-build-artifacts.sh` in PR #528.
+
+---
+
+**Decision:** Include the tested kernel context-memory repair in the approval
+rollout image, and hold production until its kernel PR is merged.
+**Came up because:** Verification of the pinned kernel exposed a large-context
+WASM failure: copying invocation bytes could overwrite module static data. The
+repair at `a40d3795bb5361e645d9a5ffda01cc30c5239518` passes the failing memory
+regressions, the unchanged saved-history replay, and the full kernel pre-push suite.
+**Options:** (a) release the previous pin with this known failure; (b) include the
+reviewed repair and verify the complete image before deployment.
+**Chose (b) over (a) because:** The same runtime executes the application callbacks
+used by remote sessions. Preparing its image while kernel checks run preserves
+the release order without shipping the known failure.
+**Where:** Kernel PR #478; the two Temper dependency manifests and Cargo.lock in
+TemperPaw PR #528.
+
+---
+
+**Decision:** Keep the kernel image based on `c5fd99a` and exclude the separate
+Ask policy change until its governed Genesis installation is resolved.
+**Came up because:** PR #530 can merge while its canonical app installation still
+awaits a human decision. Bundled-policy precedence during boot has not been proven.
+**Options:** (a) silently build the newer main branch containing that policy;
+(b) retain the exact reviewed kernel candidate and its verified image.
+**Chose (b) over (a) because:** A kernel deployment must not become an alternate
+route around the pending app-installation decision. Any later inclusion requires
+confirmed authorization and installation state, followed by image verification.
+**Where:** PR #528 candidate base and immutable deployment image selection;
+coordination with the PR #530 owner.
