@@ -406,6 +406,17 @@ permit(
   ["agent", "worker", "system", "supervisor", "human"].contains(principal.agent_type)
 };
 
+// Foundry's authenticated human API uses the registered operator credential.
+// This grants only answering, not Ask creation, generic writes, or agent approval.
+permit(
+  principal == Agent::"operator",
+  action == Action::"Answer",
+  resource is Ask
+) when {
+  principal has agent_type && principal.agent_type == "operator" &&
+  principal has agentTypeVerified && principal.agentTypeVerified == true
+};
+
 permit(
   principal is Agent,
   action in [
