@@ -107,3 +107,60 @@ for mode in default absolute relative missing fail; do
     echo "PASS: $mode (${#builders[@]} builders)"
 done
 
+# Exercise the release entry points too: a working builder cannot package a
+# required module when the Docker or CI list never invokes it.
+unset TEST_CARGO_MODE
+export CARGO_TARGET_DIR="$TMP/pipeline target"
+python3 - "$ROOT" "$TMP/repo" <<'PYTHON'
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import tomllib
+
+root, fixture = map(Path, sys.argv[1:])
+pipelines = {
+    "Dockerfile": re.findall(
+        r"cd (?:/app/)?(os-apps/[^\s]+) && bash build\.sh",
+        (root / "Dockerfile").read_text(),
+    ),
+    "CI": [
+        str(Path(script).parent)
+        for script in re.findall(
+            r"^\s+(os-apps/[^\s]+/build\.sh)",
+            (root / ".github/workflows/ci.yml").read_text(),
+            re.MULTILINE,
+        )
+    ],
+}
+# dsf-twin's generated modules are outside this shell-builder fixture.
+apps = {path.parent.parent for path in root.glob("os-apps/*/wasm/build.sh")}
+apps.discard(root / "os-apps/dsf-twin")
+apps.add(root / "os-apps/paw-fs")
+for pipeline, directories in pipelines.items():
+    assert directories, f"{pipeline}: no WASM builders found"
+    for artifact in fixture.rglob("*.wasm"):
+        artifact.unlink()
+    for directory in directories:
+        if Path(directory).parts[1] == "dsf-twin":
+            continue
+        subprocess.run(
+            ["bash", "build.sh"],
+            cwd=fixture / directory,
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
+    for app in sorted(apps):
+        manifest = tomllib.loads((app / "app.toml").read_text())
+        packaged = fixture / app.relative_to(root) / "wasm"
+        for module in manifest.get("wasm_modules", []):
+            if module.get("criticality") != "app-required":
+                continue
+            name = module["name"]
+            artifacts = list(packaged.rglob(f"{name}.wasm"))
+            assert artifacts and all(
+                path.read_bytes().startswith(b"fresh ") for path in artifacts
+            ), f"{pipeline}: required module {app.name}/{name} was not packaged"
+    print(f"PASS: {pipeline} packages required modules")
+PYTHON

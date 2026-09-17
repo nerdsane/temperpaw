@@ -165,3 +165,21 @@ newer one, and surfaces any close failure or leftover duplicate as a red run for
 human to resolve. Given up: the run now fails when a legitimate newer bump coexists -
 but that IS an anomaly worth flagging (per the lead's ask).
 **Where:** `temper-pin-bump.yml` (supersede block after `gh pr create`).
+
+
+---
+
+**Decision:** Build `artifact_batch_apply` in both the Docker image and full CI
+WASM lists, and exercise those lists in the existing packaging regression.
+**Came up because:** The isolated PR #528 image boot failed before readiness:
+`paw-fs` declares `artifact_batch_apply` as app-required, but neither build list
+invoked its existing builder. Testing that builder alone had passed.
+**Options:** (a) add the missing invocations and verify packaged required modules
+from the actual build lists; (b) weaken the module's startup requirement;
+(c) replace the build orchestration during this kernel rollout.
+**Chose (a) over (b)/(c) because:** It repairs the demonstrated packaging omission
+and makes the existing regression catch build-list drift without changing runtime
+authorization or introducing another build system. The full candidate image must
+still boot successfully before release.
+**Where:** `Dockerfile`, `.github/workflows/ci.yml`, and
+`scripts/test-wasm-build-artifacts.sh` in PR #528.
