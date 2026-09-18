@@ -1112,6 +1112,32 @@ kind = "param_nonempty"
 param = "error_message"
 
 [[action]]
+name = "RetrySelectedStopExhaustedVerification"
+kind = "input"
+from = ["RetrySelectedObserved"]
+params = [{ name = "operation_key", type = "string" }, { name = "error_message", type = "string" }, { name = "failure_evidence_ref", type = "string" }, { name = "expected_operation_sequence", type = "counter" }]
+to = "RetrySelectedFailed"
+guard = [{ type = "min_count", var = "verification_attempts", min = 40 }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_operation_sequence"
+field = "operation_sequence"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "error_message"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "failure_evidence_ref"
+
+[[action]]
 name = "RetrySelectedAcknowledgeFailure"
 kind = "input"
 from = ["RetrySelectedFailed"]

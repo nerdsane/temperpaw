@@ -435,7 +435,12 @@ fn read_binding(
     }
     let set = match subject_type {
         "DsfFlow" => "DsfFlows",
-        "DsfParticipant" if matches!(config.source, Source::OperationalSnapshot { .. }) => {
+        "DsfParticipant"
+            if matches!(
+                config.source,
+                Source::OperationalSnapshot { .. } | Source::Datadog { .. }
+            ) =>
+        {
             "DsfParticipants"
         }
         _ => return Err("unsupported ModelSync subject type".into()),

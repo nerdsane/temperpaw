@@ -869,6 +869,17 @@ def make_operation(doc, entity, provider, operation, concern):
             correlation + nonempty("error_message"),
         )
     )
+    # Exhausted verification is an operator failure decision, never a success callback.
+    actions.append(
+        action(
+            operation + "StopExhaustedVerification",
+            [state("Observed")],
+            state("Failed"),
+            ["operation_key", "error_message", "failure_evidence_ref"],
+            correlation + nonempty("error_message", "failure_evidence_ref"),
+            guards=[{"type": "min_count", "var": "verification_attempts", "min": 40}],
+        )
+    )
     actions.append(
         action(
             operation + "AcknowledgeFailure",
@@ -1076,7 +1087,12 @@ def module_manifest(documents):
                 "SetAlias",
                 "RetrySelected",
             } or name.endswith(
-                ("ResumeReconciliation", "ResumeVerification", "AcknowledgeFailure")
+                (
+                    "ResumeReconciliation",
+                    "ResumeVerification",
+                    "AcknowledgeFailure",
+                    "StopExhaustedVerification",
+                )
             ):
                 resource["human_actions"][name] = {
                     "params": entry.get("params", []),

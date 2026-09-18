@@ -882,6 +882,71 @@ async fn resource_timer_reuse_cancels_the_previous_operation_generation() {
 }
 
 #[test]
+fn exhausted_verification_can_be_stopped_without_claiming_success() {
+    let mut sim = registered(31);
+    executing(&mut sim, 0);
+    step(&mut sim, "DeployExecutionSucceeded", provider(0));
+    let params = json!({"operation_key":"operation-0","expected_operation_sequence":1,
+        "error_message":"Exact revision has no request correlation tags",
+        "failure_evidence_ref":"evidence:missing-tags"});
+    assert!(
+        sim.step(
+            "subject",
+            "DeployStopExhaustedVerification",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    for _ in 0..40 {
+        step(&mut sim, "DeployVerify", json!({}));
+        step(&mut sim, "DeployVerifyingTimedOut", json!({}));
+    }
+    for (key, value) in [
+        ("operation_key", json!("stale")),
+        ("expected_operation_sequence", json!(0)),
+        ("error_message", json!("")),
+        ("failure_evidence_ref", json!("")),
+    ] {
+        let mut invalid = params.clone();
+        invalid[key] = value;
+        assert!(
+            sim.step(
+                "subject",
+                "DeployStopExhaustedVerification",
+                &invalid.to_string()
+            )
+            .is_err()
+        );
+    }
+    let failed = step(&mut sim, "DeployStopExhaustedVerification", params.clone());
+    assert_eq!(failed["status"], "DeployFailed");
+    assert_eq!(failed["fields"]["verification_attempts"], 40);
+    assert_eq!(failed["fields"]["execution_attempts"], 1);
+    assert_eq!(failed["fields"]["operation_sequence"], 1);
+    assert_eq!(failed["fields"]["provider_known"], true);
+    assert_ne!(failed["fields"]["operation_verified"], true);
+    assert_ne!(failed["fields"]["deploy_verified"], true);
+    assert!(
+        sim.step(
+            "subject",
+            "DeployStopExhaustedVerification",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    let mut acknowledgement = params;
+    acknowledgement
+        .as_object_mut()
+        .unwrap()
+        .remove("error_message");
+    let active = step(&mut sim, "DeployAcknowledgeFailure", acknowledgement);
+    assert_eq!(active["status"], "Active");
+    assert_ne!(active["fields"]["operation_verified"], true);
+    executing(&mut sim, 1);
+    assert!(!sim.has_violations());
+}
+
+#[test]
 fn explicit_resume_restores_only_the_exhausted_read_budget() {
     let mut sim = registered(11);
     executing(&mut sim, 0);
@@ -1072,7 +1137,8 @@ fn agent_action_manifest_matches_ioa_and_has_no_retired_resource_routes() {
             .contains(&name)
                 || name.ends_with("ResumeReconciliation")
                 || name.ends_with("ResumeVerification")
-                || name.ends_with("AcknowledgeFailure");
+                || name.ends_with("AcknowledgeFailure")
+                || name.ends_with("StopExhaustedVerification");
             if selected {
                 let actual = &resource["human_actions"][name];
                 assert_eq!(

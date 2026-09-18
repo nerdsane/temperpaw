@@ -512,3 +512,27 @@ Successful collection also carries an empty declared error_message, so a recover
 **Chose the guarded action because:** It preserves historical state and the deployment concurrency fence, is idempotent at zero, and leaves model and observation counters untouched. The same generated contract covers all six provider resource types. It does not authorize deployment or replace proof, review waiver, provider binding, or telemetry checks. Current canonical Genesis repairs must be retained when this delta is published.
 
 **Where:** os-apps/dsf-twin/specs/generate.py and generated IOA/CSDL/module contracts/Cedar; legacy_resource_bootstrap_preserves_used_sequences in dsf_factory_contract. The regression reproduces the absent-counter failure and rejects a reset after the first operation.
+
+## D42: Stop exhausted verification as an explicit failed operation
+
+**Decision:** Each provider operation exposes StopExhaustedVerification from its Observed state only after all 40 verification attempts. The operator supplies the current operation key and sequence, a failure explanation, and an evidence reference. It transitions to Failed; the existing AcknowledgeFailure releases the resource for another operation.
+
+**Came up because:** The first real staging deployment succeeded at Railway, but its old backend did not export the exact request/revision trace tags needed for verification. Retrying the same revision cannot fix its instrumentation, and the bounded verifier leaves the resource in DeployObserved after 40 attempts.
+
+**Options:** Forge a runtime failure callback, add scheduler/kernel behavior, or expose a guarded operator failure decision in the existing resource contract.
+
+**Chose the explicit decision because:** It preserves the provider execution identity and all attempt/sequence counters, records failure instead of claiming verification, and performs no provider write. ResumeVerification remains available when more read attempts can resolve a transient delay. Recovery rejects early use, stale operation identity, and empty evidence or explanation; runtime success/failure callbacks remain unavailable to operators.
+
+**Where:** os-apps/dsf-twin/specs/generate.py and generated provider IOA/CSDL/module contracts/Cedar; exhausted_verification_can_be_stopped_without_claiming_success in dsf_factory_contract and exhausted_verification_recovery_is_an_operator_command_not_a_callback in dsf_factory_policy. The regression failed against the original contract before this change.
+
+### D43: Reuse Datadog observations for participant cohorts
+
+**Decision:** Allow participant cohorts to consume the existing bounded Datadog measurements.
+
+**Came up because:** The deployed application lacks the operational snapshot endpoint, while the first working twin must maintain its user layer.
+
+**Options:** Add a snapshot endpoint and related application machinery, keep the cohort static, or reuse existing Datadog collection.
+
+**Chose existing Datadog collection over adding an endpoint because:** It maintains measured cohort activity through the existing immutable observation contract with no new API or credentials. Request counts are not unique people and may include synthetic probes; missing data stays absent rather than becoming zero.
+
+**Where:** `os-apps/dsf-twin/wasm/dsf_model_collect/src/lib.rs`, participant binding regression tests and module README; PR527.
