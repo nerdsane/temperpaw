@@ -119,6 +119,9 @@
         <Property Name="ErrorMessage" Type="Edm.String"/>
         <Property Name="HasPlan" Type="Edm.Boolean"/>
         <Property Name="WorkerDone" Type="Edm.Boolean"/>
+        <Property Name="ReviewWaived" Type="Edm.Boolean"/>
+        <Property Name="ReviewWaiverHead" Type="Edm.String"/>
+        <Property Name="ReviewWaiverReason" Type="Edm.String"/>
         <Property Name="ReviewPassed" Type="Edm.Boolean"/>
         <Property Name="EvaluationPassed" Type="Edm.Boolean"/>
         <Property Name="ProofAttached" Type="Edm.Boolean"/>

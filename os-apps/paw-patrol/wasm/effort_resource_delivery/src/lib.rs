@@ -301,17 +301,36 @@ pub fn verify(runtime: &mut Runtime<impl Host>, binding: &Binding) -> Result<Cal
     let effort = binding.current(runtime)?;
     if required(&effort, "status")? != "ResourceVerifying"
         || required(&effort, "head_sha")? != binding.head
-        || field(&effort, "resource_delivery_merged") != Some(&Value::Bool(true))
     {
         return Err(Error::Binding(
             "Effort is not verifying merged resource delivery",
         ));
+    }
+    if field(&effort, "resource_delivery_merged") != Some(&Value::Bool(true)) {
+        if !chain_merge_ready::owner_waiver_holds(&effort, &binding.head)
+            || [
+                "resource_delivery_configured",
+                "evaluation_passed",
+                "proof_attached",
+                "e2e_ok",
+                "decisions_file_ready",
+                "merge_risk_clear",
+            ]
+            .iter()
+            .any(|flag| field(&effort, flag) != Some(&Value::Bool(true)))
+        {
+            return Err(Error::Binding(
+                "Effort lacks exact-head waived delivery authorization",
+            ));
+        }
+        validate_operations(runtime, binding, &effort)?;
     }
     let mut evidence = Vec::new();
     for checked in parse_plan(&binding.plan)? {
         let operation = &checked.expected;
         let row = runtime.row(&checked.entity_set, &operation.resource_id)?;
         if required(&row, "status")? != "Active"
+            || field(&row, "provider_known") != Some(&Value::Bool(true))
             || field(&row, "operation_verified") != Some(&Value::Bool(true))
             || field(&row, &checked.flag) != Some(&Value::Bool(true))
         {

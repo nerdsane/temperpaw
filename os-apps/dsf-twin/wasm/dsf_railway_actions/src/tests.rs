@@ -299,3 +299,77 @@ fn unknown_configuration_cannot_smuggle_provider_source_or_credentials() {
         );
     }
 }
+
+#[test]
+fn next_deploy_ignores_previous_receipt_and_writes_only_after_discovery() {
+    let change = json!({"baseline_deployment_id":"old-deployment","not_before_ms":90_000});
+    let mut row = invocation("Deploy", &change).resource;
+    row["operation_sequence"] = json!(2);
+    row["operation_key"] = json!("operation-2");
+    row["provider_execution_id"] = json!("old-deployment");
+    row["provider_known"] = json!(false);
+    let op = Invocation::parse("railway-project-service-production", &row).unwrap();
+    let mut host = TestHost {
+        responses: VecDeque::from([
+            no_deployments(),
+            instance("old-deployment"),
+            json!({"data":{"serviceInstanceDeployV2":"new-deployment"}}),
+        ]),
+        requests: vec![],
+    };
+    let receipt = run(&mut host, |runtime| {
+        Deploy::execute(
+            runtime,
+            &target(),
+            &serde_json::from_value(change).unwrap(),
+            &op,
+        )
+    })
+    .unwrap();
+    assert_eq!(receipt.execution_id, "new-deployment");
+    assert!(host.requests[0].contains("DsfRailwayDeployments"));
+    assert_eq!(
+        host.requests
+            .iter()
+            .filter(|r| r.contains("mutation"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn uncertain_next_deploy_discovers_current_receipt_without_reusing_history_or_writing() {
+    let change = json!({"baseline_deployment_id":"old-deployment","not_before_ms":90_000});
+    let mut row = invocation("Deploy", &change).resource;
+    row["status"] = json!("DeployReconciling");
+    row["operation_sequence"] = json!(2);
+    row["operation_key"] = json!("operation-2");
+    row["provider_execution_id"] = json!("old-deployment");
+    row["provider_known"] = json!(false);
+    let op = Invocation::parse("railway-project-service-production", &row).unwrap();
+    let mut node = deployment("new-deployment", "new-snapshot")["data"]["deployment"].clone();
+    node["createdAt"] = json!("1970-01-01T00:01:35Z");
+    let mut host = TestHost {
+        responses: VecDeque::from([json!({"data":{"deployments":{"edges":[{"node":node}]}}})]),
+        requests: vec![],
+    };
+    let typed = serde_json::from_value(change).unwrap();
+    let receipt = run(&mut host, |runtime| {
+        Deploy::observe(runtime, &target(), &typed, &op)
+    })
+    .unwrap();
+    assert_eq!(receipt.execution_id, "new-deployment");
+    assert_eq!(host.requests.len(), 1);
+    assert!(!host.requests[0].contains("mutation"));
+    host.responses.push_back(no_deployments());
+    assert!(matches!(
+        run(&mut host, |runtime| Deploy::observe(
+            runtime,
+            &target(),
+            &typed,
+            &op
+        )),
+        Err(Error::Pending(_))
+    ));
+    assert!(host.requests.iter().all(|r| !r.contains("mutation")));
+}

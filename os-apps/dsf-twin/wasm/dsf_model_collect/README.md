@@ -15,7 +15,7 @@ Supported sources:
 | `source.provider` | Fields | Subject |
 | --- | --- | --- |
 | `github` | `owner`, `repository`, `git_ref` | DsfFlow |
-| `datadog` | `site`, `app_key_secret`, `query`, `window_seconds`, `max_age_seconds` | DsfFlow |
+| `datadog` | `site`, `app_key_secret`, `query`, `window_seconds`, `max_age_seconds` | DsfFlow or DsfParticipant |
 | `dsf_operations` | `service`, `environment`, `max_age_seconds` | DsfFlow or DsfParticipant |
 
 GitHub observations retain the exact resolved commit, tree, and commit time.
@@ -23,6 +23,10 @@ They omit author details and commit messages. Datadog observations retain bounde
 numeric points and the exact query/window. A zero is a measured value; no numeric
 points are absence of data, and old points are stale data. Neither condition
 asserts an outage. A metric query does not create or impersonate a Datadog monitor.
+A participant subject may represent a cohort measured by a Datadog query. Request
+counts measure requests, not unique people; synthetic probes included by the
+query remain part of that measurement. The cohort definition must state these
+limits, and observations retain the exact query and time window.
 
 Operational snapshots use the authenticated DSF endpoint with
 `participant_limit=200&job_limit=20`. The returned participant cursor becomes

@@ -44,7 +44,7 @@ fn effort(b: &Binding) -> Value {
     json!({"status":"ResourceVerifying","resource_delivery_plan":b.plan,"resource_delivery_head":b.head,"delivery_sequence":b.sequence,"head_sha":b.head,"resource_delivery_merged":true,"deploy_configured":false})
 }
 fn resource(id: &str) -> Value {
-    json!({"status":"Active","operation_verified":true,"deploy_verified":true,"effort_id":"effort-1","operation_key":format!("op-{id}"),"operation_sequence":1,"request_revision":"a".repeat(40),"request_configuration":"{}","proof_ref":format!("proof-{id}"),"verified_resource_id":id,"verified_revision":"a".repeat(40),"provider_evidence_ref":"https://provider.invalid/evidence","flow_evidence_ref":"https://deep-sci-fi.world/probe","telemetry_evidence_ref":"https://app.datadoghq.com/apm/trace/1"})
+    json!({"status":"Active","provider_known":true,"operation_verified":true,"deploy_verified":true,"effort_id":"effort-1","operation_key":format!("op-{id}"),"operation_sequence":1,"request_revision":"a".repeat(40),"request_configuration":"{}","proof_ref":format!("proof-{id}"),"verified_resource_id":id,"verified_revision":"a".repeat(40),"provider_evidence_ref":"https://provider.invalid/evidence","flow_evidence_ref":"https://deep-sci-fi.world/probe","telemetry_evidence_ref":"https://app.datadoghq.com/apm/trace/1"})
 }
 #[test]
 fn aggregate_requires_both_exact_resource_operations_and_reads_only_temper() {
@@ -67,6 +67,7 @@ fn pending_acknowledged_failed_unrelated_and_missing_evidence_cannot_complete() 
     for (field, value) in [
         ("status", json!("DeployVerifying")),
         ("operation_verified", json!(false)),
+        ("provider_known", json!(false)),
         ("deploy_verified", json!(false)),
         ("operation_sequence", json!(2)),
         ("operation_key", json!("another")),
@@ -218,5 +219,60 @@ fn resource_merge_runs_the_same_recorded_review_and_proof_checks() {
             requests: vec![],
         };
         assert!(merge(&mut runtime(&mut h), &b).is_err(), "case {case}");
+    }
+}
+
+fn waived_replies(b: &Binding) -> Vec<Value> {
+    let mut replies = validation_replies(b);
+    let row = &mut replies[0];
+    row["status"] = json!("ResourceVerifying");
+    row["resource_delivery_merged"] = json!(false);
+    row["review_passed"] = json!(false);
+    row["review_waiver_head"] = json!(b.head);
+    row["review_waiver_reason"] =
+        json!("Owner authorized this exact resource delivery without model review");
+    for flag in [
+        "review_waived",
+        "resource_delivery_configured",
+        "evaluation_passed",
+        "proof_attached",
+        "e2e_ok",
+        "decisions_file_ready",
+        "merge_risk_clear",
+    ] {
+        row[flag] = json!(true);
+    }
+    replies.extend([resource("api"), resource("web")]);
+    replies
+}
+#[test]
+fn waived_delivery_checks_current_proof_and_actual_results_without_fake_review_or_merge() {
+    let b = binding();
+    let mut host = Mock {
+        replies: waived_replies(&b).into(),
+        requests: vec![],
+    };
+    assert_eq!(
+        verify(&mut runtime(&mut host), &b).unwrap().action,
+        "ResourceDeliveryVerified"
+    );
+    assert_eq!(host.requests.len(), 11);
+    for case in 0..8 {
+        let mut replies = waived_replies(&b);
+        match case {
+            0 => replies[0]["review_waiver_head"] = json!("c".repeat(40)),
+            1 => replies[0]["review_waived"] = json!(false),
+            2 => replies[0]["proof_attached"] = json!(false),
+            3 => replies[0]["resource_delivery_configured"] = json!(false),
+            4 => replies[2]["commit"] = json!("c".repeat(40)),
+            5 => replies[4]["resource_change"]["operation_sequence"] = json!(2),
+            6 => replies[10]["operation_verified"] = json!(false),
+            _ => replies[10]["telemetry_evidence_ref"] = json!(""),
+        }
+        let mut host = Mock {
+            replies: replies.into(),
+            requests: vec![],
+        };
+        assert!(verify(&mut runtime(&mut host), &b).is_err(), "case {case}");
     }
 }

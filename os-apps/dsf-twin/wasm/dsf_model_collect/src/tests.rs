@@ -368,3 +368,155 @@ fn snapshot_rejects_invalid_revision_cursor_or_page_limits() {
         assert!(parse_source(&cfg, &row, 1_000_000).is_err());
     }
 }
+
+#[test]
+fn scheduled_collection_waits_without_reading_sources_or_creating_observations() {
+    let mut host = FakeHost::new(vec![]);
+    let fields =
+        json!({"sync_sequence":2,"scheduled_refresh":true,"next_due_at":"1970-01-01T00:20:00Z"});
+    let result = collect(
+        &mut host,
+        "https://temper.invalid",
+        "default",
+        "sync-1",
+        &fields,
+        1_000_000,
+    )
+    .unwrap();
+    assert_eq!(result.action, "CollectionDeferred");
+    assert_eq!(result.params, json!({"expected_sequence":2}));
+    assert!(host.requests.is_empty());
+}
+
+#[test]
+fn manual_due_and_first_collections_read_the_provider() {
+    for (scheduled, due) in [
+        (false, Some("1970-01-01T00:20:00Z")),
+        (true, Some("1970-01-01T00:10:00Z")),
+        (true, Some("1970-01-01T00:16:40Z")),
+        (true, None),
+    ] {
+        let mut fields = sync();
+        fields["scheduled_refresh"] = json!(scheduled);
+        if let Some(due) = due {
+            fields["next_due_at"] = json!(due);
+        }
+        let mut host = FakeHost::new(vec![
+            config_json(dd(), "api"),
+            json!({"status":"Active"}),
+            json!({"status":"ok","series":[]}),
+        ]);
+        let result = collect(
+            &mut host,
+            "https://temper.invalid",
+            "default",
+            "sync-1",
+            &fields,
+            1_000_000,
+        )
+        .unwrap();
+        assert_eq!(result.action, "CollectionAbsent");
+        assert_eq!(host.requests.len(), 3);
+        assert_eq!(result.params["next_due_at"], "1970-01-01T00:21:40.000Z");
+    }
+}
+
+#[test]
+fn malformed_due_time_fails_without_reading_a_provider() {
+    let mut host = FakeHost::new(vec![]);
+    let fields = json!({"sync_sequence":2,"scheduled_refresh":true,"next_due_at":"not-a-time"});
+    assert!(
+        collect(
+            &mut host,
+            "https://temper.invalid",
+            "default",
+            "sync-1",
+            &fields,
+            1_000_000
+        )
+        .is_err()
+    );
+    assert!(host.requests.is_empty());
+}
+
+#[test]
+fn participant_datadog_cohort_preserves_query_sequence_and_coverage() {
+    let mut config = config_json(dd(), "public-world-readers");
+    config["subject_type"] = json!("DsfParticipant");
+    let mut fields = sync();
+    fields["subject_type"] = json!("DsfParticipant");
+    for (point, action) in [
+        (json!([990000, 0]), "CollectionSucceeded"),
+        (json!([990000, null]), "CollectionAbsent"),
+        (json!([800000, 4]), "CollectionStale"),
+    ] {
+        let mut host = FakeHost::new(vec![
+            config.clone(),
+            json!({"status":"Active"}),
+            json!({"status":"ok","series":[{"metric":"hits","pointlist":[point]}]}),
+        ]);
+        let result = collect(
+            &mut host,
+            "https://temper.example",
+            "default",
+            "participant-sync",
+            &fields,
+            1_000_000,
+        )
+        .unwrap();
+        assert_eq!(result.action, action);
+        assert_eq!(result.params["observation_id"], "participant-sync-7");
+        assert_eq!(result.params["expected_sequence"], 7);
+        assert_eq!(result.params["query"], host.requests[2].url);
+        assert_eq!(result.params["evidence_ref"], host.requests[2].url);
+        assert_eq!(
+            host.requests[2].url,
+            provider_request(&serde_json::from_value(config.clone()).unwrap(), 1_000_000)
+                .unwrap()
+                .url
+        );
+        assert_eq!(
+            host.requests[1].url,
+            "https://temper.example/tdata/DsfParticipants('subject-1')"
+        );
+        assert_eq!(host.requests.len(), 3);
+        assert!(host.requests.iter().all(|request| request.method == "GET"));
+    }
+}
+
+#[test]
+fn participant_binding_rejects_github_and_mismatched_or_unsupported_subjects() {
+    for (subject_type, subject_id, source) in [
+        (
+            "DsfParticipant",
+            "subject-1",
+            json!({"provider":"github","owner":"org","repository":"repo","git_ref":"main"}),
+        ),
+        ("DsfParticipant", "other-subject", dd()),
+        ("InventedParticipant", "subject-1", dd()),
+    ] {
+        let mut config = config_json(source.clone(), "public-world-readers");
+        config["subject_type"] = json!(subject_type);
+        config["subject_id"] = json!(subject_id);
+        let mut fields = sync();
+        fields["subject_type"] = json!(subject_type);
+        fields["source_kind"] = source["provider"].clone();
+        let mut host = FakeHost::new(vec![config]);
+        assert!(
+            collect(
+                &mut host,
+                "https://temper.example",
+                "default",
+                "participant-sync",
+                &fields,
+                1_000_000
+            )
+            .is_err()
+        );
+        assert_eq!(
+            host.requests.len(),
+            1,
+            "reject before subject or provider reads"
+        );
+    }
+}

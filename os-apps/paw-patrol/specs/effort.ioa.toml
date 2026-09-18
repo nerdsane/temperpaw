@@ -430,7 +430,7 @@ effect = [
   { type = "set_bool", var = "panel_started", value = true },
   { type = "set_bool", var = "review_fix_it_clear", value = false },
   { type = "set_bool", var = "merge_risk_clear", value = false },
-  { type = "set_bool", var = "review_passed", value = false }
+  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false }
 ]
 hint = "Attach one agent's ReviewRun. Clears prior review_fix_it_clear, merge_risk_clear, and review_passed so a later failing panel cannot ride an old clearance. review_run_ids appends that id."
 
@@ -487,6 +487,7 @@ module = "chain_review_ready"
 on_failure = "RetractReviewPassed"
 
 [action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "RetractReviewPassed"
@@ -503,7 +504,7 @@ from = ["InReview"]
 to = "Building"
 params = ["error_message"]
 effect = [
-  { type = "set_bool", var = "review_passed", value = false },
+  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false },
   { type = "set_bool", var = "review_fix_it_clear", value = false },
   { type = "set_bool", var = "merge_risk_clear", value = false },
   { type = "set_bool", var = "worker_done", value = false },
@@ -546,6 +547,7 @@ module = "chain_proof_ready"
 on_failure = "RetractProofAttached"
 
 [action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "RetractProofAttached"
@@ -593,6 +595,7 @@ module = "chain_merge_ready"
 on_failure = "RetractMerge"
 
 [action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
 
 # Same shape as WorkCycle.Complete → ReleaseRun.Request. to_state Deploying
 # so a retract does not spawn a ship.
@@ -625,7 +628,7 @@ guard = "is_true deploy_configured"
 from = ["Deploying", "Merged"]
 to = "Proving"
 effect = [
-  { type = "set_bool", var = "review_passed", value = false },
+  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false },
   { type = "set_bool", var = "proof_attached", value = false }
 ]
 hint = "Callback: Merge head_sha does not match Recorded ReviewRuns and ProofPacket."
@@ -701,7 +704,7 @@ from = ["Stalled"]
 to = "Building"
 params = ["ask_id"]
 effect = [
-  { type = "set_bool", var = "review_passed", value = false },
+  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false },
   { type = "set_bool", var = "review_fix_it_clear", value = false },
   { type = "set_bool", var = "merge_risk_clear", value = false },
   { type = "set_bool", var = "worker_done", value = false },
@@ -774,6 +777,7 @@ module = "effort_resource_delivery_validate"
 
 [action.triggers.config]
 timeout_secs = "120"
+temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "ResourceDeliveryConfigured"
@@ -852,6 +856,7 @@ module = "effort_resource_delivery_merge"
 
 [action.triggers.config]
 timeout_secs = "120"
+temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "ResourceDeliveryMerged"
@@ -882,7 +887,7 @@ kind = "input"
 from = ["ResourceMergeChecking"]
 params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "error_message", type = "string" }]
 to = "Proving"
-effect = [{ type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
+effect = [{ type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
 
 [[action.constraints]]
 kind = "param_equals_field"
@@ -919,6 +924,7 @@ module = "effort_resource_delivery_verify"
 
 [action.triggers.config]
 timeout_secs = "120"
+temper_api_url = "{secret:temper_api_url}"
 
 [[action]]
 name = "ResourceDeliveryVerified"
@@ -979,7 +985,7 @@ kind = "input"
 from = ["ResourceMergeChecking"]
 params = []
 to = "Proving"
-effect = [{ type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
+effect = [{ type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
 
 [[action]]
 name = "ResourceVerificationTimedOut"
@@ -997,3 +1003,122 @@ on_timeout = "ResourceMergeTimedOut"
 state = "ResourceVerifying"
 after_seconds = 300
 on_timeout = "ResourceVerificationTimedOut"
+
+[[state]]
+name = "review_waived"
+type = "bool"
+initial = "false"
+
+[[state]]
+name = "review_waiver_head"
+type = "string"
+initial = ""
+
+[[state]]
+name = "review_waiver_reason"
+type = "string"
+initial = ""
+
+
+# Owner disposition is separate from review_passed. Cedar requires approval.
+[[action]]
+name = "WaiveReview"
+kind = "input"
+from = ["InReview", "Proving"]
+to = "InReview"
+params = ["review_waiver_head", "review_waiver_reason"]
+effect = [{ type = "set_bool", var = "review_waived", value = true }]
+hint = "Record the owner's explicit waiver for one full commit. This does not mark model review as passed."
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "review_waiver_head"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "review_waiver_reason"
+
+[[action]]
+name = "PassWaivedEvaluation"
+kind = "input"
+from = ["InReview"]
+to = "Proving"
+params = ["evaluation_run_id"]
+guard = [{ type = "is_true", var = "review_waived" }, { type = "is_true", var = "e2e_ok" }]
+effect = "set evaluation_passed true"
+hint = "Record successful checks under an explicit owner waiver; review_passed remains unchanged."
+
+[[action]]
+name = "AuthorizeWaivedResourceDeployment"
+kind = "input"
+from = ["Proving"]
+to = "Merged"
+params = ["head_sha"]
+guard = [
+  { type = "is_true", var = "review_waived" },
+  { type = "is_true", var = "evaluation_passed" },
+  { type = "is_true", var = "proof_attached" },
+  { type = "is_true", var = "e2e_ok" },
+  { type = "is_true", var = "decisions_file_ready" },
+  { type = "is_true", var = "merge_risk_clear" }
+]
+hint = "Authorize a resource-owned deployment under the owner's exact-revision waiver. Does not merge Git or deploy the Temper image. Resource-specific proof remains mandatory."
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "head_sha"
+field = "review_waiver_head"
+
+[[action.triggers]]
+name = "waived_resource_checks_records"
+kind = "wasm"
+module = "chain_merge_ready"
+on_failure = "RetractMerge"
+
+[action.triggers.config]
+owner_waiver = "true"
+temper_api_url = "{secret:temper_api_url}"
+
+# Legacy rows have no persisted counter. Saturating decrement bootstraps only zero.
+[[action]]
+name = "BootstrapDeliverySequence"
+kind = "input"
+from = ["Building", "InReview", "Proving", "Merged"]
+params = []
+effect = [{ type = "decrement", var = "delivery_sequence" }]
+guard = [{ type = "max_count", var = "delivery_sequence", max = 1 }]
+
+# The authorization already happened through AuthorizeWaivedResourceDeployment.
+# This action checks results; it never marks a Git merge or model review passed.
+[[action]]
+name = "VerifyWaivedResourceDelivery"
+kind = "input"
+from = ["Merged", "Deploying"]
+to = "ResourceVerifying"
+params = [{ name = "head_sha", type = "string" }]
+effect = [{ type = "increment", var = "delivery_sequence" }]
+guard = [{ type = "is_true", var = "review_waived" }, { type = "is_true", var = "resource_delivery_configured" }, { type = "is_true", var = "evaluation_passed" }, { type = "is_true", var = "proof_attached" }, { type = "is_true", var = "e2e_ok" }, { type = "is_true", var = "decisions_file_ready" }, { type = "is_true", var = "merge_risk_clear" }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "head_sha"
+field = "review_waiver_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "head_sha"
+field = "resource_delivery_head"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "head_sha"
+field = "head_sha"
+
+[[action.triggers]]
+name = "effort_resource_delivery_verify"
+kind = "wasm"
+module = "effort_resource_delivery_verify"
+
+[action.triggers.config]
+timeout_secs = "120"
+temper_api_url = "{secret:temper_api_url}"

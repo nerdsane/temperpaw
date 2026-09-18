@@ -412,6 +412,17 @@ def resource_document(entity, provider, identity, operations):
         )
     )
     actions.append(model_revision(operations))
+    # Legacy resource journals may predate persisted counter defaults.
+    # Saturating decrement materializes zero; the guard forbids history resets.
+    actions.append(
+        action(
+            "BootstrapOperationSequence",
+            ["Active"],
+            "Active",
+            guards=[bounded("operation_sequence", 1)],
+            effects=[{"type": "decrement", "var": "operation_sequence"}],
+        )
+    )
     live = [state for state in states if state not in ("Draft", "Retired")]
     observation_inputs = [
         "observation_id",
@@ -858,6 +869,27 @@ def make_operation(doc, entity, provider, operation, concern):
             correlation + nonempty("error_message"),
         )
     )
+    # Exhausted verification is an operator failure decision, never a success callback.
+    actions.append(
+        action(
+            operation + "StopExhaustedVerification",
+            [state("Observed")],
+            state("Failed"),
+            ["operation_key", "error_message", "failure_evidence_ref"],
+            correlation + nonempty("error_message", "failure_evidence_ref"),
+            guards=[{"type": "min_count", "var": "verification_attempts", "min": 40}],
+        )
+    )
+    # Abandonment records an operator decision, not provider absence or success.
+    actions.append(
+        action(
+            operation + "AbandonReconciliation",
+            [state("Unknown")],
+            state("Failed"),
+            ["operation_key", "error_message", "failure_evidence_ref"],
+            correlation + nonempty("error_message", "failure_evidence_ref"),
+        )
+    )
     actions.append(
         action(
             operation + "AcknowledgeFailure",
@@ -994,7 +1026,10 @@ def csdl(documents):
                 references.append((f"Dsf.Twin.{name}/{property_label}", *reference))
         # Provider groups nodes by the external system; role groups by twin concern.
         if name in resource_providers:
-            provider, role = resource_providers[name], PROVIDER_ROLES.get(name, "resource")
+            provider, role = (
+                resource_providers[name],
+                PROVIDER_ROLES.get(name, "resource"),
+            )
         else:
             provider, role = "temper", RECORD_ROLES[name]
         add(entity, "Annotation", Term="Temper.Provider", String=provider)
@@ -1054,6 +1089,7 @@ def module_manifest(documents):
         for name, entry in actions.items():
             if name in {
                 "ReviseModel",
+                "BootstrapOperationSequence",
                 "RefreshObservations",
                 "Deploy",
                 "ApplyConfiguration",
@@ -1061,7 +1097,13 @@ def module_manifest(documents):
                 "SetAlias",
                 "RetrySelected",
             } or name.endswith(
-                ("ResumeReconciliation", "ResumeVerification", "AcknowledgeFailure")
+                (
+                    "ResumeReconciliation",
+                    "ResumeVerification",
+                    "AcknowledgeFailure",
+                    "StopExhaustedVerification",
+                    "AbandonReconciliation",
+                )
             ):
                 resource["human_actions"][name] = {
                     "params": entry.get("params", []),

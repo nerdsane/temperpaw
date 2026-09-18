@@ -11,11 +11,21 @@ fn source() -> String {
     )
     .unwrap()
 }
+fn wasm_root() -> PathBuf {
+    std::env::var_os("PAW_PATROL_WASM_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/paw-patrol/wasm")
+        })
+}
 fn step(sim: &mut SimActorSystem, name: &str, params: Value) -> Value {
     sim.step("effort", name, &params.to_string())
         .unwrap_or_else(|error| panic!("{name}: {error}"))
 }
 fn proving() -> SimActorSystem {
+    proving_with_review(true)
+}
+fn proving_with_review(reviewed: bool) -> SimActorSystem {
     let ioa = source();
     let handler = EntityActorHandler::new(
         "Effort",
@@ -41,22 +51,35 @@ fn proving() -> SimActorSystem {
     step(&mut sim, "StartBuild", json!({}));
     step(&mut sim, "WorkerDone", json!({}));
     step(&mut sim, "SubmitForReview", json!({}));
-    step(
-        &mut sim,
-        "AttachReviewRun",
-        json!({"reviewer_run_id":"review-1","review_run_ids":"review-1"}),
-    );
-    step(&mut sim, "MarkFixItClear", json!({}));
-    step(&mut sim, "MarkRiskClear", json!({}));
-    step(
-        &mut sim,
-        "PassReview",
-        json!({"reviewer_run_id":"review-1"}),
-    );
+    if reviewed {
+        step(
+            &mut sim,
+            "AttachReviewRun",
+            json!({"reviewer_run_id":"review-1","review_run_ids":"review-1"}),
+        );
+        step(&mut sim, "MarkFixItClear", json!({}));
+        step(&mut sim, "MarkRiskClear", json!({}));
+        step(
+            &mut sim,
+            "PassReview",
+            json!({"reviewer_run_id":"review-1"}),
+        );
+    } else {
+        step(
+            &mut sim,
+            "WaiveReview",
+            json!({"review_waiver_head":"a".repeat(40),"review_waiver_reason":"Owner authorized this exact delivery without model review"}),
+        );
+        step(&mut sim, "MarkRiskClear", json!({}));
+    }
     step(&mut sim, "ReportE2e", json!({"e2e_summary":"live proof"}));
     step(
         &mut sim,
-        "PassEvaluation",
+        if reviewed {
+            "PassEvaluation"
+        } else {
+            "PassWaivedEvaluation"
+        },
         json!({"evaluation_run_id":"evaluation-1"}),
     );
     step(
@@ -226,7 +249,7 @@ async fn native_intent_accept_seeds_strict_effort_and_legacy_merge_creates_tempe
         "chain_proof_ready",
         "chain_merge_ready",
     ] {
-        let bytes = fs::read(directory.join(format!("../wasm/{module}/{module}.wasm")))
+        let bytes = fs::read(wasm_root().join(format!("{module}/{module}.wasm")))
             .expect("Build paw-patrol gate WASMs before this proof");
         let hash = server.wasm_engine.compile_and_cache(&bytes).unwrap();
         server
@@ -395,11 +418,7 @@ async fn prove_github_file(field: &str, path: &str) {
     use temper_wasm::{
         SimWasmHost, StreamRegistry, WasmEngine, WasmInvocationContext, WasmResourceLimits,
     };
-    let bytes = fs::read(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../os-apps/paw-patrol/wasm/chain_github_ready/chain_github_ready.wasm"),
-    )
-    .unwrap();
+    let bytes = fs::read(wasm_root().join("chain_github_ready/chain_github_ready.wasm")).unwrap();
     let engine = WasmEngine::new().unwrap();
     let hash = engine.compile_and_cache(&bytes).unwrap();
     let ctx = WasmInvocationContext {
@@ -611,7 +630,7 @@ async fn packaged_resource_delivery_gates_return_fenced_callbacks_and_verify_bot
     let expected = |entity: &str, id: &str| json!({"entity_type":entity,"resource_id":id,"action":"Deploy","operation_key":format!("op-{id}"),"operation_sequence":1,"revision":sha,"configuration_sha256":format!("{:x}",Sha256::digest(b"{}")),"proof_ref":format!("proof-{id}")});
     let plan=json!({"operations":[expected("DsfRailwayServiceInstance","api"),expected("DsfVercelProject","web")]}).to_string();
     let row = json!({"status":"ResourceVerifying","resource_delivery_plan":plan,"resource_delivery_head":sha,"delivery_sequence":3,"head_sha":sha,"resource_delivery_merged":true,"deploy_configured":false});
-    let resource = |id: &str| json!({"status":"Active","operation_verified":true,"deploy_verified":true,"effort_id":"effort-1","operation_key":format!("op-{id}"),"operation_sequence":1,"request_revision":sha,"request_configuration":"{}","proof_ref":format!("proof-{id}"),"verified_resource_id":id,"verified_revision":sha,"provider_evidence_ref":"https://provider.test/deploy","flow_evidence_ref":"https://deep-sci-fi.world/probe","telemetry_evidence_ref":"https://app.datadoghq.com/apm/trace/test"});
+    let resource = |id: &str| json!({"status":"Active","provider_known":true,"operation_verified":true,"deploy_verified":true,"effort_id":"effort-1","operation_key":format!("op-{id}"),"operation_sequence":1,"request_revision":sha,"request_configuration":"{}","proof_ref":format!("proof-{id}"),"verified_resource_id":id,"verified_revision":sha,"provider_evidence_ref":"https://provider.test/deploy","flow_evidence_ref":"https://deep-sci-fi.world/probe","telemetry_evidence_ref":"https://app.datadoghq.com/apm/trace/test"});
     let engine = WasmEngine::new().unwrap();
     for (stage, failure) in [
         ("validate", "ResourceDeliveryRejected"),
@@ -619,10 +638,7 @@ async fn packaged_resource_delivery_gates_return_fenced_callbacks_and_verify_bot
         ("verify", "ResourceDeliveryPending"),
     ] {
         let module = format!("effort_resource_delivery_{stage}");
-        let bytes = fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../os-apps/paw-patrol/wasm/{module}/{module}.wasm"
-        )))
-        .unwrap();
+        let bytes = fs::read(wasm_root().join(format!("{module}/{module}.wasm"))).unwrap();
         let hash = engine.compile_and_cache(&bytes).unwrap();
         let ctx = WasmInvocationContext {
             tenant: "default".into(),
@@ -717,4 +733,183 @@ fn every_declared_effort_producer_matches_strict_parameters() {
             .unwrap()
             .success()
     );
+}
+
+// Provider, proof, and file HTTP responses are deterministic fixtures. The
+// callback is produced by compiled WASM and consumed by the real actor; this
+// proves neither a live provider deployment nor hosted telemetry availability.
+#[tokio::test]
+async fn waived_delivery_consumes_compiled_evidence_without_claiming_review_or_git_merge() {
+    use sha2::{Digest, Sha256};
+    use std::{collections::BTreeMap, sync::RwLock};
+    use temper_wasm::{
+        SimWasmHost, StreamRegistry, WasmEngine, WasmInvocationContext, WasmResourceLimits,
+    };
+    let head = "a".repeat(40);
+    let operation = json!({"entity_type":"DsfRailwayServiceInstance","resource_id":"api","action":"Deploy","operation_key":"op-api","operation_sequence":1,"revision":head,"configuration_sha256":format!("{:x}",Sha256::digest(b"{}")),"proof_ref":"proof-1"});
+    let plan = json!({"operations":[operation]}).to_string();
+    let config = json!({"resource_delivery_plan":plan,"resource_delivery_head":head});
+    let fence = |sequence| json!({"expected_delivery_plan":plan,"expected_delivery_head":head,"expected_delivery_sequence":sequence});
+    let mut reviewed = proving();
+    step(&mut reviewed, "ConfigureResourceDelivery", config.clone());
+    step(&mut reviewed, "ResourceDeliveryConfigured", fence(1));
+    step(
+        &mut reviewed,
+        "MergeResourceDelivery",
+        json!({"pr_number":"1","head_sha":head}),
+    );
+    step(&mut reviewed, "ResourceDeliveryMerged", fence(2));
+    assert!(
+        reviewed
+            .step(
+                "effort",
+                "VerifyWaivedResourceDelivery",
+                &json!({"head_sha":head}).to_string()
+            )
+            .is_err(),
+        "No waiver must reject the waived action"
+    );
+
+    let mut sim = proving_with_review(false);
+    step(
+        &mut sim,
+        "AuthorizeWaivedResourceDeployment",
+        json!({"head_sha":head}),
+    );
+    sim.assert_status("effort", "Merged");
+    step(&mut sim, "ConfigureResourceDelivery", config);
+    step(&mut sim, "ResourceDeliveryConfigured", fence(1));
+    assert!(
+        sim.step(
+            "effort",
+            "VerifyWaivedResourceDelivery",
+            &json!({"head_sha":"b".repeat(40)}).to_string()
+        )
+        .is_err()
+    );
+    let actor = step(
+        &mut sim,
+        "VerifyWaivedResourceDelivery",
+        json!({"head_sha":head}),
+    );
+    sim.assert_status("effort", "ResourceVerifying");
+    let mut row = actor["fields"].clone();
+    row["status"] = actor["status"].clone();
+    assert_eq!(row["review_passed"], false);
+    assert_eq!(row["resource_delivery_merged"], false);
+    assert_eq!(row["delivery_sequence"], 2);
+    let resource = json!({"status":"Active","allowed_operations":["Deploy"],"provider_known":true,"operation_verified":true,"deploy_verified":true,"effort_id":"effort","operation_key":"op-api","operation_sequence":1,"request_revision":head,"request_configuration":"{}","proof_ref":"proof-1","verified_resource_id":"api","verified_revision":head,"provider_evidence_ref":"https://provider.test/deploy","flow_evidence_ref":"https://staging.deep-sci-fi.world/probe","telemetry_evidence_ref":"https://app.datadoghq.com/apm/trace/test"});
+    let packet = json!({"status":"Recorded","effort_id":"effort","commit":head,"record_present":true,"artifact_ref":"artifact-1","changed_surface":["delivery"],"blast_radius":[],"features":[{"key":"delivery","verification":"rerun","verdict":"pass"}],"tests":{"result":"pass"},"independent_verifier":{"agrees":true,"reran":["delivery"]}});
+    let module = "effort_resource_delivery_verify";
+    let engine = WasmEngine::new().unwrap();
+    let hash = engine
+        .compile_and_cache(&fs::read(wasm_root().join(format!("{module}/{module}.wasm"))).unwrap())
+        .unwrap();
+    for case in [
+        "wrong-head",
+        "no-waiver",
+        "missing-resource",
+        "unknown-provider",
+        "missing-telemetry",
+        "valid",
+    ] {
+        let mut current = row.clone();
+        let mut actual = resource.clone();
+        match case {
+            "wrong-head" => current["review_waiver_head"] = json!("b".repeat(40)),
+            "no-waiver" => current["review_waived"] = json!(false),
+            "unknown-provider" => actual["provider_known"] = json!(false),
+            "missing-telemetry" => actual["telemetry_evidence_ref"] = json!(""),
+            "missing-resource" | "valid" => {}
+            _ => unreachable!(),
+        }
+        let host = SimWasmHost::new()
+            .with_default_response(500, "unexpected request")
+            .with_response(
+                "https://temper.test/tdata/Efforts('effort')",
+                200,
+                &json!({"fields":current}).to_string(),
+            )
+            .with_response(
+                "https://temper.test/tdata/DsfRailwayServiceInstances('api')",
+                if case == "missing-resource" { 404 } else { 200 },
+                &json!({"fields":actual}).to_string(),
+            )
+            .with_response(
+                "https://temper.test/tdata/ProofPackets('proof-1')",
+                200,
+                &json!({"fields":packet}).to_string(),
+            )
+            .with_response(
+                "https://temper.test/tdata/Files('artifact-1')",
+                200,
+                &json!({"fields":{"status":"Ready"}}).to_string(),
+            )
+            .with_response(
+                "https://temper.test/tdata/Files('artifact-1')/$value",
+                200,
+                &json!({"resource_change":operation}).to_string(),
+            );
+        let ctx = WasmInvocationContext {
+            tenant: "default".into(),
+            entity_type: "Effort".into(),
+            entity_id: "effort".into(),
+            trigger_action: "VerifyWaivedResourceDelivery".into(),
+            wasm_module: Some(module.into()),
+            trigger_params: json!({"head_sha":head}),
+            entity_state: json!({"fields":row}),
+            agent_id: None,
+            session_id: None,
+            integration_config: BTreeMap::from([(
+                "temper_api_url".into(),
+                "https://temper.test".into(),
+            )]),
+            trace_id: String::new(),
+            workflow_root_entity_type: None,
+            workflow_root_entity_id: None,
+            workflow_run_id: None,
+            http_request: None,
+        };
+        let result = engine
+            .invoke(
+                &hash,
+                &ctx,
+                Arc::new(host),
+                &WasmResourceLimits::default(),
+                Arc::new(RwLock::new(StreamRegistry::default())),
+            )
+            .await
+            .unwrap();
+        assert!(result.success, "{case}: {result:?}");
+        assert_eq!(
+            result.callback_action,
+            if case == "valid" {
+                "ResourceDeliveryVerified"
+            } else {
+                "ResourceDeliveryPending"
+            },
+            "{case}: {result:?}"
+        );
+        assert_eq!(result.callback_params["expected_delivery_sequence"], 2);
+        if case == "valid" {
+            let evidence: Value = serde_json::from_str(
+                result.callback_params["resource_delivery_evidence"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(evidence.as_array().unwrap().len(), 1);
+            let mut stale = result.callback_params.clone();
+            stale["expected_delivery_sequence"] = json!(1);
+            assert!(
+                sim.step("effort", &result.callback_action, &stale.to_string())
+                    .is_err()
+            );
+            let completed = step(&mut sim, &result.callback_action, result.callback_params);
+            sim.assert_status("effort", "Verified");
+            assert_eq!(completed["fields"]["review_passed"], false);
+            assert_eq!(completed["fields"]["resource_delivery_merged"], false);
+            assert_eq!(completed["fields"]["deploy_verified"], true);
+        }
+    }
 }

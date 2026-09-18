@@ -358,6 +358,15 @@ kind = "param_nonempty"
 param = "model_provenance_ref"
 
 [[action]]
+name = "BootstrapOperationSequence"
+kind = "input"
+from = ["Active"]
+params = []
+to = "Active"
+effect = [{ type = "decrement", var = "operation_sequence" }]
+guard = [{ type = "max_count", var = "operation_sequence", max = 1 }]
+
+[[action]]
 name = "Observe"
 kind = "input"
 from = ["Active", "Refreshing", "RetrySelectedValidating", "RetrySelectedReady", "RetrySelectedExecuting", "RetrySelectedUnknown", "RetrySelectedReconciling", "RetrySelectedObserved", "RetrySelectedVerifying", "RetrySelectedBlocked", "RetrySelectedFailed"]
@@ -1101,6 +1110,57 @@ field = "operation_sequence"
 [[action.constraints]]
 kind = "param_nonempty"
 param = "error_message"
+
+[[action]]
+name = "RetrySelectedStopExhaustedVerification"
+kind = "input"
+from = ["RetrySelectedObserved"]
+params = [{ name = "operation_key", type = "string" }, { name = "error_message", type = "string" }, { name = "failure_evidence_ref", type = "string" }, { name = "expected_operation_sequence", type = "counter" }]
+to = "RetrySelectedFailed"
+guard = [{ type = "min_count", var = "verification_attempts", min = 40 }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_operation_sequence"
+field = "operation_sequence"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "error_message"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "failure_evidence_ref"
+
+[[action]]
+name = "RetrySelectedAbandonReconciliation"
+kind = "input"
+from = ["RetrySelectedUnknown"]
+params = [{ name = "operation_key", type = "string" }, { name = "error_message", type = "string" }, { name = "failure_evidence_ref", type = "string" }, { name = "expected_operation_sequence", type = "counter" }]
+to = "RetrySelectedFailed"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "operation_key"
+field = "operation_key"
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_operation_sequence"
+field = "operation_sequence"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "error_message"
+
+[[action.constraints]]
+kind = "param_nonempty"
+param = "failure_evidence_ref"
 
 [[action]]
 name = "RetrySelectedAcknowledgeFailure"
