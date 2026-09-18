@@ -251,6 +251,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -294,6 +301,60 @@
             "proof_ref",
             "request_configuration",
             "request_revision"
+          ]
+        },
+        "DeployStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "DeployObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "DeployAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "DeployUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "DeployAcknowledgeFailure": {
@@ -386,6 +447,60 @@
             "proof_ref",
             "request_configuration",
             "request_configuration"
+          ]
+        },
+        "ApplyConfigurationStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "ApplyConfigurationAcknowledgeFailure": {
@@ -483,6 +598,60 @@
             "request_configuration",
             "request_revision",
             "rollback_execution_id"
+          ]
+        },
+        "RollbackStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RollbackObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "RollbackAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RollbackUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "RollbackAcknowledgeFailure": {
@@ -823,6 +992,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -871,6 +1047,60 @@
             "request_configuration",
             "request_revision",
             "deployment_target"
+          ]
+        },
+        "DeployStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "DeployObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "DeployAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "DeployUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "DeployAcknowledgeFailure": {
@@ -968,6 +1198,60 @@
             "request_configuration",
             "request_configuration",
             "deployment_target"
+          ]
+        },
+        "ApplyConfigurationStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "ApplyConfigurationAcknowledgeFailure": {
@@ -1070,6 +1354,60 @@
             "request_revision",
             "rollback_execution_id",
             "deployment_target"
+          ]
+        },
+        "RollbackStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RollbackObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "RollbackAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RollbackUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "RollbackAcknowledgeFailure": {
@@ -1177,6 +1515,60 @@
             "deployment_target",
             "alias",
             "provider_execution_id"
+          ]
+        },
+        "SetAliasStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "SetAliasObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "SetAliasAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "SetAliasUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "SetAliasAcknowledgeFailure": {
@@ -1542,6 +1934,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -1585,6 +1984,60 @@
             "proof_ref",
             "request_configuration",
             "request_configuration"
+          ]
+        },
+        "ApplyConfigurationStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "ApplyConfigurationAcknowledgeFailure": {
@@ -1847,6 +2300,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -1890,6 +2350,60 @@
             "proof_ref",
             "request_configuration",
             "request_configuration"
+          ]
+        },
+        "ApplyConfigurationStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "ApplyConfigurationAcknowledgeFailure": {
@@ -2157,6 +2671,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -2200,6 +2721,60 @@
             "proof_ref",
             "request_configuration",
             "request_configuration"
+          ]
+        },
+        "ApplyConfigurationStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "ApplyConfigurationAcknowledgeFailure": {
@@ -2469,6 +3044,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -2521,6 +3103,60 @@
             "request_configuration",
             "request_revision",
             "selected_generation_ids"
+          ]
+        },
+        "RetrySelectedStopExhaustedVerification": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RetrySelectedObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "RetrySelectedAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RetrySelectedUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
           ]
         },
         "RetrySelectedAcknowledgeFailure": {

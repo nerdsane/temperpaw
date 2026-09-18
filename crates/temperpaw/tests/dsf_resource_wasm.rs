@@ -212,23 +212,33 @@ async fn packaged_configuration_verification_cannot_borrow_production_domain_or_
     );
     state["provider_execution_id"] = json!("instance-1");
     let request_id = format!("dsf-{:x}", Sha256::digest(b"railway-p-s-e:change-2:2"));
-    for (domain, trace_origin, expected) in [
+    for (domain, trace_origin, provider_known, expected) in [
         (
             "api.deep-sci-fi.world",
             "https://api.deep-sci-fi.world",
+            true,
             "ApplyConfigurationVerificationPending",
         ),
         (
             "staging.deep-sci-fi.world",
             "https://api.deep-sci-fi.world",
+            true,
             "ApplyConfigurationVerificationPending",
         ),
         (
             "staging.deep-sci-fi.world",
             stage,
+            true,
             "ApplyConfigurationVerificationSucceeded",
         ),
+        (
+            "staging.deep-sci-fi.world",
+            stage,
+            false,
+            "ApplyConfigurationVerificationPending",
+        ),
     ] {
+        state["provider_known"] = json!(provider_known);
         let provider = json!({"data":{"service":{"id":"service-1","projectId":"project-1"},"serviceInstance":{"id":"instance-1","serviceId":"service-1","environmentId":"env-1","numReplicas":2,"domains":{"customDomains":[{"id":"domain-1","domain":domain,"projectId":"project-1","serviceId":"service-1","environmentId":"env-1","deletedAt":null}],"serviceDomains":[]}}}});
         let trace = json!({"data":[{"attributes":{"service":"backend","env":"production","status":"ok","trace_id":"trace-1","custom":{"git":{"commit":{"sha":"a".repeat(40)}},"dsf":{"request_id":request_id},"http":{"status_code":200,"url":format!("{trace_origin}/api/health")}}}}]});
         let host = SimWasmHost::new()
@@ -315,4 +325,42 @@ async fn packaged_validation_refuses_unbound_discovery_before_any_provider_or_pr
             .unwrap()
             .contains("verification requires a Railway application resource")
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn packaged_model_collector_defers_only_scheduled_future_reads() {
+    let module = "dsf_model_collect";
+    let engine = WasmEngine::new().unwrap();
+    let hash = engine.compile_and_cache(&bytes(module)).unwrap();
+    for scheduled in [true, false] {
+        let ctx = context(
+            "DsfModelSync",
+            module,
+            json!({"fields":{
+                "sync_sequence":7, "scheduled_refresh":scheduled,
+                "next_due_at":"2099-01-01T00:00:00Z"
+            }}),
+        );
+        let result = engine
+            .invoke(
+                &hash,
+                &ctx,
+                Arc::new(SimWasmHost::new().with_default_response(403, "not accessible")),
+                &WasmResourceLimits::default(),
+                Arc::new(RwLock::new(StreamRegistry::default())),
+            )
+            .await
+            .unwrap();
+        assert!(result.success, "{result:?}");
+        assert_eq!(
+            result.callback_action,
+            if scheduled {
+                "CollectionDeferred"
+            } else {
+                "CollectionFailed"
+            }
+        );
+        assert_eq!(result.callback_params["expected_sequence"], 7);
+        assert!(result.callback_params.get("observation_id").is_none());
+    }
 }

@@ -99,7 +99,10 @@ media API access does not mean the application is absent. A production media
 repair additionally proves the linked Railway custom domain and R2 media domain
 before a paid request.
 
-DsfModelSync owns bounded GitHub/code, Flow and Participant observation. Each active
+DsfModelSync owns bounded GitHub/code, Flow and Participant observation. Idle and
+Ready sources check their recorded due time every minute; a future due time skips
+all provider reads and creates no observation. Explicit Refresh collects immediately.
+Pause stops scheduling; failed collections retain their bounded retry policy. Each active
 resource separately refreshes every five minutes through its own state timeout.
 Collection failure rearms that timer; operations suspend it until Active, and
 retirement stops it. Participant

@@ -62,7 +62,11 @@ impl Invocation {
             proof_id: text("proof_ref")?,
             config_ref: text("config_ref")?,
             config_sha256: digest,
+            // The retained receipt is audit history until this operation observes its provider.
             execution_id: field(resource, "provider_execution_id")
+                .filter(|_| {
+                    field(resource, "provider_known").and_then(Value::as_bool) == Some(true)
+                })
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),

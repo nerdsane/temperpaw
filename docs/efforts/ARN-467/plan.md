@@ -35,3 +35,13 @@ actually verified, and the remaining limitation. Localhost alone is not a handov
 A hosted snapshot must identify its capture time and cannot stand in for live
 operation or chat verification. An empty page, a passing unit test or a
 prepared registration file is not a completed checkpoint.
+
+
+## September 16 continuation: first executable DSF delivery
+
+Rita clarified that the twin is the agent-maintained application, infrastructure and user representation through which agents act. The Foundry composer-link direction is withdrawn. The next live milestone is one real resource-owned delivery through the existing Effort, followed by provider, application and Datadog verification; a reusable twin-building skill follows proven DSF usage.
+
+1. Restore governed reads of application/user model rows and authenticated Genesis discovery. Establish actual installed dsf-twin and paw-patrol pins and rollback references before publication.
+2. Repair recurring application/user collection through ModelSync state timeouts, respecting source intervals, pause and callback sequences. Compare the candidate delta with canonical Genesis source before release.
+3. Publish and install the verified twin and resource-delivery lifecycle modules. Bind the chosen DSF service to its real repository, application origin, verification flow and telemetry; the inspected staging resource currently declares no allowed operations.
+4. Run one bounded change through proof, review, the declared resource operation and read-only Effort completion. Observe later automatic collection and an agent-maintained model update. Retain empirical application verification alongside twin evidence. Do not declare delivery from local tests or a registered resource alone.

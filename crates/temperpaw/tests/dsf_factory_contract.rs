@@ -23,6 +23,87 @@ fn source(name: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
+#[test]
+fn legacy_resource_bootstrap_preserves_used_sequences() {
+    use temper_server::entity_actor::{EntityState, effects::process_action};
+    for (file, entity) in ENTITIES.iter().take(6) {
+        let text = source(file);
+        let table = TransitionTable::from_ioa_source(&text);
+        let ioa = temper_spec::automaton::parse_automaton(&text).unwrap();
+        let operation = ioa
+            .actions
+            .iter()
+            .find(|action| {
+                ["Deploy", "ApplyConfiguration", "SetAlias", "RetrySelected"]
+                    .contains(&action.name.as_str())
+            })
+            .unwrap();
+        let mut params: serde_json::Map<String, Value> = operation
+            .params
+            .iter()
+            .map(|param| {
+                (
+                    param.name().to_owned(),
+                    json!(format!("bound-{}", param.name())),
+                )
+            })
+            .collect();
+        params.insert("expected_operation_sequence".into(), json!(0));
+        let params = Value::Object(params);
+        // Recovered legacy state: no persisted operation counter or corresponding field.
+        let mut state: EntityState = serde_json::from_value(json!({
+            "entity_type":entity,"entity_id":"legacy","status":"Active","item_count":0,
+            "fields":{},"counters":{"model_sequence":7,"observed_sequence":9}
+        }))
+        .unwrap();
+        let before = serde_json::to_value(&state).unwrap();
+        assert!(
+            !process_action(&mut state, &table, &operation.name, &params).success,
+            "{entity}"
+        );
+        assert_eq!(serde_json::to_value(&state).unwrap(), before, "{entity}");
+        let start = text
+            .find("[[action]]\nname = \"BootstrapOperationSequence\"")
+            .unwrap();
+        let end = start + text[start + 1..].find("[[action]]").unwrap() + 1;
+        let without_bootstrap = format!("{}{}", &text[..start], &text[end..]);
+        let old_table = TransitionTable::from_ioa_source(&without_bootstrap);
+        assert!(!process_action(&mut state, &old_table, &operation.name, &params).success);
+        assert!(
+            !process_action(
+                &mut state,
+                &old_table,
+                "BootstrapOperationSequence",
+                &json!({})
+            )
+            .success
+        );
+        assert_eq!(serde_json::to_value(&state).unwrap(), before, "{entity}");
+        for _ in 0..2 {
+            let result =
+                process_action(&mut state, &table, "BootstrapOperationSequence", &json!({}));
+            assert!(result.success, "{entity}: {:?}", result.error);
+            assert_eq!(state.counters["operation_sequence"], 0, "{entity}");
+            assert_eq!(state.counters["model_sequence"], 7, "{entity}");
+            assert_eq!(state.counters["observed_sequence"], 9, "{entity}");
+        }
+        assert!(
+            process_action(&mut state, &table, &operation.name, &params).success,
+            "{entity}"
+        );
+        assert_eq!(state.counters["operation_sequence"], 1, "{entity}");
+        assert!(
+            !process_action(&mut state, &table, "BootstrapOperationSequence", &json!({})).success
+        );
+        state.status = "Active".into();
+        let used = serde_json::to_value(&state).unwrap();
+        assert!(
+            !process_action(&mut state, &table, "BootstrapOperationSequence", &json!({})).success
+        );
+        assert_eq!(serde_json::to_value(&state).unwrap(), used, "{entity}");
+    }
+}
+
 fn step(sim: &mut SimActorSystem, action: &str, params: Value) -> Value {
     sim.step("subject", action, &params.to_string())
         .unwrap_or_else(|error| panic!("{action}: {error}"))
@@ -801,6 +882,148 @@ async fn resource_timer_reuse_cancels_the_previous_operation_generation() {
 }
 
 #[test]
+fn abandoning_reconciliation_records_failure_without_asserting_absence() {
+    let mut sim = registered(32);
+    executing(&mut sim, 0);
+    step(&mut sim, "DeployExecutionSucceeded", provider(0));
+    step(&mut sim, "DeployVerify", json!({}));
+    step(&mut sim, "DeployVerificationSucceeded", verification(0));
+    executing(&mut sim, 1);
+    let params = json!({"operation_key":"operation-1","expected_operation_sequence":2,
+        "error_message":"Old receipt was read before any provider write",
+        "failure_evidence_ref":"evidence:pre-write-failure"});
+    assert!(
+        sim.step(
+            "subject",
+            "DeployAbandonReconciliation",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    let unknown = step(
+        &mut sim,
+        "DeployExecutionUncertain",
+        json!({"operation_key":"operation-1",
+        "expected_operation_sequence":2,"error_message":"Revision differs"}),
+    );
+    for (key, value) in [
+        ("operation_key", json!("stale")),
+        ("expected_operation_sequence", json!(0)),
+        ("error_message", json!("")),
+        ("failure_evidence_ref", json!("")),
+    ] {
+        let mut invalid = params.clone();
+        invalid[key] = value;
+        assert!(
+            sim.step(
+                "subject",
+                "DeployAbandonReconciliation",
+                &invalid.to_string()
+            )
+            .is_err()
+        );
+    }
+    let failed = step(&mut sim, "DeployAbandonReconciliation", params.clone());
+    assert_eq!(failed["status"], "DeployFailed");
+    assert_eq!(failed["fields"]["execution_attempts"], 1);
+    assert_eq!(failed["fields"]["reconciliation_attempts"], 0);
+    assert_eq!(failed["fields"]["operation_sequence"], 2);
+    assert_eq!(failed["fields"]["provider_execution_id"], "deployment-1");
+    assert_ne!(failed["fields"]["provider_known"], true);
+    assert_ne!(failed["fields"]["operation_verified"], true);
+    assert_ne!(failed["fields"]["deploy_verified"], true);
+    for name in [
+        "absence_evidence_ref",
+        "provider_execution_id",
+        "provider_evidence_ref",
+    ] {
+        assert_eq!(failed["fields"][name], unknown["fields"][name], "{name}");
+    }
+    assert!(
+        sim.step(
+            "subject",
+            "DeployAbandonReconciliation",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    let mut acknowledgement = params;
+    acknowledgement
+        .as_object_mut()
+        .unwrap()
+        .remove("error_message");
+    let active = step(&mut sim, "DeployAcknowledgeFailure", acknowledgement);
+    assert_eq!(active["status"], "Active");
+    assert_ne!(active["fields"]["operation_verified"], true);
+    assert!(!sim.has_violations());
+}
+
+#[test]
+fn exhausted_verification_can_be_stopped_without_claiming_success() {
+    let mut sim = registered(31);
+    executing(&mut sim, 0);
+    step(&mut sim, "DeployExecutionSucceeded", provider(0));
+    let params = json!({"operation_key":"operation-0","expected_operation_sequence":1,
+        "error_message":"Exact revision has no request correlation tags",
+        "failure_evidence_ref":"evidence:missing-tags"});
+    assert!(
+        sim.step(
+            "subject",
+            "DeployStopExhaustedVerification",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    for _ in 0..40 {
+        step(&mut sim, "DeployVerify", json!({}));
+        step(&mut sim, "DeployVerifyingTimedOut", json!({}));
+    }
+    for (key, value) in [
+        ("operation_key", json!("stale")),
+        ("expected_operation_sequence", json!(0)),
+        ("error_message", json!("")),
+        ("failure_evidence_ref", json!("")),
+    ] {
+        let mut invalid = params.clone();
+        invalid[key] = value;
+        assert!(
+            sim.step(
+                "subject",
+                "DeployStopExhaustedVerification",
+                &invalid.to_string()
+            )
+            .is_err()
+        );
+    }
+    let failed = step(&mut sim, "DeployStopExhaustedVerification", params.clone());
+    assert_eq!(failed["status"], "DeployFailed");
+    assert_eq!(failed["fields"]["verification_attempts"], 40);
+    assert_eq!(failed["fields"]["execution_attempts"], 1);
+    assert_eq!(failed["fields"]["operation_sequence"], 1);
+    assert_eq!(failed["fields"]["provider_known"], true);
+    assert_ne!(failed["fields"]["operation_verified"], true);
+    assert_ne!(failed["fields"]["deploy_verified"], true);
+    assert!(
+        sim.step(
+            "subject",
+            "DeployStopExhaustedVerification",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    let mut acknowledgement = params;
+    acknowledgement
+        .as_object_mut()
+        .unwrap()
+        .remove("error_message");
+    let active = step(&mut sim, "DeployAcknowledgeFailure", acknowledgement);
+    assert_eq!(active["status"], "Active");
+    assert_ne!(active["fields"]["operation_verified"], true);
+    executing(&mut sim, 1);
+    assert!(!sim.has_violations());
+}
+
+#[test]
 fn explicit_resume_restores_only_the_exhausted_read_budget() {
     let mut sim = registered(11);
     executing(&mut sim, 0);
@@ -991,7 +1214,9 @@ fn agent_action_manifest_matches_ioa_and_has_no_retired_resource_routes() {
             .contains(&name)
                 || name.ends_with("ResumeReconciliation")
                 || name.ends_with("ResumeVerification")
-                || name.ends_with("AcknowledgeFailure");
+                || name.ends_with("AcknowledgeFailure")
+                || name.ends_with("StopExhaustedVerification")
+                || name.ends_with("AbandonReconciliation");
             if selected {
                 let actual = &resource["human_actions"][name];
                 assert_eq!(
@@ -1162,4 +1387,114 @@ fn only_current_verified_operation_can_satisfy_the_effort() {
     assert_eq!(acknowledged["fields"]["operation_verified"], false);
     assert_eq!(acknowledged["fields"]["deploy_verified"], false);
     assert_eq!(acknowledged["fields"]["verified_revision"], "revision-1");
+}
+
+#[test]
+fn model_sync_schedules_due_checks_and_fences_deferred_results() {
+    let ioa = temper_spec::automaton::parse_automaton(&source("model_sync")).unwrap();
+    for state in ["Idle", "Ready"] {
+        assert!(ioa.state_timeouts.iter().any(|timer| timer.state == state
+            && timer.on_timeout == "RefreshIfDue"
+            && timer.after_seconds == 60));
+    }
+    assert!(
+        !ioa.state_timeouts
+            .iter()
+            .any(|timer| timer.state == "Paused")
+    );
+    let mut sim = simulator("model_sync", "DsfModelSync", 467);
+    step(
+        &mut sim,
+        "Configure",
+        json!({"subject_type":"DsfFlow", "source_kind":"github", "source_id":"repo", "resource_id":"flow-1", "source_config_ref":"file-1", "computer_id":"computer-1"}),
+    );
+    for sequence in 1..=3 {
+        let row = step(&mut sim, "RefreshIfDue", json!({}));
+        assert_eq!(row["fields"]["scheduled_refresh"], true);
+        assert!(
+            sim.step(
+                "subject",
+                "CollectionDeferred",
+                &json!({"expected_sequence":sequence-1}).to_string()
+            )
+            .is_err()
+        );
+        step(
+            &mut sim,
+            "CollectionDeferred",
+            json!({"expected_sequence":sequence}),
+        );
+        sim.assert_status("subject", "Ready");
+    }
+    step(&mut sim, "Pause", json!({}));
+    assert!(sim.step("subject", "RefreshIfDue", "{}").is_err());
+    step(&mut sim, "Resume", json!({}));
+    let row = step(&mut sim, "Refresh", json!({}));
+    assert_eq!(row["fields"]["scheduled_refresh"], false);
+}
+
+#[tokio::test]
+async fn model_sync_timer_rearms_after_deferral_and_stops_on_pause() {
+    use temper_runtime::{ActorSystem, tenant::TenantId};
+    use temper_server::{
+        registry::SpecRegistry,
+        request_context::AgentContext,
+        state::{DispatchCommand, ServerState},
+    };
+    let xml = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../os-apps/dsf-twin/specs/model.csdl.xml"),
+    )
+    .unwrap();
+    // Shorten only the timer. No provider module is installed in this fixture;
+    // callbacks below stand in for its deferred result, not a provider success.
+    let ioa = source("model_sync").replace("after_seconds = 60", "after_seconds = 1");
+    let mut registry = SpecRegistry::new();
+    registry.register_tenant(
+        "default",
+        temper_spec::csdl::parse_csdl(&xml).unwrap(),
+        xml,
+        &[("DsfModelSync", ioa.as_str())],
+    );
+    let state = ServerState::from_registry(ActorSystem::new("model-sync-timers"), registry);
+    let tenant = TenantId::from("default".to_owned());
+    let ctx = AgentContext::for_service("model-sync-timer-test");
+    state
+        .get_or_create_tenant_entity(&tenant, "DsfModelSync", "subject", json!({}))
+        .await
+        .unwrap();
+    let dispatch = |action, params| {
+        state.dispatch(DispatchCommand {
+            tenant: &tenant,
+            entity_type: "DsfModelSync",
+            entity_id: "subject",
+            action,
+            params,
+            agent_ctx: &ctx,
+            await_integration: false,
+            await_reactions: true,
+        })
+    };
+    assert!(dispatch("Configure", json!({"subject_type":"DsfFlow", "source_kind":"github", "source_id":"repo", "resource_id":"flow-1", "source_config_ref":"file-1", "computer_id":"computer-1"})).await.unwrap().success);
+    for sequence in 1..=2 {
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let row = state
+            .get_tenant_entity_state(&tenant, "DsfModelSync", "subject")
+            .await
+            .unwrap();
+        assert_eq!(row.state.status, "Collecting");
+        assert!(
+            dispatch("CollectionDeferred", json!({"expected_sequence":sequence}))
+                .await
+                .unwrap()
+                .success
+        );
+    }
+    assert!(dispatch("Pause", json!({})).await.unwrap().success);
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    let row = state
+        .get_tenant_entity_state(&tenant, "DsfModelSync", "subject")
+        .await
+        .unwrap();
+    assert_eq!(row.state.status, "Paused");
 }

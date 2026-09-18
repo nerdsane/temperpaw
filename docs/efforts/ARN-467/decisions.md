@@ -488,3 +488,87 @@ Successful collection also carries an empty declared error_message, so a recover
 **Verification:** The cascade fails on the pre-change file (`L1 FAILED: 25 states explored, 6 dead transition(s)`) and passes on this one (`L1 PASSED: 33 states explored`); the whole spec directory goes from `Error: IOA verification failed for entity 'Experiment'` to `IOA verification cascade: ALL PASSED` for all twelve entities. Each new check was run against a mutation first: removing `Select`'s increment, deleting `SelectionSucceeded`'s `param_equals_field` constraint, and pointing `sequence_field()` back at `operation_sequence` each fail the corresponding test. The composite cross-entity stage reports 236 dropped reactions and a PARTIAL `DsfExperiment` scope, both of which reproduce on `origin/main` with this spec removed or replaced by a counter-free variant — they were simply unreachable while the cascade aborted at Experiment.
 
 **Where:** os-apps/dsf-twin/specs/experiment.ioa.toml (`selection_sequence`, `Select`, the three selection constraints); os-apps/dsf-twin/specs/model.csdl.xml (regenerated, one property); os-apps/dsf-twin/wasm/dsf_experiment_common/src/lib.rs (`Phase::sequence_field`, `Invocation::parse`, `execute`), src/guest.rs, src/tests.rs; crates/temperpaw/tests/dsf_experiment_runtime.rs (`a_retried_selection_refuses_the_previous_attempt_s_result`); crates/temperpaw/tests/dsf_factory_contract.rs (selection and cleanup sequence numbers); temper rev 2c6b9460 `crates/temper-verify/src/{cascade.rs,checker.rs,model/builder.rs,model/types.rs}`.
+
+## D40: Keep application and participant observations recurring through the model state machine
+
+**Decision:** DsfModelSync schedules a due check every minute from Idle and Ready. Its existing collector skips provider reads until the recorded next_due_at, while an explicit Refresh still collects immediately. Pause disables scheduling, and failures retain the existing bounded retry path.
+
+**Came up because:** Rita clarified that agents must operate through and maintain the application, infrastructure and user layers. Infrastructure already schedules observations, but successful model collection enters Ready indefinitely; the investigation worker consumes existing observations without scheduling new ones.
+
+**Options:** Add an external polling loop; ignore each source's interval and collect at a fixed cadence; or use declared state timeouts and a sequence-fenced deferred callback in the existing collector.
+
+**Chose declared timeouts because:** Scheduling stays in the executable contract, source intervals remain meaningful, and a due check performs no external reads when the recorded deadline is in the future. Manual refresh remains available. The tradeoff is up to one minute of scheduling delay after a source becomes due. This is a candidate delta against GitHub source; publication still requires comparison with canonical Genesis source and verified installed pins.
+
+**Where:** os-apps/dsf-twin/specs/model_sync.base.toml, generated IOA/CSDL and policies, dsf_model_collect, and dsf_factory_contract tests.
+
+## D41: Bootstrap unused legacy resource counters through a guarded action
+
+**Decision:** Each provider resource exposes BootstrapOperationSequence only in Active with operation_sequence below one. Its saturating decrement persists a missing zero and cannot reset a used sequence.
+
+**Came up because:** The first staging Deploy request failed its expected_operation_sequence constraint before any provider write. The existing journal predates persisted defaults; current kernel recovery deliberately does not invent newly declared fields.
+
+**Options:** Change kernel recovery or equality semantics; patch operational fields directly; or add an explicit, governed app migration for unused resource counters.
+
+**Chose the guarded action because:** It preserves historical state and the deployment concurrency fence, is idempotent at zero, and leaves model and observation counters untouched. The same generated contract covers all six provider resource types. It does not authorize deployment or replace proof, review waiver, provider binding, or telemetry checks. Current canonical Genesis repairs must be retained when this delta is published.
+
+**Where:** os-apps/dsf-twin/specs/generate.py and generated IOA/CSDL/module contracts/Cedar; legacy_resource_bootstrap_preserves_used_sequences in dsf_factory_contract. The regression reproduces the absent-counter failure and rejects a reset after the first operation.
+
+## D42: Stop exhausted verification as an explicit failed operation
+
+**Decision:** Each provider operation exposes StopExhaustedVerification from its Observed state only after all 40 verification attempts. The operator supplies the current operation key and sequence, a failure explanation, and an evidence reference. It transitions to Failed; the existing AcknowledgeFailure releases the resource for another operation.
+
+**Came up because:** The first real staging deployment succeeded at Railway, but its old backend did not export the exact request/revision trace tags needed for verification. Retrying the same revision cannot fix its instrumentation, and the bounded verifier leaves the resource in DeployObserved after 40 attempts.
+
+**Options:** Forge a runtime failure callback, add scheduler/kernel behavior, or expose a guarded operator failure decision in the existing resource contract.
+
+**Chose the explicit decision because:** It preserves the provider execution identity and all attempt/sequence counters, records failure instead of claiming verification, and performs no provider write. ResumeVerification remains available when more read attempts can resolve a transient delay. Recovery rejects early use, stale operation identity, and empty evidence or explanation; runtime success/failure callbacks remain unavailable to operators.
+
+**Where:** os-apps/dsf-twin/specs/generate.py and generated provider IOA/CSDL/module contracts/Cedar; exhausted_verification_can_be_stopped_without_claiming_success in dsf_factory_contract and exhausted_verification_recovery_is_an_operator_command_not_a_callback in dsf_factory_policy. The regression failed against the original contract before this change.
+
+### D43: Reuse Datadog observations for participant cohorts
+
+**Decision:** Allow participant cohorts to consume the existing bounded Datadog measurements.
+
+**Came up because:** The deployed application lacks the operational snapshot endpoint, while the first working twin must maintain its user layer.
+
+**Options:** Add a snapshot endpoint and related application machinery, keep the cohort static, or reuse existing Datadog collection.
+
+**Chose existing Datadog collection over adding an endpoint because:** It maintains measured cohort activity through the existing immutable observation contract with no new API or credentials. Request counts are not unique people and may include synthetic probes; missing data stays absent rather than becoming zero.
+
+**Where:** `os-apps/dsf-twin/wasm/dsf_model_collect/src/lib.rs`, participant binding regression tests and module README; PR527.
+
+## D44: Scope provider receipts to the current operation
+
+**Decision:** Decode a retained provider_execution_id as the current invocation's execution receipt only when provider_known is true. Keep the persisted field unchanged for audit history.
+
+**Came up because:** A second staging Deploy correctly reset provider_known but inherited the previous deployment ID. Its adapter queried that old deployment and rejected the new requested revision before writing anything.
+
+**Options:** Erase provider history when beginning an operation, special-case Railway, or honor the existing current-operation receipt flag at the shared invocation boundary.
+
+**Chose the shared boundary because:** Every generated operation already resets provider_known and only correlated provider callbacks set it true. This preserves history and fixes sequential operations across providers. Uncertain operations still discover matching provider executions without writing; an empty listing remains pending because it does not prove absence under eventual consistency. The fix does not reset attempt budgets or authorize another ambiguous write.
+
+**Where:** dsf_resource_common/src/invocation.rs; sequential receipt and Railway execute/reconcile regressions. The common regression failed against the original decoder before the fix. The packaged verification fixture now models the declared provider_known=true callback state and separately proves that an old receipt with provider_known=false cannot pass even with matching application and trace evidence; this negative case fails the original WASM.
+
+## D45: Record abandoned reconciliation without claiming provider absence
+
+**Decision:** Expose AbandonReconciliation from an operation's Unknown state to Failed, requiring its exact operation key/sequence and nonempty explanation/evidence. Existing AcknowledgeFailure releases the resource afterward; neither action retries or resets counters.
+
+**Came up because:** The stale-receipt defect failed before the second deployment's provider mutation, but the conservative runtime reported an uncertain execution. Fixing receipt selection cannot turn an empty, potentially delayed provider listing into proof of absence.
+
+**Options:** Assert absence from an empty listing, reset the write budget, or record the authorized operator decision to stop reconciliation separately from provider facts.
+
+**Chose explicit abandonment because:** It preserves provider receipts, counters, and unverified status without inventing absence or success. For this incident, the source path and old-revision lookup establish a pre-write failure; a fresh deployment still requires a baseline recheck and its normal proof/authorization. A genuinely ambiguous write must be investigated before requesting another operation.
+
+**Where:** generated provider contracts, human-action manifest, Cedar, and runtime contract/policy regressions. The new action regression failed against the original contract before the change.
+
+## D46: Complete explicitly waived resource delivery with real resource proof
+
+**Decision:** Let an exact-head owner-authorized Effort verify its configured twin operations through the existing resource verifier while preserving review_passed=false and resource_delivery_merged=false.
+
+**Came up because:** Canonical owner authorization reaches Merged without pretending a model review or Git merge occurred, but the original resource delivery verifier only accepted the reviewed Git-merge path.
+
+**Options:** Manufacture passing review/merge flags, leave the authorized lifecycle incomplete, or add an explicit waived entry to the same evidence verifier.
+
+**Chose the explicit entry because:** It retains the recorded authorization, head, proof and readiness requirements, then requires current Active resource state, known provider identity, exact operation binding and application/telemetry evidence. It does not weaken the reviewed path. A guarded zero-only bootstrap handles existing records whose delivery counter predates the contract.
+
+**Where:** paw-patrol Effort contract, chain_merge_ready and effort_resource_delivery modules; the actor plus actual compiled canonical module regression covers successful waived verification and wrong head, missing waiver/resource/telemetry, unknown provider and stale callback rejection. Canonical patrol f04211aa07be0d94b5dc88c7f40eaa0ca894f0da preserves the prior owner-waiver actions.

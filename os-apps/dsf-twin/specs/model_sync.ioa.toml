@@ -5,7 +5,12 @@ name = "DsfModelSync"
 states = ["Draft", "Idle", "Collecting", "Ready", "Failed", "Paused"]
 initial = "Draft"
 strict_action_params = true
-allow_indefinite_states = ["Draft", "Idle", "Ready", "Failed", "Paused"]
+allow_indefinite_states = ["Draft", "Failed", "Paused"]
+
+[[state]]
+name = "scheduled_refresh"
+type = "bool"
+initial = "false"
 
 [[state]]
 name = "source_kind"
@@ -161,7 +166,7 @@ kind = "input"
 from = ["Idle", "Ready", "Failed"]
 to = "Collecting"
 guard = [{ type = "max_count", var = "failure_count", max = 3 }]
-effect = [{ type = "increment", var = "sync_sequence" }, { type = "trigger", name = "dsf_model_collect" }]
+effect = [{ type = "set_bool", var = "scheduled_refresh", value = false }, { type = "increment", var = "sync_sequence" }, { type = "trigger", name = "dsf_model_collect" }]
 
 [[action.triggers]]
 name = "dsf_model_collect"
@@ -170,6 +175,34 @@ module = "dsf_model_collect"
 
 [action.triggers.config]
 timeout_secs = "120"
+
+[[action]]
+name = "RefreshIfDue"
+kind = "internal"
+from = ["Idle", "Ready"]
+to = "Collecting"
+guard = [{ type = "max_count", var = "failure_count", max = 3 }]
+effect = [{ type = "set_bool", var = "scheduled_refresh", value = true }, { type = "increment", var = "sync_sequence" }, { type = "trigger", name = "dsf_model_collect" }]
+
+[[action.triggers]]
+name = "dsf_model_collect"
+kind = "wasm"
+module = "dsf_model_collect"
+
+[action.triggers.config]
+timeout_secs = "120"
+
+[[action]]
+name = "CollectionDeferred"
+kind = "input"
+from = ["Collecting"]
+to = "Ready"
+params = [{ name = "expected_sequence", type = "counter" }]
+
+[[action.constraints]]
+kind = "param_equals_field"
+param = "expected_sequence"
+field = "sync_sequence"
 
 [[action]]
 name = "CollectionFailed"
@@ -481,6 +514,16 @@ on_timeout = "CollectionTimedOut"
 state = "Failed"
 after_seconds = 900
 on_timeout = "Refresh"
+
+[[state_timeout]]
+state = "Idle"
+after_seconds = 60
+on_timeout = "RefreshIfDue"
+
+[[state_timeout]]
+state = "Ready"
+after_seconds = 60
+on_timeout = "RefreshIfDue"
 
 [[invariant]]
 name = "BoundedCollectionFailures"

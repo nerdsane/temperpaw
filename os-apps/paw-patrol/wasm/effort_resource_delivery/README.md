@@ -11,3 +11,9 @@ Each plan entry has `entity_type`, `resource_id`, `action`, `operation_key`, `op
 Run the shared crate tests and `audit_callers.py`. Native actor, HTTP and compiled-WASM coverage is in `crates/temperpaw/tests/effort_resource_delivery.rs`. Its GitHub boundary uses the real gate with recorded HTTP responses; it does not claim an external GitHub request or provider deployment.
 
 Build wrappers with their default Cargo target directories. If sharing a target directory for these wrappers, keep standalone `chain_*` entrypoint builds in their own targets: the wrappers depend on those crates in library mode.
+
+An existing exact-head owner-authorized resource deployment can enter verification
+with `VerifyWaivedResourceDelivery`. This preserves `review_passed=false` and
+does not assert a Git merge. It rechecks the waiver, current resource proofs and
+all exact provider results. Legacy Efforts bootstrap an absent delivery counter
+with `BootstrapDeliverySequence`; its zero-only guard prevents counter rewind.

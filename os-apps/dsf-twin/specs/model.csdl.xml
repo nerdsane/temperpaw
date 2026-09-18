@@ -98,6 +98,9 @@
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
       </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+      </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
         <Parameter Name="observation_id" Type="Edm.String" />
@@ -290,6 +293,20 @@
         <Parameter Name="error_message" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
+      <Action Name="DeployStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="DeployAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
       <Action Name="DeployAcknowledgeFailure" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
         <Parameter Name="operation_key" Type="Edm.String" />
@@ -411,6 +428,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="ApplyConfigurationAcknowledgeFailure" IsBound="true">
@@ -535,6 +566,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="RollbackStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="RollbackAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="RollbackAcknowledgeFailure" IsBound="true">
@@ -665,6 +710,9 @@
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
       </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+      </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
         <Parameter Name="observation_id" Type="Edm.String" />
@@ -858,6 +906,20 @@
         <Parameter Name="error_message" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
+      <Action Name="DeployStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="DeployAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
       <Action Name="DeployAcknowledgeFailure" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
         <Parameter Name="operation_key" Type="Edm.String" />
@@ -980,6 +1042,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="ApplyConfigurationAcknowledgeFailure" IsBound="true">
@@ -1105,6 +1181,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="RollbackStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="RollbackAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="RollbackAcknowledgeFailure" IsBound="true">
@@ -1233,6 +1323,20 @@
         <Parameter Name="error_message" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
+      <Action Name="SetAliasStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="SetAliasAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
       <Action Name="SetAliasAcknowledgeFailure" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
         <Parameter Name="operation_key" Type="Edm.String" />
@@ -1352,6 +1456,9 @@
         <Parameter Name="config_sha256" Type="Edm.String" />
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
+      </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
       </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
@@ -1543,6 +1650,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="ApplyConfigurationAcknowledgeFailure" IsBound="true">
@@ -1667,6 +1788,9 @@
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
       </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
+      </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
         <Parameter Name="observation_id" Type="Edm.String" />
@@ -1857,6 +1981,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="ApplyConfigurationAcknowledgeFailure" IsBound="true">
@@ -1983,6 +2121,9 @@
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
       </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
+      </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
         <Parameter Name="observation_id" Type="Edm.String" />
@@ -2173,6 +2314,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="ApplyConfigurationAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="ApplyConfigurationAcknowledgeFailure" IsBound="true">
@@ -2300,6 +2455,9 @@
         <Parameter Name="config_sha256" Type="Edm.String" />
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
+      </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />
       </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />
@@ -2493,6 +2651,20 @@
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />
         <Parameter Name="operation_key" Type="Edm.String" />
         <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="RetrySelectedStopExhaustedVerification" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
+        <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
+      </Action>
+      <Action Name="RetrySelectedAbandonReconciliation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />
+        <Parameter Name="operation_key" Type="Edm.String" />
+        <Parameter Name="error_message" Type="Edm.String" />
+        <Parameter Name="failure_evidence_ref" Type="Edm.String" />
         <Parameter Name="expected_operation_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="RetrySelectedAcknowledgeFailure" IsBound="true">
@@ -3013,6 +3185,7 @@
         </Key>
         <Property Name="Id" Type="Edm.String" Nullable="false" />
         <Property Name="Status" Type="Edm.String" />
+        <Property Name="ScheduledRefresh" Type="Edm.Boolean" />
         <Property Name="SourceKind" Type="Edm.String" />
         <Property Name="SourceId" Type="Edm.String" />
         <Property Name="ResourceId" Type="Edm.String" />
@@ -3051,6 +3224,13 @@
       </Action>
       <Action Name="Refresh" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
+      </Action>
+      <Action Name="RefreshIfDue" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
+      </Action>
+      <Action Name="CollectionDeferred" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />
+        <Parameter Name="expected_sequence" Type="Edm.Int64" />
       </Action>
       <Action Name="CollectionFailed" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfModelSync" />

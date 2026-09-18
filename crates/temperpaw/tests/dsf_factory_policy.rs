@@ -28,6 +28,45 @@ fn service(name: &str) -> SecurityContext {
     AgentContext::for_service(name).security_ctx.unwrap()
 }
 #[test]
+fn exhausted_verification_recovery_is_an_operator_command_not_a_callback() {
+    let engine = policy("");
+    for kind in ["human", "dsf-factory"] {
+        let member = SecurityContext::from_resolved_identity("member", kind, None);
+        assert!(allowed(
+            &engine,
+            &member,
+            "DsfRailwayServiceInstance",
+            "DeployStopExhaustedVerification"
+        ));
+        assert!(allowed(
+            &engine,
+            &member,
+            "DsfRailwayServiceInstance",
+            "DeployAbandonReconciliation"
+        ));
+        assert!(!allowed(
+            &engine,
+            &member,
+            "DsfRailwayServiceInstance",
+            "DeployVerificationFailed"
+        ));
+        assert!(!allowed(
+            &engine,
+            &member,
+            "DsfRailwayServiceInstance",
+            "DeployVerificationSucceeded"
+        ));
+    }
+    let other = SecurityContext::from_resolved_identity("other", "other-agent", None);
+    assert!(!allowed(
+        &engine,
+        &other,
+        "DsfRailwayServiceInstance",
+        "DeployStopExhaustedVerification"
+    ));
+}
+
+#[test]
 fn resident_agents_can_raise_questions_but_cannot_answer_them() {
     let text = fs::read_to_string(app().join("policies/resident_asks.cedar")).unwrap();
     let engine = AuthzEngine::new(&text).unwrap();
@@ -356,4 +395,25 @@ fn actual_wasm_authorization_adapter_uses_method_context_and_secret_id() {
         gate.authorize_secret_access("dsf_vercel_token", &ctx),
         WasmAuthzDecision::Deny(_)
     ));
+}
+
+#[test]
+fn model_due_checks_and_deferred_callbacks_are_runtime_only() {
+    let engine = policy("permit(principal, action, resource);");
+    let agent = SecurityContext::from_resolved_identity("factory", "dsf-factory", None);
+    for action in ["RefreshIfDue", "CollectionDeferred"] {
+        assert!(!allowed(&engine, &agent, "DsfModelSync", action));
+        assert!(allowed(
+            &engine,
+            &service("wasm-runtime"),
+            "DsfModelSync",
+            action
+        ));
+        assert!(allowed(
+            &engine,
+            &service("timeout-scheduler"),
+            "DsfModelSync",
+            action
+        ));
+    }
 }
