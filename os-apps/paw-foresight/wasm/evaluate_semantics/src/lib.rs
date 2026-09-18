@@ -68,7 +68,10 @@ fn validate(response: &Value) -> Result<(), String> {
             sum += n;
             max = max.max(n);
         }
-        if (sum - 1.0).abs() > 0.00001 {
+        // Live Jev responses round probabilities to two decimal places.
+        // Three independently rounded options can differ from one by 0.015.
+        // Preserve the raw response; scoring normalizes the accepted distribution.
+        if (sum - 1.0).abs() > 0.015 + f64::EPSILON {
             return Err("distribution_not_normalized".into());
         }
         let choice = a["choice"].as_str().ok_or("missing_choice")?;
@@ -246,6 +249,17 @@ mod tests {
     #[test]
     fn accepts_complete_distribution() {
         assert!(validate(&response()).is_ok());
+    }
+    #[test]
+    fn accepts_observed_rounding_but_rejects_larger_mass_errors() {
+        let mut r = response();
+        // Numerical values from the saved live decomposition_batched response;
+        // labels are mapped solely to exercise the three-option wire contract.
+        r["answers"]["timing"]["probabilities"] =
+            json!({"clear":0.81,"defect":0.10,"unknown":0.08});
+        assert!(validate(&r).is_ok());
+        r["answers"]["timing"]["probabilities"]["unknown"] = json!(0.06);
+        assert!(validate(&r).is_err());
     }
     #[test]
     fn rejects_missing_or_inconsistent_answers() {

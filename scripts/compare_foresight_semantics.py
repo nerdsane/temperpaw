@@ -61,7 +61,8 @@ def summarize(rows, labels):
             q = quality[key]
             q["n"] += 1
             q["correct"] += answer["choice"] == expected
-            q["brier_sum"] += sum((p - float(option == expected)) ** 2
+            mass = sum(answer["probabilities"].values())
+            q["brier_sum"] += sum((p / mass - float(option == expected)) ** 2
                                    for option, p in answer["probabilities"].items())
     return {
         "records": len(rows), "statuses": dict(statuses), "errors": dict(errors),
@@ -78,7 +79,8 @@ def summarize(rows, labels):
             for key, q in quality.items()},
         "limits": ["Shadow mode retains every existing critic call.",
                    "Provider latency is not whole-pipeline elapsed time.",
-                   "Semantic labels do not measure future forecast accuracy."]}
+                   "Semantic labels do not measure future forecast accuracy.",
+                   "Brier scores normalize rounded probabilities; raw records remain unchanged."]}
 
 
 if __name__ == "__main__":
