@@ -25,3 +25,13 @@ The report and exact evidence are in Foundry: `arn518-fair-comparison-report.md`
 ## Verification
 
 The shared-packet guest test exercises preparation and both consumers, checks that no consumer refetches documents, compares their complete input and rubric, and verifies tampering rejection. Runtime tests prove the callback/system-entry/spawn sequence, terminal outcomes and callback permissions. A stale preparation cannot overwrite a newer repair. The explicit ignored live test replays frozen packets through the actual compiled Jev guest using ProductionWasmHost; credentials are supplied only through a restricted file path and never appear in artifacts.
+
+## Transition-localization replay
+
+An additional live API experiment evaluated 171 recorded internal dependencies across the same 22 paths, preserving all document text as indexed verbatim passages. The four questions were asked per dependency; each resulting defect then received a separate passage-selection question with every passage plus `none`. This experimental harness is in `scripts/localize_foresight_jev.py`; calculations are in `scripts/summarize_foresight_localization.py`. It is not deployed application behavior.
+
+Jev returned 76 timing flags (54 with a selected passage) and 67 missing-step flags (12 with a selected passage); no local contradiction or incentive flags. Ten of the original 25 broad disagreements had a corresponding local flag with a citation. The repeated broad questions matched 85/88 prior Jev judgments. A selected passage is not validation: several missing-step citations describe timing concerns rather than omitted prerequisites. Existing author cost flags remain visible, so retrieving them is not independent discovery.
+
+All final cases completed. Four initial citation requests exceeded the token budget, resolved by batching four citation questions per request with full context. One inconsistent choice/probability response was rejected and the classification rerun once; failed attempts are retained. Source reconstruction, offsets, packet hashes, exact edge selection, citation coverage and summary totals were checked. External references (274 edges) were recorded but not individually assessed, and no new matched GPT run or gold-label accuracy claim is made.
+
+Foundry holds `arn518-jev-localization-report.md`, `arn518-jev-localization-results.json`, `arn518-jev-localization-summary.json` and `arn518-jev-localization-pilot.json`. The design supported by this experiment is specific transition flags with inspectable citations and reasoning review before any cost or forecast changes.
