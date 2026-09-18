@@ -662,3 +662,18 @@ unless { principal is Admin || (principal has agent_type && ["human","supervisor
 // not expose workspace browsing or management to model sessions or operators.
 permit(principal is Agent, action in [Action::"read", Action::"list"], resource is Workspace)
 when { principal has agent_type && principal.agent_type == "system" };
+
+// Jev is a shadow evaluator. Its records cannot mutate paths or forecasts.
+permit(principal, action in [Action::"read", Action::"list"], resource is SemanticEvaluation);
+permit(principal, action in [Action::"create", Action::"Evaluate", Action::"Timeout"], resource is SemanticEvaluation)
+when { principal has agent_type && principal.agent_type == "system" };
+permit(principal == Agent::"service:wasm-runtime",
+  action in [Action::"Record", Action::"Skip", Action::"Fail"], resource is SemanticEvaluation);
+forbid(principal, action in [Action::"update", Action::"delete"], resource is SemanticEvaluation);
+permit(principal is Admin, action == Action::"ConfigureSemanticEvaluation", resource is World);
+permit(principal, action == Action::"ConfigureSemanticEvaluation", resource is World)
+when { principal has agent_type && ["human","supervisor","system"].contains(principal.agent_type) };
+permit(principal is Agent, action == Action::"http_call", resource is HttpEndpoint)
+when { context.module == "evaluate_semantics" };
+permit(principal is Agent, action == Action::"access_secret", resource is Secret)
+when { context.module == "evaluate_semantics" };

@@ -296,6 +296,7 @@
       <!-- Corridor world engine (ADR-002) -->
 
       <EntityType Name="World">
+        <Property Name="SemanticEvaluationMode" Type="Edm.String"/>
         <Key><PropertyRef Name="Id"/></Key>
         <Property Name="Id" Type="Edm.String" Nullable="false"/>
         <Property Name="Status" Type="Edm.String"/>
@@ -1158,7 +1159,21 @@
         <ReturnType Type="TemperPaw.Foresight.LearningRun"/>
       </Action>
 
+      <EntityType Name="SemanticEvaluation">
+        <Key><PropertyRef Name="Id"/></Key>
+        <Property Name="Id" Type="Edm.String"/>
+        <Property Name="Status" Type="Edm.String"/>
+        <Property Name="ParentId" Type="Edm.String"/>
+        <Property Name="WorldId" Type="Edm.String"/>
+        <Property Name="EndpointId" Type="Edm.String"/>
+        <Property Name="RepairLogFileId" Type="Edm.String"/>
+        <Property Name="RequiredNodeIds" Type="Edm.String"/>
+        <Property Name="RoundCount" Type="Edm.String"/>
+        <Property Name="ResultJson" Type="Edm.String"/>
+        <Property Name="ErrorMessage" Type="Edm.String"/>
+      </EntityType>
       <EntityContainer Name="Service">
+        <EntitySet Name="SemanticEvaluations" EntityType="TemperPaw.Foresight.SemanticEvaluation"/>
         <EntitySet Name="ForesightModels" EntityType="TemperPaw.Foresight.ForesightModel"/>
         <EntitySet Name="Projections" EntityType="TemperPaw.Foresight.Projection"/>
         <EntitySet Name="Observations" EntityType="TemperPaw.Foresight.Observation"/>
@@ -1297,6 +1312,32 @@
       <Action Name="CommitForecastSnapshot" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
         <Parameter Name="expected_registration_attempt" Type="Edm.Int64"/>
+      </Action>
+      <Action Name="ConfigureSemanticEvaluation" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <Parameter Name="semantic_evaluation_mode" Type="Edm.String"/>
+      </Action>
+      <Action Name="Evaluate" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.SemanticEvaluation"/>
+        <Parameter Name="world_id" Type="Edm.String"/>
+        <Parameter Name="endpoint_id" Type="Edm.String"/>
+        <Parameter Name="repair_log_file_id" Type="Edm.String"/>
+        <Parameter Name="required_node_ids" Type="Edm.String"/>
+        <Parameter Name="round_count" Type="Edm.String"/>
+      </Action>
+      <Action Name="Record" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.SemanticEvaluation"/>
+        <Parameter Name="result_json" Type="Edm.String"/>
+      </Action>
+      <Action Name="Skip" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.SemanticEvaluation"/>
+      </Action>
+      <Action Name="Fail" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.SemanticEvaluation"/>
+        <Parameter Name="error_message" Type="Edm.String"/>
+      </Action>
+      <Action Name="Timeout" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.SemanticEvaluation"/>
       </Action>
     </Schema>
   </edmx:DataServices>

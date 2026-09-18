@@ -1031,3 +1031,17 @@ type = "same_id"
 name = "registration_nodes_json"
 type = "string"
 initial = "[]"
+
+# Chosen before research so comparison runs have explicit evaluator provenance.
+[[state]]
+name = "semantic_evaluation_mode"
+type = "string"
+initial = "off"
+
+[[action]]
+name = "ConfigureSemanticEvaluation"
+kind = "input"
+from = ["Created"]
+to = "Created"
+params = ["semantic_evaluation_mode"]
+constraints = [{kind="param_nonempty",param="semantic_evaluation_mode"}]

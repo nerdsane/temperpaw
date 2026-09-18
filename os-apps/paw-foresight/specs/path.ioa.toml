@@ -441,7 +441,10 @@ kind = "input"
 from = ["Repaired"]
 params = []
 hint = "Start the adversary after the deterministic prune gate passes."
-effect = [{ type = "trigger", name = "spawn_adversaries" }]
+effect = [
+  { type = "trigger", name = "spawn_adversaries" },
+  { type = "spawn", entity_type = "SemanticEvaluation", entity_id_source = "{uuid}", initial_action = "Evaluate", copy_fields = "world_id,endpoint_id,repair_log_file_id,required_node_ids,round_count" },
+]
 
 [[action.triggers]]
 name = "spawn_adversaries"

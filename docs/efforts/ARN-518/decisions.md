@@ -497,3 +497,17 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the verified source because:** The release source must reproduce the repair rather than silently reverting it during a rebuild. The kernel change was independently reviewed and tested in its owning repository; this app change aligns the two manifests and lockfile with the native image already under live verification. Kernel PR #479 merged as `42e6223c460eb22f24248a98754d3487a7a97808`.
 
 **Where:** `crates/temperpaw/Cargo.toml`, `crates/paw-codex-worker/Cargo.toml`, `Cargo.lock`; acceptance image native source `9836b4bc21b67b02a575fc241050e179ab2022c1`.
+
+## D41 — Measure Jev in shadow mode before changing routing
+- **Decision:** Add a pinned Jev semantic evaluator without allowing its judgments to change criticism, costing or forecasts.
+- **Came up because:** Rita approved implementing the Jev proposal and comparing the rearchitecture with the current full pipeline.
+- **Options:** Replace the critic immediately; shadow the existing critic with recorded evaluator inputs.
+- **Chose shadow over replacement because:** No Foresight-held-out error rates or routing threshold have been demonstrated. This preserves a valid comparator while measuring coverage, disagreement, latency and usage.
+- **Where:** os-apps/paw-foresight/wasm/evaluate_semantics; docs/efforts/ARN-518/jev-shadow.md.
+
+## D42 — Store asynchronous judgments independently of path progress
+- **Decision:** Each path challenge spawns a SemanticEvaluation whose terminal record is immutable.
+- **Came up because:** A path can revise or finish before a shadow response returns; storing its result on that path would reject late callbacks or overwrite earlier rounds.
+- **Options:** Store the latest result on Path; use a separate bounded evaluation lifecycle.
+- **Chose the evaluation lifecycle because:** It records success, skipped, failed and timed-out evaluations without changing the path's state or losing earlier observations.
+- **Where:** os-apps/paw-foresight/specs/semantic_evaluation.ioa.toml.
