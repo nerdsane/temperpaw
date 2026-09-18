@@ -421,6 +421,8 @@
       </EntityType>
 
       <EntityType Name="Path">
+        <Property Name="ChallengePacketJson" Type="Edm.String"/>
+        <Property Name="ChallengePacketSha256" Type="Edm.String"/>
         <Key><PropertyRef Name="Id"/></Key>
         <Property Name="Id" Type="Edm.String" Nullable="false"/>
         <Property Name="Status" Type="Edm.String"/>
@@ -835,6 +837,15 @@
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
         <ReturnType Type="TemperPaw.Foresight.Path"/>
       </Action>
+      <Action Name="ChallengePrepared" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+        <Parameter Name="challenge_packet_json" Type="Edm.String"/>
+        <Parameter Name="challenge_packet_sha256" Type="Edm.String"/>
+        <Parameter Name="expected_repair_log_file_id" Type="Edm.String"/>
+      </Action>
+      <Action Name="LaunchChallenge" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
+      </Action>
       <Action Name="StartChallenge" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Path"/>
         <ReturnType Type="TemperPaw.Foresight.Path"/>
@@ -1160,6 +1171,8 @@
       </Action>
 
       <EntityType Name="SemanticEvaluation">
+        <Property Name="ChallengePacketJson" Type="Edm.String"/>
+        <Property Name="ChallengePacketSha256" Type="Edm.String"/>
         <Key><PropertyRef Name="Id"/></Key>
         <Property Name="Id" Type="Edm.String"/>
         <Property Name="Status" Type="Edm.String"/>
@@ -1319,6 +1332,8 @@
       </Action>
       <Action Name="Evaluate" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.SemanticEvaluation"/>
+        <Parameter Name="challenge_packet_json" Type="Edm.String"/>
+        <Parameter Name="challenge_packet_sha256" Type="Edm.String"/>
         <Parameter Name="world_id" Type="Edm.String"/>
         <Parameter Name="endpoint_id" Type="Edm.String"/>
         <Parameter Name="repair_log_file_id" Type="Edm.String"/>

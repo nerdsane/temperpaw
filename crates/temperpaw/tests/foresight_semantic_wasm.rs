@@ -24,6 +24,17 @@ fn module_bytes() -> &'static [u8] {
     })
 }
 
+fn packet_fixture(mode: &str) -> (String, String) {
+    use sha2::{Digest, Sha256};
+    let questions: Value = serde_json::from_str(include_str!(
+        "../../../os-apps/paw-foresight/wasm/evaluation_contract.json"
+    ))
+    .unwrap();
+    let packet=json!({"schema_version":"foresight-evaluation-packet-v2","mode":mode,"questions":questions,"state":{"world_id":"w-1","path_id":"p-1","repair":"A requires B. B occurs first.","endpoint_bundle":"A reaches production after B.","observed_graph":"B already exists.","required_nodes":[]}}).to_string();
+    let hash = format!("{:x}", Sha256::digest(packet.as_bytes()));
+    (packet, hash)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn declared_spawn_reaches_terminal_callback_through_real_runtime() {
     use axum::{
@@ -115,9 +126,9 @@ async fn declared_spawn_reaches_terminal_callback_through_real_runtime() {
                 tenant: &tenant,
                 entity_type: "Path",
                 entity_id: "p-1",
-                action: "StartChallenge",
-                params: json!({}),
-                agent_ctx: &system,
+                action: "ChallengePrepared",
+                params: json!({"challenge_packet_json":packet_fixture(mode).0,"challenge_packet_sha256":packet_fixture(mode).1,"expected_repair_log_file_id":"r-1"}),
+                agent_ctx: &AgentContext::for_service("wasm-runtime"),
                 await_integration: true,
                 await_reactions: true,
             })
@@ -163,7 +174,7 @@ async fn declared_spawn_reaches_terminal_callback_through_real_runtime() {
 }
 fn response() -> Value {
     let mut answers = json!({});
-    for k in ["evidence", "prerequisite", "timing"] {
+    for k in ["contradiction", "incentive", "lag", "miracle"] {
         answers[k] = json!({"type":"choice","choice":"clear","probabilities":{"clear":0.96,"defect":0.02,"unknown":0.02},"confidence":0.9});
     }
     json!({"model":"jev-1.13.0","answers":answers,"usage":{"input_tokens":120,"output_tokens":0}})
@@ -188,7 +199,7 @@ async fn evaluate(mode: &str, key: bool, provider: Value) -> Value {
         trigger_action: "Evaluate".into(),
         wasm_module: Some("evaluate_semantics".into()),
         trigger_params: json!({}),
-        entity_state: json!({"status":"Running","fields":{"parent_id":"p-1","world_id":"w-1","repair_log_file_id":"r-1","required_node_ids":"[]","round_count":"0"}}),
+        entity_state: json!({"status":"Running","fields":{"parent_id":"p-1","world_id":"w-1","repair_log_file_id":"r-1","required_node_ids":"[]","round_count":"0","challenge_packet_json":packet_fixture(mode).0,"challenge_packet_sha256":packet_fixture(mode).1}}),
         agent_id: None,
         session_id: None,
         integration_config: config,
@@ -327,7 +338,7 @@ fn path_still_starts_the_original_critic_and_spawns_shadow_separately() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|a| a["name"].as_str() == Some("StartChallenge"))
+        .find(|a| a["name"].as_str() == Some("LaunchChallenge"))
         .unwrap();
     assert_eq!(a["effect"].as_array().unwrap().len(), 2);
     assert_eq!(a["effect"][0]["name"].as_str(), Some("spawn_adversaries"));

@@ -54,14 +54,13 @@ name = "Evaluate"
 kind = "input"
 from = ["Created"]
 to = "Running"
-params = ["world_id","endpoint_id","repair_log_file_id","required_node_ids","round_count"]
+params = ["world_id","endpoint_id","repair_log_file_id","required_node_ids","round_count","challenge_packet_json","challenge_packet_sha256"]
 [[action.triggers]]
 name = "evaluate_semantics"
 kind = "wasm"
 module = "evaluate_semantics"
 on_failure = "Fail"
 [action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
 typesafe_api_key = "{secret:foresight_typesafe_api_key}"
 
 [[action]]
@@ -103,3 +102,13 @@ assert = "no_further_transitions"
 name = "FailedIsFinal"
 when = ["Failed"]
 assert = "no_further_transitions"
+
+[[state]]
+name = "challenge_packet_json"
+type = "string"
+initial = ""
+
+[[state]]
+name = "challenge_packet_sha256"
+type = "string"
+initial = ""

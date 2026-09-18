@@ -102,3 +102,8 @@ startup_loading = "lazy"
 name = "evaluate_semantics"
 criticality = "app-required"
 startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "prepare_challenge"
+criticality = "app-required"
+startup_loading = "lazy"

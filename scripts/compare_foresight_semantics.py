@@ -29,7 +29,8 @@ def summarize(rows, labels):
     judgments = Counter()
     evaluated_hashes = set()
     quality = {k: {"n": 0, "correct": 0, "brier_sum": 0.0}
-               for k in ("evidence", "prerequisite", "timing")}
+               for k in ("contradiction", "incentive", "lag", "miracle",
+                         "evidence", "prerequisite", "timing")}
     for row in rows:
         fields = row.get("fields", row)
         status = row.get("status", fields.get("Status"))

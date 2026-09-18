@@ -13,6 +13,9 @@
 //! Build: `cargo build --target wasm32-unknown-unknown --release`
 
 use temper_wasm_sdk::prelude::*;
+mod packet_contract {
+    include!("../../evaluation_packet.rs");
+}
 
 /// No temper_create: adversaries refute, they never add nodes.
 /// No temper_read: repair log + bundle are inlined at spawn — session reads
@@ -440,40 +443,55 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         // there. Without it, temper.write fails Cedar — hard error.
         let workspace_id = ensure_world_workspace(&ctx, &api, &headers, &world_id)?;
 
-        // Inline repair log + bundle at spawn time (same pattern as repairers).
-        // Session temper.read cannot resolve harness file ids — adversaries were
-        // thrashing on path guesses (7.5k APM errors on tool.temper.read).
-        let repair_log_inline =
-            fetch_file_inline(&ctx, &api, &headers, &repair_log_file_id, "repair log");
-        let mut bundle_inline = String::new();
-        if endpoint_id.is_empty() {
-            ctx.log("warn", "spawn_adversaries: path has no endpoint_id");
+        let packet_raw = get("challenge_packet_json");
+        let packet = packet_contract::checked_packet(&packet_raw, &get("challenge_packet_sha256"))?;
+        let matched = packet["mode"] == "shadow";
+        let (repair_log_inline, bundle_inline) = if matched {
+            (String::new(), String::new())
         } else {
-            match ctx.http_call(
-                "GET",
-                &format!("{api}/tdata/Endpoints('{endpoint_id}')"),
-                &headers,
-                "",
-            ) {
-                Ok(r) if r.status >= 200 && r.status < 300 => {
-                    let endpoint: Value = serde_json::from_str(&r.body).unwrap_or(json!({}));
-                    let bundle_file_id = entity_field(&endpoint, "bundle_file_id", "BundleFileId");
-                    bundle_inline =
-                        fetch_file_inline(&ctx, &api, &headers, &bundle_file_id, "endpoint bundle");
-                }
-                Ok(r) => ctx.log(
-                    "warn",
-                    &format!(
-                        "spawn_adversaries: fetch Endpoint {endpoint_id} failed (HTTP {})",
-                        r.status
+            // Inline repair log + bundle at spawn time (same pattern as repairers).
+            // Session temper.read cannot resolve harness file ids — adversaries were
+            // thrashing on path guesses (7.5k APM errors on tool.temper.read).
+            let repair_log_inline =
+                fetch_file_inline(&ctx, &api, &headers, &repair_log_file_id, "repair log");
+            let mut bundle_inline = String::new();
+            if endpoint_id.is_empty() {
+                ctx.log("warn", "spawn_adversaries: path has no endpoint_id");
+            } else {
+                match ctx.http_call(
+                    "GET",
+                    &format!("{api}/tdata/Endpoints('{endpoint_id}')"),
+                    &headers,
+                    "",
+                ) {
+                    Ok(r) if r.status >= 200 && r.status < 300 => {
+                        let endpoint: Value = serde_json::from_str(&r.body).unwrap_or(json!({}));
+                        let bundle_file_id =
+                            entity_field(&endpoint, "bundle_file_id", "BundleFileId");
+                        bundle_inline = fetch_file_inline(
+                            &ctx,
+                            &api,
+                            &headers,
+                            &bundle_file_id,
+                            "endpoint bundle",
+                        );
+                    }
+                    Ok(r) => ctx.log(
+                        "warn",
+                        &format!(
+                            "spawn_adversaries: fetch Endpoint {endpoint_id} failed (HTTP {})",
+                            r.status
+                        ),
                     ),
-                ),
-                Err(e) => ctx.log(
-                    "warn",
-                    &format!("spawn_adversaries: fetch Endpoint {endpoint_id} failed ({e})"),
-                ),
+                    Err(e) => ctx.log(
+                        "warn",
+                        &format!("spawn_adversaries: fetch Endpoint {endpoint_id} failed ({e})"),
+                    ),
+                }
             }
-        }
+
+            (repair_log_inline, bundle_inline)
+        };
 
         // Create the adversary agent and bind it to the path. A PATCH failure
         // only loosens Cedar's assigned-adversary check: warn and proceed.
@@ -510,14 +528,22 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
         }
 
         // Spawn the adversary session.
-        let adversary_msg = adversary_prompt(
-            &path_id,
-            &world_id,
-            &repair_log_inline,
-            &bundle_inline,
-            &repair_flags,
-            hindcast,
-        );
+        let adversary_msg = if matched {
+            format!(
+                "You are the Adversary for path {path_id} in world {world_id}. Evaluate ONLY the frozen packet below, using exactly its questions and criteria. No external research or additional entity reads are permitted in this matched comparison. For each question return clear, defect or unknown with an evidence-grounded reason. Do not infer certainty from missing evidence. Record the four answers and packet SHA-256 in your challenge log. For each substantive defect not already represented in state.repair_flags, report a cost flag of the corresponding question kind (contradiction, incentive, lag, miracle), a justified low/medium/high severity, and a note. Do not duplicate a cost already acknowledged by the repairer. Do not turn unknown into a defect or a clear judgment. Write the log with temper.write(\"/challenge-log-{path_id}.md\", <markdown>) and then temper.action(\"Paths\",\"{path_id}\",\"ChallengeComplete\",{{\"challenge_log_file_id\":<returned file_id>,\"challenge_flags\":<JSON encoded flags array>}}). Then temper.done(\"complete\"). Never add or repair nodes or compute scores. Packet SHA-256: {}\nFROZEN PACKET:\n{}",
+                get("challenge_packet_sha256"),
+                packet_raw
+            )
+        } else {
+            adversary_prompt(
+                &path_id,
+                &world_id,
+                &repair_log_inline,
+                &bundle_inline,
+                &repair_flags,
+                hindcast,
+            )
+        };
         start_session(
             &ctx,
             &api,
@@ -526,7 +552,11 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             "adversary",
             &model,
             &provider,
-            &tools_enabled(hindcast),
+            &if matched {
+                "temper_action,temper_write".to_string()
+            } else {
+                tools_enabled(hindcast)
+            },
             "40",
             &adversary_msg,
             &workspace_id,

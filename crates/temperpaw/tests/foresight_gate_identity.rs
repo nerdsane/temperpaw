@@ -229,6 +229,7 @@ fn deterministic_entry_actions_reject_direct_dashboard_and_session_calls() {
                 "RelayScoredRoute",
                 "RelayPrunedRoute",
                 "StartChallenge",
+                "LaunchChallenge",
             ],
         ),
     ] {
@@ -278,6 +279,7 @@ fn corridor_entry_triggers_and_metadata_preserve_the_system_boundary() {
                 ("Score", "RelayScoredRoute"),
                 ("Prune", "RelayPrunedRoute"),
                 ("RequestChallenge", "StartChallenge"),
+                ("ChallengePrepared", "LaunchChallenge"),
                 ("RevisionRequested", "ResumeRepair"),
             ],
         ),

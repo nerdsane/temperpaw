@@ -76,7 +76,7 @@ async fn path_callbacks_reenter_system_before_deterministic_http_writes() {
         .map_or(path.len(), |offset| after_header + offset);
     let effect_start = stage_start
         + path[stage_start..stage_end]
-            .find("\neffect = ")
+            .find("\n[[action.triggers]]")
             .expect("StartChallenge must have its provider integration");
     path.replace_range(effect_start..stage_end, "\n");
     // A terminal receiver records the actual authenticated HTTP relay. Claim

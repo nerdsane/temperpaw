@@ -440,18 +440,44 @@ name = "StartChallenge"
 kind = "input"
 from = ["Repaired"]
 params = []
-hint = "Start the adversary after the deterministic prune gate passes."
+hint = "Freeze complete evidence before starting either evaluator."
+[[action.triggers]]
+name = "prepare_challenge"
+kind = "wasm"
+module = "prepare_challenge"
+on_failure = "Fail"
+[action.triggers.config]
+temper_api_url = "{secret:temper_api_url}"
+
+[[action]]
+name = "ChallengePrepared"
+kind = "input"
+from = ["Repaired"]
+params = ["challenge_packet_json","challenge_packet_sha256","expected_repair_log_file_id"]
+constraints = [{kind="param_equals_field",param="expected_repair_log_file_id",field="repair_log_file_id"},{kind="param_nonempty",param="challenge_packet_json"},{kind="param_nonempty",param="challenge_packet_sha256"}]
+[[action.triggers]]
+name = "enter_launchchallenge"
+kind = "entity"
+principal = "system"
+target_entity = "Path"
+target_action = "LaunchChallenge"
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "LaunchChallenge"
+kind = "input"
+from = ["Repaired"]
+params = []
 effect = [
   { type = "trigger", name = "spawn_adversaries" },
-  { type = "spawn", entity_type = "SemanticEvaluation", entity_id_source = "{uuid}", initial_action = "Evaluate", copy_fields = "world_id,endpoint_id,repair_log_file_id,required_node_ids,round_count" },
+  { type = "spawn", entity_type = "SemanticEvaluation", entity_id_source = "{uuid}", initial_action = "Evaluate", copy_fields = "world_id,endpoint_id,repair_log_file_id,required_node_ids,round_count,challenge_packet_json,challenge_packet_sha256" },
 ]
-
 [[action.triggers]]
 name = "spawn_adversaries"
 kind = "wasm"
 module = "spawn_adversaries"
 on_failure = "Fail"
-
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
 
@@ -468,3 +494,13 @@ module = "spawn_repairers"
 on_failure = "Fail"
 [action.triggers.config]
 temper_api_url = "{secret:temper_api_url}"
+
+[[state]]
+name = "challenge_packet_json"
+type = "string"
+initial = ""
+
+[[state]]
+name = "challenge_packet_sha256"
+type = "string"
+initial = ""

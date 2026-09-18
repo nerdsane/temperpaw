@@ -511,3 +511,27 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 - **Options:** Store the latest result on Path; use a separate bounded evaluation lifecycle.
 - **Chose the evaluation lifecycle because:** It records success, skipped, failed and timed-out evaluations without changing the path's state or losing earlier observations.
 - **Where:** os-apps/paw-foresight/specs/semantic_evaluation.ioa.toml.
+
+## D43 — Freeze identical complete context before starting either evaluator
+
+**Decision:** Prepare one hashed packet containing full endpoint and repair narratives, observed evidence, required nodes, repair flags and a shared four-question rubric. Persist it before launching the critic and shadow evaluator. In matched shadow mode neither consumer independently retrieves more context.
+
+**Came up because:** The earlier three-question Jev implementation omitted the endpoint narrative and the broader critic checks, making the initial comparison unfair. The user explicitly requested equal context and a full comparison.
+
+**Options:** Independently retrieve documents in each consumer; send a reduced summary only to Jev; or freeze and share one packet.
+
+**Chose the shared packet because:** It prevents temporal drift, lost context and differing question scope. Hash verification fails closed on changed packets. A stale preparation is rejected by repair-log identity. Complete packets above the size bound fail instead of being silently truncated.
+
+**Where:** `prepare_challenge`, `evaluation_contract.json`, `evaluation_packet.rs`, Path.ChallengePrepared/LaunchChallenge and both consumers.
+
+## D44 — Distinguish paired evaluator evidence from pipeline and forecasting claims
+
+**Decision:** Compare fresh GPT-5.5 and Jev judgments on all 22 completed run-C paths, holding the full packets fixed; retain the incumbent critic while disagreements lack independent labels.
+
+**Came up because:** The user required a fair comparison. Identical-input live runs agree on 63 of 88 judgments, with most disagreement on unexplained discontinuities.
+
+**Options:** Treat the incumbent as truth; treat more Jev flags as better accuracy; or report agreement and limits without inventing labels.
+
+**Chose explicit limits because:** More flags can mean sensitivity or false alarms. The reasoning-session and Jev invocation clocks differ, reasoning usage counters are unusable, and future outcomes are not observed. A critic-stage replay cannot establish a whole-pipeline speedup.
+
+**Where:** `scripts/compare_foresight_evaluators.py`, `docs/efforts/ARN-518/jev-shadow.md` and the Foundry matched-run evidence.

@@ -31,3 +31,7 @@ give both evaluators the same frozen packet. Whole-pipeline experiments keep
 domain, evidence cutoff, generation model and search budget fixed and include
 research, generation, queueing and revision time. Shadow mode makes no claim
 to reduce whole-pipeline time or establish better forecasting accuracy.
+
+## Revision: complete shared context
+
+The original three-question, 24 KiB design above is superseded by D43/D44. StartChallenge now prepares a complete frozen packet before LaunchChallenge starts either consumer. Both use the same four-front critic rubric and hash-checked evidence. Full packet size is bounded at 128 KiB, without truncation. Shadow-mode reasoning tools are restricted to reporting, while off mode retains the existing research behavior. Evaluator data remains independent and cannot alter forecast decisions. A paired 22-path live replay validates input parity but is not a whole-pipeline or forecasting-accuracy benchmark.

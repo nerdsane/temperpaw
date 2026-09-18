@@ -619,9 +619,9 @@ when { principal has agent_type && principal.agent_type == "system" };
 forbid(principal, action in [Action::"PrepareBridge", Action::"EvaluateRoutes"], resource is Claim)
 unless { principal has agent_type && principal.agent_type == "system" };
 
-permit(principal, action in [Action::"EvaluateRepair", Action::"EvaluateChallenge", Action::"RelayScoredRoute", Action::"RelayPrunedRoute", Action::"StartChallenge", Action::"StartRepair"], resource is Path)
+permit(principal, action in [Action::"EvaluateRepair", Action::"EvaluateChallenge", Action::"RelayScoredRoute", Action::"RelayPrunedRoute", Action::"StartChallenge", Action::"LaunchChallenge", Action::"StartRepair"], resource is Path)
 when { principal has agent_type && principal.agent_type == "system" };
-forbid(principal, action in [Action::"EvaluateRepair", Action::"EvaluateChallenge", Action::"RelayScoredRoute", Action::"RelayPrunedRoute", Action::"StartChallenge", Action::"StartRepair"], resource is Path)
+forbid(principal, action in [Action::"EvaluateRepair", Action::"EvaluateChallenge", Action::"RelayScoredRoute", Action::"RelayPrunedRoute", Action::"StartChallenge", Action::"LaunchChallenge", Action::"StartRepair"], resource is Path)
 unless { principal has agent_type && principal.agent_type == "system" };
 
 
@@ -677,3 +677,11 @@ permit(principal is Agent, action == Action::"http_call", resource is HttpEndpoi
 when { context.module == "evaluate_semantics" };
 permit(principal is Agent, action == Action::"access_secret", resource is Secret)
 when { context.module == "evaluate_semantics" };
+
+permit(principal == Agent::"service:wasm-runtime", action == Action::"ChallengePrepared", resource is Path);
+forbid(principal, action == Action::"ChallengePrepared", resource is Path)
+unless { principal == Agent::"service:wasm-runtime" };
+permit(principal is Agent, action == Action::"http_call", resource is HttpEndpoint)
+when { context.module == "prepare_challenge" };
+permit(principal is Agent, action == Action::"access_secret", resource is Secret)
+when { context.module == "prepare_challenge" };
