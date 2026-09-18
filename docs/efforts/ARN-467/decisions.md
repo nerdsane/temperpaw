@@ -500,3 +500,15 @@ Successful collection also carries an empty declared error_message, so a recover
 **Chose declared timeouts because:** Scheduling stays in the executable contract, source intervals remain meaningful, and a due check performs no external reads when the recorded deadline is in the future. Manual refresh remains available. The tradeoff is up to one minute of scheduling delay after a source becomes due. This is a candidate delta against GitHub source; publication still requires comparison with canonical Genesis source and verified installed pins.
 
 **Where:** os-apps/dsf-twin/specs/model_sync.base.toml, generated IOA/CSDL and policies, dsf_model_collect, and dsf_factory_contract tests.
+
+## D41: Bootstrap unused legacy resource counters through a guarded action
+
+**Decision:** Each provider resource exposes BootstrapOperationSequence only in Active with operation_sequence below one. Its saturating decrement persists a missing zero and cannot reset a used sequence.
+
+**Came up because:** The first staging Deploy request failed its expected_operation_sequence constraint before any provider write. The existing journal predates persisted defaults; current kernel recovery deliberately does not invent newly declared fields.
+
+**Options:** Change kernel recovery or equality semantics; patch operational fields directly; or add an explicit, governed app migration for unused resource counters.
+
+**Chose the guarded action because:** It preserves historical state and the deployment concurrency fence, is idempotent at zero, and leaves model and observation counters untouched. The same generated contract covers all six provider resource types. It does not authorize deployment or replace proof, review waiver, provider binding, or telemetry checks. Current canonical Genesis repairs must be retained when this delta is published.
+
+**Where:** os-apps/dsf-twin/specs/generate.py and generated IOA/CSDL/module contracts/Cedar; legacy_resource_bootstrap_preserves_used_sequences in dsf_factory_contract. The regression reproduces the absent-counter failure and rejects a reset after the first operation.

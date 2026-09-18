@@ -23,6 +23,87 @@ fn source(name: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
+#[test]
+fn legacy_resource_bootstrap_preserves_used_sequences() {
+    use temper_server::entity_actor::{EntityState, effects::process_action};
+    for (file, entity) in ENTITIES.iter().take(6) {
+        let text = source(file);
+        let table = TransitionTable::from_ioa_source(&text);
+        let ioa = temper_spec::automaton::parse_automaton(&text).unwrap();
+        let operation = ioa
+            .actions
+            .iter()
+            .find(|action| {
+                ["Deploy", "ApplyConfiguration", "SetAlias", "RetrySelected"]
+                    .contains(&action.name.as_str())
+            })
+            .unwrap();
+        let mut params: serde_json::Map<String, Value> = operation
+            .params
+            .iter()
+            .map(|param| {
+                (
+                    param.name().to_owned(),
+                    json!(format!("bound-{}", param.name())),
+                )
+            })
+            .collect();
+        params.insert("expected_operation_sequence".into(), json!(0));
+        let params = Value::Object(params);
+        // Recovered legacy state: no persisted operation counter or corresponding field.
+        let mut state: EntityState = serde_json::from_value(json!({
+            "entity_type":entity,"entity_id":"legacy","status":"Active","item_count":0,
+            "fields":{},"counters":{"model_sequence":7,"observed_sequence":9}
+        }))
+        .unwrap();
+        let before = serde_json::to_value(&state).unwrap();
+        assert!(
+            !process_action(&mut state, &table, &operation.name, &params).success,
+            "{entity}"
+        );
+        assert_eq!(serde_json::to_value(&state).unwrap(), before, "{entity}");
+        let start = text
+            .find("[[action]]\nname = \"BootstrapOperationSequence\"")
+            .unwrap();
+        let end = start + text[start + 1..].find("[[action]]").unwrap() + 1;
+        let without_bootstrap = format!("{}{}", &text[..start], &text[end..]);
+        let old_table = TransitionTable::from_ioa_source(&without_bootstrap);
+        assert!(!process_action(&mut state, &old_table, &operation.name, &params).success);
+        assert!(
+            !process_action(
+                &mut state,
+                &old_table,
+                "BootstrapOperationSequence",
+                &json!({})
+            )
+            .success
+        );
+        assert_eq!(serde_json::to_value(&state).unwrap(), before, "{entity}");
+        for _ in 0..2 {
+            let result =
+                process_action(&mut state, &table, "BootstrapOperationSequence", &json!({}));
+            assert!(result.success, "{entity}: {:?}", result.error);
+            assert_eq!(state.counters["operation_sequence"], 0, "{entity}");
+            assert_eq!(state.counters["model_sequence"], 7, "{entity}");
+            assert_eq!(state.counters["observed_sequence"], 9, "{entity}");
+        }
+        assert!(
+            process_action(&mut state, &table, &operation.name, &params).success,
+            "{entity}"
+        );
+        assert_eq!(state.counters["operation_sequence"], 1, "{entity}");
+        assert!(
+            !process_action(&mut state, &table, "BootstrapOperationSequence", &json!({})).success
+        );
+        state.status = "Active".into();
+        let used = serde_json::to_value(&state).unwrap();
+        assert!(
+            !process_action(&mut state, &table, "BootstrapOperationSequence", &json!({})).success
+        );
+        assert_eq!(serde_json::to_value(&state).unwrap(), used, "{entity}");
+    }
+}
+
 fn step(sim: &mut SimActorSystem, action: &str, params: Value) -> Value {
     sim.step("subject", action, &params.to_string())
         .unwrap_or_else(|error| panic!("{action}: {error}"))

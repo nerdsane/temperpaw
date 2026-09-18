@@ -365,6 +365,15 @@ kind = "param_nonempty"
 param = "model_provenance_ref"
 
 [[action]]
+name = "BootstrapOperationSequence"
+kind = "input"
+from = ["Active"]
+params = []
+to = "Active"
+effect = [{ type = "decrement", var = "operation_sequence" }]
+guard = [{ type = "max_count", var = "operation_sequence", max = 1 }]
+
+[[action]]
 name = "Observe"
 kind = "input"
 from = ["Active", "Refreshing", "DeployValidating", "DeployReady", "DeployExecuting", "DeployUnknown", "DeployReconciling", "DeployObserved", "DeployVerifying", "DeployBlocked", "DeployFailed", "ApplyConfigurationValidating", "ApplyConfigurationReady", "ApplyConfigurationExecuting", "ApplyConfigurationUnknown", "ApplyConfigurationReconciling", "ApplyConfigurationObserved", "ApplyConfigurationVerifying", "ApplyConfigurationBlocked", "ApplyConfigurationFailed", "RollbackValidating", "RollbackReady", "RollbackExecuting", "RollbackUnknown", "RollbackReconciling", "RollbackObserved", "RollbackVerifying", "RollbackBlocked", "RollbackFailed", "SetAliasValidating", "SetAliasReady", "SetAliasExecuting", "SetAliasUnknown", "SetAliasReconciling", "SetAliasObserved", "SetAliasVerifying", "SetAliasBlocked", "SetAliasFailed"]

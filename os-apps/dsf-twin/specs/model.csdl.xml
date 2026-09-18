@@ -98,6 +98,9 @@
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
       </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
+      </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfRailwayServiceInstance" />
         <Parameter Name="observation_id" Type="Edm.String" />
@@ -664,6 +667,9 @@
         <Parameter Name="config_sha256" Type="Edm.String" />
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
+      </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
       </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfVercelProject" />
@@ -1353,6 +1359,9 @@
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
       </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
+      </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfSupabaseProject" />
         <Parameter Name="observation_id" Type="Edm.String" />
@@ -1666,6 +1675,9 @@
         <Parameter Name="config_sha256" Type="Edm.String" />
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
+      </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
       </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfCloudflareR2Bucket" />
@@ -1982,6 +1994,9 @@
         <Parameter Name="config_sha256" Type="Edm.String" />
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
+      </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
       </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfDatadogMonitor" />
@@ -2300,6 +2315,9 @@
         <Parameter Name="config_sha256" Type="Edm.String" />
         <Parameter Name="allowed_operations" Type="Edm.String" />
         <Parameter Name="model_provenance_ref" Type="Edm.String" />
+      </Action>
+      <Action Name="BootstrapOperationSequence" IsBound="true">
+        <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />
       </Action>
       <Action Name="Observe" IsBound="true">
         <Parameter Name="bindingParameter" Type="Dsf.Twin.DsfMediaPipeline" />

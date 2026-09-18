@@ -251,6 +251,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -822,6 +829,13 @@
             "config_sha256",
             "model_provenance_ref"
           ]
+        },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
         },
         "RefreshObservations": {
           "params": [],
@@ -1542,6 +1556,13 @@
             "model_provenance_ref"
           ]
         },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
+        },
         "RefreshObservations": {
           "params": [],
           "from": [
@@ -1846,6 +1867,13 @@
             "config_sha256",
             "model_provenance_ref"
           ]
+        },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
         },
         "RefreshObservations": {
           "params": [],
@@ -2156,6 +2184,13 @@
             "config_sha256",
             "model_provenance_ref"
           ]
+        },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
         },
         "RefreshObservations": {
           "params": [],
@@ -2468,6 +2503,13 @@
             "config_sha256",
             "model_provenance_ref"
           ]
+        },
+        "BootstrapOperationSequence": {
+          "params": [],
+          "from": [
+            "Active"
+          ],
+          "param_nonempty": []
         },
         "RefreshObservations": {
           "params": [],

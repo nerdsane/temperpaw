@@ -412,6 +412,17 @@ def resource_document(entity, provider, identity, operations):
         )
     )
     actions.append(model_revision(operations))
+    # Legacy resource journals may predate persisted counter defaults.
+    # Saturating decrement materializes zero; the guard forbids history resets.
+    actions.append(
+        action(
+            "BootstrapOperationSequence",
+            ["Active"],
+            "Active",
+            guards=[bounded("operation_sequence", 1)],
+            effects=[{"type": "decrement", "var": "operation_sequence"}],
+        )
+    )
     live = [state for state in states if state not in ("Draft", "Retired")]
     observation_inputs = [
         "observation_id",
@@ -994,7 +1005,10 @@ def csdl(documents):
                 references.append((f"Dsf.Twin.{name}/{property_label}", *reference))
         # Provider groups nodes by the external system; role groups by twin concern.
         if name in resource_providers:
-            provider, role = resource_providers[name], PROVIDER_ROLES.get(name, "resource")
+            provider, role = (
+                resource_providers[name],
+                PROVIDER_ROLES.get(name, "resource"),
+            )
         else:
             provider, role = "temper", RECORD_ROLES[name]
         add(entity, "Annotation", Term="Temper.Provider", String=provider)
@@ -1054,6 +1068,7 @@ def module_manifest(documents):
         for name, entry in actions.items():
             if name in {
                 "ReviseModel",
+                "BootstrapOperationSequence",
                 "RefreshObservations",
                 "Deploy",
                 "ApplyConfiguration",
