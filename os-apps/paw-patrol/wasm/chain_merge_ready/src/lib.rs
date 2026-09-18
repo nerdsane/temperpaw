@@ -393,19 +393,29 @@ mod waiver_tests {
     #[test]
     fn waiver_is_explicit_and_revision_bound() {
         let head = "a".repeat(40);
-        let mut fields = json!({"review_waived":true,"review_waiver_head":head,"review_waiver_reason":"Owner explicitly waived further review"});
-        assert!(owner_waiver_holds(&fields, &head));
-        assert!(!owner_waiver_holds(&fields, &"b".repeat(40)));
-        fields["review_waiver_reason"] = json!("");
-        assert!(!owner_waiver_holds(&fields, &head));
-        fields["review_waiver_reason"] = json!("approved");
-        fields["review_waived"] = json!(false);
-        assert!(!owner_waiver_holds(&fields, &head));
+        for wrapped in [false, true] {
+            let wrap = |fields: Value| {
+                if wrapped {
+                    json!({"fields":fields})
+                } else {
+                    fields
+                }
+            };
+            let mut fields = json!({"review_waived":true,"review_waiver_head":head,"review_waiver_reason":"Owner explicitly waived further review"});
+            assert!(owner_waiver_holds(&wrap(fields.clone()), &head));
+            assert!(!owner_waiver_holds(&wrap(fields.clone()), &"b".repeat(40)));
+            fields["review_waiver_reason"] = json!("");
+            assert!(!owner_waiver_holds(&wrap(fields.clone()), &head));
+            fields["review_waiver_reason"] = json!("approved");
+            fields["review_waived"] = json!(false);
+            assert!(!owner_waiver_holds(&wrap(fields), &head));
+        }
     }
 }
 
 /// A separately authorized owner disposition, never a passing model review.
 pub fn owner_waiver_holds(fields: &Value, head: &str) -> bool {
+    let fields = fields.get("fields").unwrap_or(fields);
     is_full_sha(head)
         && bool_of(fields, "review_waived")
         && str_field(fields, "review_waiver_head").as_deref() == Some(head)

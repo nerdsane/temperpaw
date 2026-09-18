@@ -584,3 +584,15 @@ Successful collection also carries an empty declared error_message, so a recover
 **Chose the narrow comparison because:** The external probe and provider-origin binding still require HTTPS. Host, path, explicit ports, credentials, query and fragment remain byte-exact; the comparison does not normalize URLs or accept a different service or deployment. The actual indexed span demonstrates the defect, so query time windows and retention settings remain unchanged.
 
 **Where:** dsf_resource_common verification and real-span fixture; packaged configuration verification. The fixture records the exact twin request ID and revision, and its positive case fails against the original matcher. Negative cases retain the identity and URL boundaries.
+
+## D48: Read owner waivers from the actual Temper entity envelope
+
+**Decision:** Normalize an entity's `fields` envelope in `owner_waiver_holds`, while retaining support for flat fields and the existing exact-head, explicit-waiver and nonempty-reason checks.
+
+**Came up because:** The live staging resource was Active with verified provider, application and trace evidence, but Effort completion returned pending. Replaying the captured rows passed as flat fixtures and failed with the real HTTP entity envelope before reading any resource: the waiver helper read the envelope as if it were the fields.
+
+**Options:** Flatten each caller, alter the runtime response shape, or normalize at the shared waiver predicate as the other review/proof predicates already do.
+
+**Chose the shared predicate because:** It fixes the representation boundary without changing authorization or evidence requirements. The compiled host regression now wraps Effort, resource, ProofPacket and File metadata responses, while file content remains the raw proof artifact.
+
+**Where:** `chain_merge_ready::owner_waiver_holds` and the existing Effort resource delivery tests. Both the pure predicate and compiled installed-module regression fail before the fix; live completion remains a separate required verification.
