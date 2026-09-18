@@ -70,14 +70,14 @@ jobs:
         run: |
           mkdir -p .proof
           python3 - <<'PY'
-          import json, os, sys, urllib.request, ssl
+          import json, os, sys, urllib.request, urllib.parse, ssl
           key=os.environ.get("TEMPER_API_KEY") or ""
           url=os.environ["TEMPER_URL"].rstrip("/")
           head=os.environ["PR_HEAD"]
           if not key:
               print("::error::TEMPER_API_KEY missing - CI asks Temper, not a PR comment"); sys.exit(1)
           req=urllib.request.Request(
-              f"{url}/tdata/ProofPackets",
+              f"{url}/tdata/ProofPackets?" + urllib.parse.urlencode({"$filter": f"commit eq '{head}'"}),
               headers={"Authorization":f"Bearer {key}","X-Tenant-Id":"default","Accept":"application/json"},
           )
           try:
