@@ -57,3 +57,15 @@ Both arms returned 52 findings, with 44 shared (84.6% baseline-relative retentio
 Strict schema, coverage and exact-quote checks passed for 20/22 outputs in each arm. All five nonverbatim quotation instances differed only by Markdown bold markers; they remain failures in the recorded validation. Four policy tests passed, and packet hashes, identical decoded evidence, exhaustive disjoint routing, all 44 unique completed sessions, timing arithmetic and archive hashes were verified. An initial native MCP submission/parser failure was fixed by splitting Python string literals across lines; excluded attempts remain in the evidence.
 
 Foundry holds `arn518-selective-review-report.md`, `arn518-selective-review-summary.json`, `arn518-selective-review-protocol.json`, and `arn518-selective-review-evidence.tar.gz`. The archive includes runnable analysis and exact live-harness sources. This demonstrates a modest observed critic-stage saving on one reused world, not a newly generated full pipeline, production threshold validation or deployment.
+
+## Semantic-program Observatory
+
+The Foresight dashboard now links to a portable Observatory with an animated prerequisite graph, exact function-call inspection, presentation mode, JSON/HTML/SVG export, browser screen capture, local live observation, comparison, a forecast ledger and source-concealed human evaluation. A self-contained HTML artifact and short MP4 are published in Foundry. ADR-012 distinguishes this offline experiment from future Temper-native production execution.
+
+A real Foresight reasoning Session proposed eight alternative hypotheses in 92.7 s. Forty Jev calls composed mechanism comparison, recursive gap checks and next-operation selection in 16.3 s, yielding 88 events over 24 prerequisite nodes. Another 40-call run verified live browser observation in 16.7 s. All candidates remain unresolved; no forecast probability or accuracy gain was inferred. Exact-input reuse and cycle/depth/call guards are tested, but these runs had no cache hits.
+
+The human evaluation view includes excerpts from the original three endpoints as an explicitly unmatched baseline. It records run/candidate identities, usefulness/vividness preferences and rationale; imported recordings support future comparisons. The existing 56 forecasts remain unscored. Outcome scoring rejects missing evidence, simulated outcomes, hindsight and future resolutions and counts one eligible revision per event.
+
+All 54 dashboard Foresight tests and five recursive-program tests pass. The production dashboard build and Svelte checks pass; browser verification covers desktop/mobile, replay, selection, live following, source inspection and portable exports preserving review provenance. No production exploration engine was replaced and no full-backend boot is claimed for this UI/experiment change. See `dashboard/static/observatory/README.md` for execution and export instructions.
+
+Foundry: `arn518-foresight-observatory.html`, `arn518-foresight-observatory-demo.mp4`, `arn518-observatory-recording.json`, `arn518-observatory-report.md`, `arn518-observatory-preview.png`, and `arn518-observatory-evidence.tar.gz`.

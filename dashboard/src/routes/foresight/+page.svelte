@@ -298,7 +298,7 @@
 <div class="foresight">
   <header class="masthead">
     <div><p class="eyebrow">Temper / Foresight</p><h1>Watch the future take shape.</h1><p>Explore possible worlds, follow predictions, and see what experience changes.</p></div>
-    <div class="live"><span class:connected={streamStatus === 'Live'}></span>{streamStatus}<button onclick={load} disabled={loading}>Refresh</button></div>
+    <div class="live"><a href={`${base}/observatory/index.html`} target="_blank" rel="noopener noreferrer">Open Observatory ↗</a><span class:connected={streamStatus === 'Live'}></span>{streamStatus}<button onclick={load} disabled={loading}>Refresh</button></div>
   </header>
   <div class="world-picker">
     <label>World<select bind:value={selectedId} onchange={chooseWorld} disabled={busy}><option value="">Choose a world</option>{#each worlds as item}<option value={item.id}>{item.title} · {item.status}</option>{/each}</select></label>
