@@ -212,23 +212,33 @@ async fn packaged_configuration_verification_cannot_borrow_production_domain_or_
     );
     state["provider_execution_id"] = json!("instance-1");
     let request_id = format!("dsf-{:x}", Sha256::digest(b"railway-p-s-e:change-2:2"));
-    for (domain, trace_origin, expected) in [
+    for (domain, trace_origin, provider_known, expected) in [
         (
             "api.deep-sci-fi.world",
             "https://api.deep-sci-fi.world",
+            true,
             "ApplyConfigurationVerificationPending",
         ),
         (
             "staging.deep-sci-fi.world",
             "https://api.deep-sci-fi.world",
+            true,
             "ApplyConfigurationVerificationPending",
         ),
         (
             "staging.deep-sci-fi.world",
             stage,
+            true,
             "ApplyConfigurationVerificationSucceeded",
         ),
+        (
+            "staging.deep-sci-fi.world",
+            stage,
+            false,
+            "ApplyConfigurationVerificationPending",
+        ),
     ] {
+        state["provider_known"] = json!(provider_known);
         let provider = json!({"data":{"service":{"id":"service-1","projectId":"project-1"},"serviceInstance":{"id":"instance-1","serviceId":"service-1","environmentId":"env-1","numReplicas":2,"domains":{"customDomains":[{"id":"domain-1","domain":domain,"projectId":"project-1","serviceId":"service-1","environmentId":"env-1","deletedAt":null}],"serviceDomains":[]}}}});
         let trace = json!({"data":[{"attributes":{"service":"backend","env":"production","status":"ok","trace_id":"trace-1","custom":{"git":{"commit":{"sha":"a".repeat(40)}},"dsf":{"request_id":request_id},"http":{"status_code":200,"url":format!("{trace_origin}/api/health")}}}}]});
         let host = SimWasmHost::new()

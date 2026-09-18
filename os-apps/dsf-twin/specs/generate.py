@@ -880,6 +880,16 @@ def make_operation(doc, entity, provider, operation, concern):
             guards=[{"type": "min_count", "var": "verification_attempts", "min": 40}],
         )
     )
+    # Abandonment records an operator decision, not provider absence or success.
+    actions.append(
+        action(
+            operation + "AbandonReconciliation",
+            [state("Unknown")],
+            state("Failed"),
+            ["operation_key", "error_message", "failure_evidence_ref"],
+            correlation + nonempty("error_message", "failure_evidence_ref"),
+        )
+    )
     actions.append(
         action(
             operation + "AcknowledgeFailure",
@@ -1092,6 +1102,7 @@ def module_manifest(documents):
                     "ResumeVerification",
                     "AcknowledgeFailure",
                     "StopExhaustedVerification",
+                    "AbandonReconciliation",
                 )
             ):
                 resource["human_actions"][name] = {

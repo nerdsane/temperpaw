@@ -882,6 +882,83 @@ async fn resource_timer_reuse_cancels_the_previous_operation_generation() {
 }
 
 #[test]
+fn abandoning_reconciliation_records_failure_without_asserting_absence() {
+    let mut sim = registered(32);
+    executing(&mut sim, 0);
+    step(&mut sim, "DeployExecutionSucceeded", provider(0));
+    step(&mut sim, "DeployVerify", json!({}));
+    step(&mut sim, "DeployVerificationSucceeded", verification(0));
+    executing(&mut sim, 1);
+    let params = json!({"operation_key":"operation-1","expected_operation_sequence":2,
+        "error_message":"Old receipt was read before any provider write",
+        "failure_evidence_ref":"evidence:pre-write-failure"});
+    assert!(
+        sim.step(
+            "subject",
+            "DeployAbandonReconciliation",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    let unknown = step(
+        &mut sim,
+        "DeployExecutionUncertain",
+        json!({"operation_key":"operation-1",
+        "expected_operation_sequence":2,"error_message":"Revision differs"}),
+    );
+    for (key, value) in [
+        ("operation_key", json!("stale")),
+        ("expected_operation_sequence", json!(0)),
+        ("error_message", json!("")),
+        ("failure_evidence_ref", json!("")),
+    ] {
+        let mut invalid = params.clone();
+        invalid[key] = value;
+        assert!(
+            sim.step(
+                "subject",
+                "DeployAbandonReconciliation",
+                &invalid.to_string()
+            )
+            .is_err()
+        );
+    }
+    let failed = step(&mut sim, "DeployAbandonReconciliation", params.clone());
+    assert_eq!(failed["status"], "DeployFailed");
+    assert_eq!(failed["fields"]["execution_attempts"], 1);
+    assert_eq!(failed["fields"]["reconciliation_attempts"], 0);
+    assert_eq!(failed["fields"]["operation_sequence"], 2);
+    assert_eq!(failed["fields"]["provider_execution_id"], "deployment-1");
+    assert_ne!(failed["fields"]["provider_known"], true);
+    assert_ne!(failed["fields"]["operation_verified"], true);
+    assert_ne!(failed["fields"]["deploy_verified"], true);
+    for name in [
+        "absence_evidence_ref",
+        "provider_execution_id",
+        "provider_evidence_ref",
+    ] {
+        assert_eq!(failed["fields"][name], unknown["fields"][name], "{name}");
+    }
+    assert!(
+        sim.step(
+            "subject",
+            "DeployAbandonReconciliation",
+            &params.to_string()
+        )
+        .is_err()
+    );
+    let mut acknowledgement = params;
+    acknowledgement
+        .as_object_mut()
+        .unwrap()
+        .remove("error_message");
+    let active = step(&mut sim, "DeployAcknowledgeFailure", acknowledgement);
+    assert_eq!(active["status"], "Active");
+    assert_ne!(active["fields"]["operation_verified"], true);
+    assert!(!sim.has_violations());
+}
+
+#[test]
 fn exhausted_verification_can_be_stopped_without_claiming_success() {
     let mut sim = registered(31);
     executing(&mut sim, 0);
@@ -1138,7 +1215,8 @@ fn agent_action_manifest_matches_ioa_and_has_no_retired_resource_routes() {
                 || name.ends_with("ResumeReconciliation")
                 || name.ends_with("ResumeVerification")
                 || name.ends_with("AcknowledgeFailure")
-                || name.ends_with("StopExhaustedVerification");
+                || name.ends_with("StopExhaustedVerification")
+                || name.ends_with("AbandonReconciliation");
             if selected {
                 let actual = &resource["human_actions"][name];
                 assert_eq!(

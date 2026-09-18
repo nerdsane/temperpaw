@@ -779,6 +779,8 @@ permit(
     Action::"ConfigureDeploy",
     Action::"ConfigureResourceDelivery",
     Action::"VerifyResourceDelivery",
+    Action::"VerifyWaivedResourceDelivery",
+    Action::"BootstrapDeliverySequence",
     Action::"Deploy",
     Action::"Stall",
     Action::"Resume",

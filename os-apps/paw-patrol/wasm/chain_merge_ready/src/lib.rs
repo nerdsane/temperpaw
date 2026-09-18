@@ -36,22 +36,23 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             .or_else(|| str_field(&fields, "ProofPacketId"))
             .or_else(|| string_list(&fields, "proof_packet_ids").into_iter().last())
             .ok_or_else(|| "chain_merge_ready: missing proof_packet_id".to_string())?;
-        if review_ids.is_empty() {
+        let waived = ctx.config.get("owner_waiver").is_some_and(|v| v == "true")
+            && owner_waiver_holds(&fields, head);
+        if !waived && review_ids.is_empty() {
             return Err("chain_merge_ready: review_run_ids is empty".to_string());
         }
         let base_url = resolve_api_url(&ctx);
         let headers = odata_headers(&ctx);
         let mut runs = Vec::new();
-        for id in &review_ids {
+        for id in review_ids.iter().filter(|_| !waived) {
             runs.push(get_entity(&ctx, &base_url, &headers, "ReviewRuns", id)?);
         }
         let packet = get_entity(&ctx, &base_url, &headers, "ProofPackets", &proof_id)?;
-        review_panel_holds(&runs, Some(head))?;
+        if !waived {
+            review_panel_holds(&runs, Some(head))?;
+        }
         proof_packet_holds(&packet, Some(head))?;
-        ctx.log(
-            "info",
-            &format!("chain_merge_ready: rows hold for {head}"),
-        );
+        ctx.log("info", &format!("chain_merge_ready: rows hold for {head}"));
         set_success_result("", &json!({ "status": "merge_ready", "head_sha": head }));
         Ok(())
     })();
@@ -69,7 +70,9 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
     let mut reviewers = BTreeSet::new();
     for (i, run) in runs.iter().enumerate() {
         let fields = run.get("fields").unwrap_or(run);
-        if str_field(fields, "status").or_else(|| str_field(fields, "Status")).as_deref()
+        if str_field(fields, "status")
+            .or_else(|| str_field(fields, "Status"))
+            .as_deref()
             != Some("Recorded")
         {
             return Err(format!("chain_merge_ready: ReviewRun[{i}] is not Recorded"));
@@ -107,7 +110,8 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
             return Err(format!("chain_merge_ready: ReviewRun[{i}] commit is bad"));
         }
         commits.insert(commit);
-        if let Some(reviewer) = str_field(fields, "reviewer_id").or_else(|| str_field(fields, "ReviewerId"))
+        if let Some(reviewer) =
+            str_field(fields, "reviewer_id").or_else(|| str_field(fields, "ReviewerId"))
         {
             reviewers.insert(reviewer);
         }
@@ -141,7 +145,9 @@ pub fn review_panel_holds(runs: &[Value], require_commit: Option<&str>) -> Resul
 
 pub fn proof_packet_holds(packet: &Value, require_commit: Option<&str>) -> Result<(), String> {
     let fields = packet.get("fields").unwrap_or(packet);
-    if str_field(fields, "status").or_else(|| str_field(fields, "Status")).as_deref()
+    if str_field(fields, "status")
+        .or_else(|| str_field(fields, "Status"))
+        .as_deref()
         != Some("Recorded")
     {
         return Err("chain_merge_ready: ProofPacket is not Recorded".to_string());
@@ -174,10 +180,7 @@ pub fn proof_packet_holds(packet: &Value, require_commit: Option<&str>) -> Resul
     let mut verification_by_key: BTreeMap<String, String> = BTreeMap::new();
     for f in &features {
         let key = f.get("key").and_then(|v| v.as_str()).unwrap_or("");
-        let verification = f
-            .get("verification")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let verification = f.get("verification").and_then(|v| v.as_str()).unwrap_or("");
         if f.get("verdict").and_then(|v| v.as_str()) == Some("fail") {
             return Err(format!("chain_merge_ready: feature '{key}' failed"));
         }
@@ -202,9 +205,7 @@ pub fn proof_packet_holds(packet: &Value, require_commit: Option<&str>) -> Resul
         match verification_by_key.get(key) {
             Some(v) if v == "rerun" => {}
             _ => {
-                return Err(format!(
-                    "chain_merge_ready: feature '{key}' was not rerun"
-                ));
+                return Err(format!("chain_merge_ready: feature '{key}' was not rerun"));
             }
         }
         if !reran.iter().any(|r| r == key) {
@@ -217,7 +218,10 @@ pub fn proof_packet_holds(packet: &Value, require_commit: Option<&str>) -> Resul
 }
 
 fn is_full_sha(commit: &str) -> bool {
-    commit.len() == 40 && commit.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn json_field(fields: &Value, name: &str) -> Result<Value, String> {
@@ -381,4 +385,29 @@ mod tests {
         assert!(review_panel_holds(&runs, Some(other)).is_err());
         assert!(proof_packet_holds(&packet(), Some(other)).is_err());
     }
+}
+
+#[cfg(test)]
+mod waiver_tests {
+    use super::*;
+    #[test]
+    fn waiver_is_explicit_and_revision_bound() {
+        let head = "a".repeat(40);
+        let mut fields = json!({"review_waived":true,"review_waiver_head":head,"review_waiver_reason":"Owner explicitly waived further review"});
+        assert!(owner_waiver_holds(&fields, &head));
+        assert!(!owner_waiver_holds(&fields, &"b".repeat(40)));
+        fields["review_waiver_reason"] = json!("");
+        assert!(!owner_waiver_holds(&fields, &head));
+        fields["review_waiver_reason"] = json!("approved");
+        fields["review_waived"] = json!(false);
+        assert!(!owner_waiver_holds(&fields, &head));
+    }
+}
+
+/// A separately authorized owner disposition, never a passing model review.
+pub fn owner_waiver_holds(fields: &Value, head: &str) -> bool {
+    is_full_sha(head)
+        && bool_of(fields, "review_waived")
+        && str_field(fields, "review_waiver_head").as_deref() == Some(head)
+        && str_field(fields, "review_waiver_reason").is_some_and(|reason| !reason.trim().is_empty())
 }

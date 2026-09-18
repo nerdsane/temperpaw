@@ -330,6 +330,33 @@
             "failure_evidence_ref"
           ]
         },
+        "DeployAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "DeployUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
         "DeployAcknowledgeFailure": {
           "params": [
             {
@@ -443,6 +470,33 @@
           ],
           "from": [
             "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
           ],
           "param_nonempty": [
             "error_message",
@@ -567,6 +621,33 @@
           ],
           "from": [
             "RollbackObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "RollbackAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RollbackUnknown"
           ],
           "param_nonempty": [
             "error_message",
@@ -995,6 +1076,33 @@
             "failure_evidence_ref"
           ]
         },
+        "DeployAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "DeployUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
         "DeployAcknowledgeFailure": {
           "params": [
             {
@@ -1113,6 +1221,33 @@
           ],
           "from": [
             "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
           ],
           "param_nonempty": [
             "error_message",
@@ -1248,6 +1383,33 @@
             "failure_evidence_ref"
           ]
         },
+        "RollbackAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RollbackUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
         "RollbackAcknowledgeFailure": {
           "params": [
             {
@@ -1376,6 +1538,33 @@
           ],
           "from": [
             "SetAliasObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "SetAliasAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "SetAliasUnknown"
           ],
           "param_nonempty": [
             "error_message",
@@ -1824,6 +2013,33 @@
             "failure_evidence_ref"
           ]
         },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
         "ApplyConfigurationAcknowledgeFailure": {
           "params": [
             {
@@ -2157,6 +2373,33 @@
           ],
           "from": [
             "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
           ],
           "param_nonempty": [
             "error_message",
@@ -2501,6 +2744,33 @@
           ],
           "from": [
             "ApplyConfigurationObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "ApplyConfigurationAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "ApplyConfigurationUnknown"
           ],
           "param_nonempty": [
             "error_message",
@@ -2856,6 +3126,33 @@
           ],
           "from": [
             "RetrySelectedObserved"
+          ],
+          "param_nonempty": [
+            "error_message",
+            "failure_evidence_ref"
+          ]
+        },
+        "RetrySelectedAbandonReconciliation": {
+          "params": [
+            {
+              "name": "operation_key",
+              "type": "string"
+            },
+            {
+              "name": "error_message",
+              "type": "string"
+            },
+            {
+              "name": "failure_evidence_ref",
+              "type": "string"
+            },
+            {
+              "name": "expected_operation_sequence",
+              "type": "counter"
+            }
+          ],
+          "from": [
+            "RetrySelectedUnknown"
           ],
           "param_nonempty": [
             "error_message",

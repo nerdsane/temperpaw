@@ -10,6 +10,25 @@ fn resource() -> Value {
 }
 
 #[test]
+fn successive_operations_do_not_adopt_the_previous_provider_receipt() {
+    let mut row = resource();
+    row["provider_execution_id"] = json!("deployment-first");
+    row["provider_known"] = json!(true);
+    let first = Invocation::parse("railway-project-service-env", &row).unwrap();
+    assert_eq!(first.execution_id.as_deref(), Some("deployment-first"));
+    row["operation_sequence"] = json!(3);
+    row["operation_key"] = json!("change-3");
+    row["provider_known"] = json!(false);
+    let second = Invocation::parse("railway-project-service-env", &row).unwrap();
+    assert_eq!(second.execution_id, None);
+    assert_eq!(second.resource["provider_execution_id"], "deployment-first");
+    row["provider_execution_id"] = json!("deployment-second");
+    row["provider_known"] = json!(true);
+    let observed = Invocation::parse("railway-project-service-env", &row).unwrap();
+    assert_eq!(observed.execution_id.as_deref(), Some("deployment-second"));
+}
+
+#[test]
 fn late_phase_cannot_act_after_resource_advanced_within_same_operation() {
     let mut row = resource();
     let invocation = Invocation::parse("railway-project-service-env", &row).unwrap();

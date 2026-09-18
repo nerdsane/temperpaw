@@ -38,6 +38,12 @@ fn exhausted_verification_recovery_is_an_operator_command_not_a_callback() {
             "DsfRailwayServiceInstance",
             "DeployStopExhaustedVerification"
         ));
+        assert!(allowed(
+            &engine,
+            &member,
+            "DsfRailwayServiceInstance",
+            "DeployAbandonReconciliation"
+        ));
         assert!(!allowed(
             &engine,
             &member,

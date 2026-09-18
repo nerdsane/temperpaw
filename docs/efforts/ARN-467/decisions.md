@@ -536,3 +536,39 @@ Successful collection also carries an empty declared error_message, so a recover
 **Chose existing Datadog collection over adding an endpoint because:** It maintains measured cohort activity through the existing immutable observation contract with no new API or credentials. Request counts are not unique people and may include synthetic probes; missing data stays absent rather than becoming zero.
 
 **Where:** `os-apps/dsf-twin/wasm/dsf_model_collect/src/lib.rs`, participant binding regression tests and module README; PR527.
+
+## D44: Scope provider receipts to the current operation
+
+**Decision:** Decode a retained provider_execution_id as the current invocation's execution receipt only when provider_known is true. Keep the persisted field unchanged for audit history.
+
+**Came up because:** A second staging Deploy correctly reset provider_known but inherited the previous deployment ID. Its adapter queried that old deployment and rejected the new requested revision before writing anything.
+
+**Options:** Erase provider history when beginning an operation, special-case Railway, or honor the existing current-operation receipt flag at the shared invocation boundary.
+
+**Chose the shared boundary because:** Every generated operation already resets provider_known and only correlated provider callbacks set it true. This preserves history and fixes sequential operations across providers. Uncertain operations still discover matching provider executions without writing; an empty listing remains pending because it does not prove absence under eventual consistency. The fix does not reset attempt budgets or authorize another ambiguous write.
+
+**Where:** dsf_resource_common/src/invocation.rs; sequential receipt and Railway execute/reconcile regressions. The common regression failed against the original decoder before the fix. The packaged verification fixture now models the declared provider_known=true callback state and separately proves that an old receipt with provider_known=false cannot pass even with matching application and trace evidence; this negative case fails the original WASM.
+
+## D45: Record abandoned reconciliation without claiming provider absence
+
+**Decision:** Expose AbandonReconciliation from an operation's Unknown state to Failed, requiring its exact operation key/sequence and nonempty explanation/evidence. Existing AcknowledgeFailure releases the resource afterward; neither action retries or resets counters.
+
+**Came up because:** The stale-receipt defect failed before the second deployment's provider mutation, but the conservative runtime reported an uncertain execution. Fixing receipt selection cannot turn an empty, potentially delayed provider listing into proof of absence.
+
+**Options:** Assert absence from an empty listing, reset the write budget, or record the authorized operator decision to stop reconciliation separately from provider facts.
+
+**Chose explicit abandonment because:** It preserves provider receipts, counters, and unverified status without inventing absence or success. For this incident, the source path and old-revision lookup establish a pre-write failure; a fresh deployment still requires a baseline recheck and its normal proof/authorization. A genuinely ambiguous write must be investigated before requesting another operation.
+
+**Where:** generated provider contracts, human-action manifest, Cedar, and runtime contract/policy regressions. The new action regression failed against the original contract before the change.
+
+## D46: Complete explicitly waived resource delivery with real resource proof
+
+**Decision:** Let an exact-head owner-authorized Effort verify its configured twin operations through the existing resource verifier while preserving review_passed=false and resource_delivery_merged=false.
+
+**Came up because:** Canonical owner authorization reaches Merged without pretending a model review or Git merge occurred, but the original resource delivery verifier only accepted the reviewed Git-merge path.
+
+**Options:** Manufacture passing review/merge flags, leave the authorized lifecycle incomplete, or add an explicit waived entry to the same evidence verifier.
+
+**Chose the explicit entry because:** It retains the recorded authorization, head, proof and readiness requirements, then requires current Active resource state, known provider identity, exact operation binding and application/telemetry evidence. It does not weaken the reviewed path. A guarded zero-only bootstrap handles existing records whose delivery counter predates the contract.
+
+**Where:** paw-patrol Effort contract, chain_merge_ready and effort_resource_delivery modules; the actor plus actual compiled canonical module regression covers successful waived verification and wrong head, missing waiver/resource/telemetry, unknown provider and stale callback rejection. Canonical patrol f04211aa07be0d94b5dc88c7f40eaa0ca894f0da preserves the prior owner-waiver actions.
