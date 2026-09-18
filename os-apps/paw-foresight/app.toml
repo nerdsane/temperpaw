@@ -107,3 +107,33 @@ startup_loading = "lazy"
 name = "prepare_challenge"
 criticality = "app-required"
 startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "semantic_prepare"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "semantic_step"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "semantic_call"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "semantic_reasoning"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "semantic_session"
+criticality = "app-required"
+startup_loading = "lazy"
+
+[[wasm_modules]]
+name = "semantic_expand"
+criticality = "app-required"
+startup_loading = "lazy"

@@ -264,6 +264,16 @@ to = "Active"
 params = ["skeleton_node_count", "graph_snapshot_file_id", "uncertainty_axes"]
 hint = "Surveyor self-reports the skeleton is recorded plus the named uncertainty axes (ADR-006). World becomes active."
 
+[[action.triggers]]
+name = "start_requested_semantic_exploration"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartSemanticExploration"
+guard = {type="bool_true",field="semantic_exploration_requested"}
+[action.triggers.resolve_target]
+type = "same_id"
+
 [[action]]
 name = "ResumeSeed"
 kind = "input"
@@ -1045,3 +1055,23 @@ from = ["Created"]
 to = "Created"
 params = ["semantic_evaluation_mode"]
 constraints = [{kind="param_nonempty",param="semantic_evaluation_mode"}]
+
+[[state]]
+name = "semantic_exploration_requested"
+type = "bool"
+initial = "false"
+
+[[action]]
+name = "RequestSemanticExploration"
+kind = "input"
+from = ["Created"]
+params = []
+effect = [{type="set_bool",var="semantic_exploration_requested",value=true}]
+
+[[action]]
+name = "StartSemanticExploration"
+kind = "input"
+from = ["Active"]
+params = []
+guard = {type="bool_true",field="semantic_exploration_requested"}
+effect = [{type="spawn",entity_type="SemanticRun",entity_id_source="{uuid}",initial_action="Start",copy_fields=""},{type="set_bool",var="semantic_exploration_requested",value=false}]

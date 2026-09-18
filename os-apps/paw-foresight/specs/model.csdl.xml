@@ -3,10 +3,82 @@
   <edmx:DataServices>
     <Schema Namespace="TemperPaw.Foresight" xmlns="http://docs.oasis-open.org/odata/ns/edm">
 
+      <EntityType Name="SemanticRun">
+        <Key><PropertyRef Name="Id"/></Key>
+        <Property Name="Id" Type="Edm.String"/>
+        <Property Name="Status" Type="Edm.String"/>
+        <Property Name="parent_type" Type="Edm.String"/>
+        <Property Name="world_id" Type="Edm.String"/>
+        <Property Name="snapshot_json" Type="Edm.String"/>
+        <Property Name="program_json" Type="Edm.String"/>
+        <Property Name="trace_json" Type="Edm.String"/>
+        <Property Name="request_json" Type="Edm.String"/>
+        <Property Name="started_at_ms" Type="Edm.String"/>
+        <Property Name="finished_at_ms" Type="Edm.String"/>
+        <Property Name="error_message" Type="Edm.String"/>
+        <Property Name="parent_id" Type="Edm.String"/>
+        <Property Name="phase" Type="Edm.String"/>
+        <Property Name="agent_id" Type="Edm.String"/>
+        <Property Name="model" Type="Edm.String"/>
+        <Property Name="provider" Type="Edm.String"/>
+        <Property Name="system_prompt" Type="Edm.String"/>
+        <Property Name="user_message" Type="Edm.String"/>
+        <Property Name="tools_enabled" Type="Edm.String"/>
+        <Property Name="tool_choice" Type="Edm.String"/>
+        <Property Name="max_turns" Type="Edm.String"/>
+        <Property Name="sandbox_url" Type="Edm.String"/>
+        <Property Name="temper_api_url" Type="Edm.String"/>
+        <Property Name="reasoning_session_id" Type="Edm.String"/>
+        <Property Name="reasoning_result" Type="Edm.String"/>
+        <Property Name="answer" Type="Edm.String"/>
+        <Property Name="check_count" Type="Edm.Int64"/>
+        <Property Name="provider_options_json" Type="Edm.String"/>
+        <Property Name="provider_latency_profile" Type="Edm.String"/>
+        <Property Name="temperature" Type="Edm.String"/>
+        <Property Name="workdir" Type="Edm.String"/>
+        <Property Name="sandbox_id" Type="Edm.String"/>
+        <Property Name="sandbox_provider" Type="Edm.String"/>
+        <Property Name="sandbox_networking_type" Type="Edm.String"/>
+        <Property Name="sandbox_allowed_hosts_json" Type="Edm.String"/>
+        <Property Name="sandbox_allow_mcp_servers" Type="Edm.Boolean"/>
+        <Property Name="sandbox_allow_package_managers" Type="Edm.Boolean"/>
+        <Property Name="sandbox_packages_json" Type="Edm.String"/>
+        <Property Name="soul_id" Type="Edm.String"/>
+        <Property Name="reply_channel_id" Type="Edm.String"/>
+        <Property Name="reply_thread_id" Type="Edm.String"/>
+        <Property Name="reply_channel_entity_id" Type="Edm.String"/>
+        <Property Name="reply_channel_type" Type="Edm.String"/>
+        <Property Name="reply_route_source" Type="Edm.String"/>
+        <Property Name="parent_session_id" Type="Edm.String"/>
+        <Property Name="session_depth" Type="Edm.Int64"/>
+        <Property Name="max_follow_ups" Type="Edm.String"/>
+        <Property Name="hook_policy" Type="Edm.String"/>
+        <Property Name="reserve_tokens" Type="Edm.String"/>
+        <Property Name="keep_recent_tokens" Type="Edm.String"/>
+        <Property Name="compaction_model" Type="Edm.String"/>
+        <Property Name="heartbeat_timeout_seconds" Type="Edm.String"/>
+        <Property Name="project_harness_id" Type="Edm.String"/>
+        <Property Name="project_id" Type="Edm.String"/>
+        <Property Name="workspace_id" Type="Edm.String"/>
+        <Property Name="conversation_file_id" Type="Edm.String"/>
+        <Property Name="file_manifest_id" Type="Edm.String"/>
+        <Property Name="session_file_id" Type="Edm.String"/>
+        <Property Name="session_leaf_id" Type="Edm.String"/>
+        <Property Name="session_entries_materialized" Type="Edm.String"/>
+        <Property Name="prepared_context_file_id" Type="Edm.String"/>
+        <Property Name="prepared_context_inline_json" Type="Edm.String"/>
+        <Property Name="system_prompt_hash" Type="Edm.String"/>
+        <Property Name="system_prompt_file_id" Type="Edm.String"/>
+        <Property Name="session_mode" Type="Edm.String"/>
+        <Property Name="gen_ai_parent_trace_id" Type="Edm.String"/>
+        <Property Name="gen_ai_parent_span_id" Type="Edm.String"/>
+</EntityType>
+
       <EntityType Name="ForesightModel">
         <Key><PropertyRef Name="Id"/></Key>
         <Property Name="Id" Type="Edm.String" Nullable="false"/>
         <Property Name="Status" Type="Edm.String"/>
+        <Property Name="parent_type" Type="Edm.String"/>
         <Property Name="Name" Type="Edm.String"/>
         <Property Name="ModelType" Type="Edm.String"/>
         <Property Name="SignalSourceConfig" Type="Edm.String"/>
@@ -356,7 +428,8 @@
         <Property Name="DeepeningClaimIds" Type="Edm.String"/>
         <Property Name="DeepeningCursor" Type="Edm.String"/>
         <Property Name="DeepeningClaimId" Type="Edm.String"/>
-</EntityType>
+        <Property Name="semantic_exploration_requested" Type="Edm.Boolean"/>
+      </EntityType>
 
       <EntityType Name="EventNode">
         <Key><PropertyRef Name="Id"/></Key>
@@ -1203,6 +1276,7 @@
         <EntitySet Name="Hindcasts" EntityType="TemperPaw.Foresight.Hindcast"/>
         <EntitySet Name="Lenses" EntityType="TemperPaw.Foresight.Lens"/>
         <EntitySet Name="LearningRuns" EntityType="TemperPaw.Foresight.LearningRun"/>
+        <EntitySet Name="SemanticRuns" EntityType="TemperPaw.Foresight.SemanticRun"/>
       </EntityContainer>
       <Action Name="Register" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.Forecast"/>

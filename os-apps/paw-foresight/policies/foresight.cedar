@@ -685,3 +685,43 @@ permit(principal is Agent, action == Action::"http_call", resource is HttpEndpoi
 when { context.module == "prepare_challenge" };
 permit(principal is Agent, action == Action::"access_secret", resource is Secret)
 when { context.module == "prepare_challenge" };
+
+// Native semantic exploration: readers inspect; operators start/cancel;
+// provider callbacks and frozen results belong to the machine.
+permit(principal, action in [Action::"read", Action::"list"], resource is SemanticRun);
+permit(principal, action in [Action::"create", Action::"Start", Action::"Cancel"], resource is SemanticRun)
+when { ["human", "supervisor", "system"].contains(principal.agent_type) };
+permit(principal, action, resource is SemanticRun)
+when { principal.agent_type == "system" };
+permit(principal is Admin, action, resource is SemanticRun);
+
+permit(principal, action == Action::"RequestSemanticExploration", resource is World)
+when { ["human", "supervisor", "system"].contains(principal.agent_type) };
+permit(principal, action == Action::"StartSemanticExploration", resource is World)
+when { principal.agent_type == "system" };
+// WASM result callbacks are delivered by the runtime relay, not browser callers.
+permit(principal == Agent::"service:wasm-runtime",
+ action in [Action::"Prepared",Action::"Evaluate",Action::"Recorded",Action::"Reason",Action::"LaunchReasoning",Action::"ReasoningPending",Action::"ReasoningComplete",Action::"Expanded",Action::"Complete",Action::"Fail"],
+ resource is SemanticRun);
+forbid(principal,
+ action in [Action::"Prepared",Action::"Evaluate",Action::"Recorded",Action::"Reason",Action::"LaunchReasoning",Action::"ReasoningPending",Action::"ReasoningComplete",Action::"Expanded",Action::"Complete"],
+ resource is SemanticRun)
+unless { principal == Agent::"service:wasm-runtime" };
+
+// Six modules share no ambient network capability. Only the snapshot/session
+// readers may read the local engine; only the one-call provider may reach Jev.
+permit(principal is Agent, action == Action::"http_call", resource is HttpEndpoint)
+when {
+ ["semantic_prepare", "semantic_session"].contains(context.module) &&
+ context.method == "GET" && context.url like "http://127.0.0.1:3467/tdata/*"
+};
+permit(principal is Agent, action == Action::"http_call", resource is HttpEndpoint)
+when {
+ context.module == "semantic_call" && context.method == "POST" &&
+ context.url == "https://api.typesafe.ai/v1/systemone"
+};
+permit(principal is Agent, action == Action::"access_secret", resource == Secret::"foresight_typesafe_api_key")
+when { context.module == "semantic_call" };
+
+permit(principal is Agent, action == Action::"access_secret", resource == Secret::"temper_api_url")
+when { ["semantic_prepare", "semantic_session"].contains(context.module) };
