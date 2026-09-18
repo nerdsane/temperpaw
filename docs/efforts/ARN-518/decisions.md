@@ -535,3 +535,15 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose explicit limits because:** More flags can mean sensitivity or false alarms. The reasoning-session and Jev invocation clocks differ, reasoning usage counters are unusable, and future outcomes are not observed. A critic-stage replay cannot establish a whole-pipeline speedup.
 
 **Where:** `scripts/compare_foresight_evaluators.py`, `docs/efforts/ARN-518/jev-shadow.md` and the Foundry matched-run evidence.
+
+## D45 — Keep the source dependency aligned with the native release package
+
+**Decision:** Pin Foresight to the prepared agent package `temperpaw/paw-agent@1fe41a7a5efd4b71bb72c349cab94b28b211f4ff` and publish that dependency before installing Foresight.
+
+**Came up because:** The native Foresight release package already references this rebuilt agent, while the source manifest still names the older unpublished `801e2fdf7e626dd0d0285b370f626f6b94e80609` version. A later package build would restore that stale dependency.
+
+**Options:** Leave the replacement only in the packaging index; or record the same exact dependency in the owning source manifest.
+
+**Chose the source manifest because:** Source and package must describe the same dependency closure. This pin records the intended release; it does not claim that Genesis publication or live installation has succeeded. Those remain required verification steps.
+
+**Where:** `os-apps/paw-foresight/app.toml`; prepared Foresight package `3aff81d797d20ee8de817c32fd2ebc861080693b`.
