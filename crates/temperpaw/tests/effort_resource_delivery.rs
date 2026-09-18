@@ -828,22 +828,22 @@ async fn waived_delivery_consumes_compiled_evidence_without_claiming_review_or_g
             .with_response(
                 "https://temper.test/tdata/Efforts('effort')",
                 200,
-                &current.to_string(),
+                &json!({"fields":current}).to_string(),
             )
             .with_response(
                 "https://temper.test/tdata/DsfRailwayServiceInstances('api')",
                 if case == "missing-resource" { 404 } else { 200 },
-                &actual.to_string(),
+                &json!({"fields":actual}).to_string(),
             )
             .with_response(
                 "https://temper.test/tdata/ProofPackets('proof-1')",
                 200,
-                &packet.to_string(),
+                &json!({"fields":packet}).to_string(),
             )
             .with_response(
                 "https://temper.test/tdata/Files('artifact-1')",
                 200,
-                &json!({"status":"Ready"}).to_string(),
+                &json!({"fields":{"status":"Ready"}}).to_string(),
             )
             .with_response(
                 "https://temper.test/tdata/Files('artifact-1')/$value",
