@@ -233,6 +233,12 @@ async fn packaged_configuration_verification_cannot_borrow_production_domain_or_
         ),
         (
             "staging.deep-sci-fi.world",
+            "http://staging.deep-sci-fi.world",
+            true,
+            "ApplyConfigurationVerificationSucceeded",
+        ),
+        (
+            "staging.deep-sci-fi.world",
             stage,
             false,
             "ApplyConfigurationVerificationPending",

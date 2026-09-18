@@ -572,3 +572,15 @@ Successful collection also carries an empty declared error_message, so a recover
 **Chose the explicit entry because:** It retains the recorded authorization, head, proof and readiness requirements, then requires current Active resource state, known provider identity, exact operation binding and application/telemetry evidence. It does not weaken the reviewed path. A guarded zero-only bootstrap handles existing records whose delivery counter predates the contract.
 
 **Where:** paw-patrol Effort contract, chain_merge_ready and effort_resource_delivery modules; the actor plus actual compiled canonical module regression covers successful waived verification and wrong head, missing waiver/resource/telemetry, unknown provider and stale callback rejection. Canonical patrol f04211aa07be0d94b5dc88c7f40eaa0ca894f0da preserves the prior owner-waiver actions.
+
+## D47: Match the verified external probe across TLS termination
+
+**Decision:** Accept an observed HTTP span URL for an expected HTTPS probe only when every byte after the scheme is identical. Keep exact service, environment, revision, request ID, successful span status and HTTP 200 requirements.
+
+**Came up because:** The real staging deployment is healthy and Datadog indexed its exact operation-sequence-three probe, but Railway terminates TLS before the application. That span reports `http://deep-sci-fi-staging.up.railway.app/api/health` while the provider-bound external probe successfully used HTTPS.
+
+**Options:** Change application proxy handling, weaken origin matching generally, or recognize this one asymmetric scheme difference in the span comparison.
+
+**Chose the narrow comparison because:** The external probe and provider-origin binding still require HTTPS. Host, path, explicit ports, credentials, query and fragment remain byte-exact; the comparison does not normalize URLs or accept a different service or deployment. The actual indexed span demonstrates the defect, so query time windows and retention settings remain unchanged.
+
+**Where:** dsf_resource_common verification and real-span fixture; packaged configuration verification. The fixture records the exact twin request ID and revision, and its positive case fails against the original matcher. Negative cases retain the identity and URL boundaries.

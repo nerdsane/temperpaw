@@ -357,7 +357,10 @@ fn matching_span(
     let Some(attrs) = span.get("attributes") else {
         return false;
     };
-    attrs.pointer("/custom/http/url").and_then(Value::as_str) == Some(health_url)
+    attrs
+        .pointer("/custom/http/url")
+        .and_then(Value::as_str)
+        .is_some_and(|observed| same_probe_url(observed, health_url))
         && attrs.get("service").and_then(Value::as_str) == Some(&dd.service)
         && attrs.get("env").and_then(Value::as_str) == Some(&dd.environment)
         && attrs.get("status").and_then(Value::as_str) == Some("ok")
@@ -374,9 +377,80 @@ fn matching_span(
             == Some(request_id)
 }
 
+fn same_probe_url(observed: &str, expected: &str) -> bool {
+    // The bound external probe uses HTTPS; TLS termination can leave HTTP in its span.
+    // Compare the remaining bytes exactly: do not normalize host, path, ports or credentials.
+    observed == expected
+        || expected
+            .strip_prefix("https://")
+            .is_some_and(|suffix| observed.strip_prefix("http://") == Some(suffix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn railway_tls_termination_preserves_the_exact_probe_identity() {
+        let span: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/railway_proxy_health_span.json"
+        ))
+        .unwrap();
+        let dd = Datadog {
+            site: "datadoghq.com".into(),
+            service: "deep-sci-fi-backend".into(),
+            environment: "staging".into(),
+            api_key_secret: "dd-api".into(),
+            app_key_secret: "dd-app".into(),
+        };
+        let request_id = "dsf-fd4862bc62da72b986b4d8bee2d4c05cd75d567a091236b8885e83fb674acf17";
+        let revision = "7597673d083654bad15596116d2b4893b085e0c0";
+        let expected = "https://deep-sci-fi-staging.up.railway.app/api/health";
+        assert!(matching_span(&span, &dd, request_id, revision, expected));
+        for observed in [
+            "http://api.deep-sci-fi.world/api/health",
+            "http://deep-sci-fi-staging.up.railway.app.attacker.test/api/health",
+            "http://deep-sci-fi-staging.up.railway.app/api/worlds",
+            "http://deep-sci-fi-staging.up.railway.app/api/health?probe=other",
+            "http://deep-sci-fi-staging.up.railway.app/api/health#fragment",
+            "http://deep-sci-fi-staging.up.railway.app:80/api/health",
+            "http://deep-sci-fi-staging.up.railway.app:443/api/health",
+            "http://user:password@deep-sci-fi-staging.up.railway.app/api/health",
+            "http://deep-sci-fi-staging.up.railway.app/api/%68ealth",
+            "//deep-sci-fi-staging.up.railway.app/api/health",
+        ] {
+            let mut other = span.clone();
+            other["attributes"]["custom"]["http"]["url"] = json!(observed);
+            assert!(
+                !matching_span(&other, &dd, request_id, revision, expected),
+                "{observed}"
+            );
+        }
+        for pointer in [
+            "/attributes/service",
+            "/attributes/env",
+            "/attributes/custom/git/commit/sha",
+            "/attributes/custom/dsf/request_id",
+            "/attributes/status",
+            "/attributes/custom/http/status_code",
+        ] {
+            let mut other = span.clone();
+            *other.pointer_mut(pointer).unwrap() = json!("other");
+            assert!(
+                !matching_span(&other, &dd, request_id, revision, expected),
+                "{pointer}"
+            );
+        }
+        let mut other = span.clone();
+        other["attributes"]["custom"]["http"]["url"] = json!(expected);
+        assert!(!matching_span(
+            &other,
+            &dd,
+            request_id,
+            revision,
+            "http://deep-sci-fi-staging.up.railway.app/api/health"
+        ));
+    }
+
     #[test]
     fn actual_nested_span_shape_must_match_service_environment_revision_and_probe() {
         let dd = Datadog {
