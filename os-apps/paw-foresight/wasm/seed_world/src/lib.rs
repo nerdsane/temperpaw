@@ -206,12 +206,17 @@ keep this imagined possibility separate from the observations that motivated it.
 --- END CORPUS ---
 
 Persist useful research as it emerges so the person can watch it build. Use the exact API:
-temper.create("EventNodes", {{"world_id": "{world_id}", "statement": "<finding, date, scope, uncertainty and competing interpretation>", "layer": "mid", "probability": "", "provenance": "observed", "source_refs": "[\"<URL or corpus reference with a short supporting quotation and source date>\"]", "resolve_by": "{target_date}", "author_agent_id": "{agent_id}"}})
+temper.create("EventNodes", {{"world_id": "{world_id}", "statement": "<what the source actually establishes, with its date, scope and limits>", "layer": "mid", "probability": "", "provenance": "observed", "source_refs": "[\"<URL or corpus reference with a short supporting quotation and source date>\"]", "resolve_by": "{target_date}", "author_agent_id": "{agent_id}"}})
 Use provenance observed, contested, weak_signal, or hypothesis to identify the claim's
 status. Use determined only for an actually fixed fact. Leave probability empty for research
 claims: unknown does not mean 0.5 and sourced does not mean 1.0. A genuinely quoted,
 quantified forecast may use provenance market or authored with its stated probability;
 identify whose estimate it is, its horizon and its conditions in the statement.
+Keep the source claim and your future interpretation in separate nodes. An observed,
+contested or weak_signal statement must not append what this could mean for future work,
+income or behavior. Save that inference separately with provenance hypothesis, even when
+it feels obvious. The later search must be able to reject your interpretation without
+rejecting the source observation that prompted it.
 Hypotheses may cite their motivating evidence, but explicitly say they are inferred and
 unverified; never fabricate a source for the hypothesis. If no source was available, say so
 and use an empty source_refs array. Preserve enough actual source content to let subsequent
