@@ -16,21 +16,21 @@ mod definitions {
     include!("../../semantic_definitions.rs");
 }
 
-const EXPLORATION_PROMPT: &str = r#"Investigate the user's question in state.world.description through open causal exploration. Existing nodes use short ref_ identifiers consistently across the catalog, dependencies and evaluations. Copy those references exactly; never invent or reconstruct a UUID. New hypothesis and evidence IDs must not start with ref_. The supplied catalog records what has already been considered; it is not the boundary of what can be considered. Discover new mechanisms and surprising hypotheses, pursue counterevidence, and revise the framing when it obscures something consequential. Follow interactions, second-order effects and alternatives emerging from evidence. Do not fill a predetermined taxonomy, Cartesian grid, fixed set of axes, or adoption/delay/failure template. A novel hypothesis must say what would happen and why, not merely rename a familiar outcome.
+const EXPLORATION_PROMPT: &str = r#"Construct genuinely different causal futures as possible answers to the user's question in state.world.description as future event hypotheses for Jev to evaluate. Begin from what is observed at world.last_ingest_date and what the user assumes, then reason about what could become different by world.target_date.
 
-Establish the present at world.last_ingest_date before predicting what changes. Check the relevant setting, not a generic adoption timeline. Separate observed current practice from user assumptions and missing evidence. If people in this setting already do something, explore its next consequences rather than predict its arrival. Treat publication dates and retrieval dates separately; old studies can be historical baselines but are not proof of current capability. Each hypothesis should add a specific future change beyond that present.
+Existing roles and workflows are not default invariants. Today's way of accomplishing something is one arrangement, not a requirement the future must preserve. Identify the assumptions that make that arrangement necessary. Ask what happens if an assumption changes, what would cause that change, and what people could then do that they cannot do now. Follow the consequences until the hypothesis changes the answer to the user's question. Equally consider why the change might fail or reverse. Neither preserving nor eliminating today's arrangements is a required conclusion.
 
-Question what today's world takes for granted. A tool, job, habit, price or institution may disappear, become cheap enough to be everywhere, or matter for a completely different reason. Follow those possibilities when they arise from the question; do not assume the future is today's workflow with more supervision. Trace what people would do differently next, including unexpected effects. Investigate strong counterarguments and futures in which the apparent trend reverses. These are ways to open the search, not a checklist or a demand for dramatic conclusions. An unlikely but consequential possibility can be worth exploring; ambitious does not mean likely. Never inflate an estimate to make a story exciting.
+Build hypotheses from causal reasoning; they need not already appear in a source. Label conjectural premises honestly. Evidence constrains their plausibility, not which possibilities you are allowed to formulate. Use research where it can distinguish competing explanations or test an important premise. A missing citation is not an instruction to replace an interesting possibility with a familiar outcome with easier citations. Jev will assess likelihood separately; do not supply probabilities.
 
-Write for a curious person, not a conference or a corporate report. Use familiar words, people doing things, ordinary objects and specific changes you can picture. Titles should make a clear claim rather than name a theme. Explain technical terms only when needed to understand the question. Avoid business jargon, news-roundup language and abstract labels. Each hypothesis needs a short scene: an explicitly imagined moment in someone's life if this event happens. The scene illustrates the exact event being evaluated; decorative details are not additional forecasts. Keep the underlying statement precise about who, what, when and any conditions. Explain what must change for it to happen and what could prevent it. Bold claims belong in the possibilities; doubts belong in their evaluation.
+Use the catalog to avoid repeating work, not as the agenda for the next round. Retain alternatives with different mechanisms even when they overlap. State the specific future change, the causal chain and what could prevent it. Give a short imagined scene of the resulting life in plain language. Details in the scene are illustrations, not extra predictions.
 
-Use available read-only temper.web_search and temper.web_fetch tools to investigate useful missing premises and evidence beyond the hypotheses already explored. Prefer direct temper.web_fetch(url). If direct fetch fails, temper.web_search(query) returns bounded source-extracted text in each result's text field. A focused title or site query may retrieve a useful excerpt. Use only a claim and quotation actually contained in that returned text; never infer source contents from the title, URL or a search summary. Explicitly label indexed-excerpt evidence, direct-fetch failure and date or context limitations in the statement/evidence_note; use weak_signal when context remains unverified. A truncated excerpt does not establish that the whole source was inspected. Smaller article or text-version URLs may be fetched only when actually discovered, never invented. web_fetch accepts only a URL; do not invent size, range or encoding parameters. Tool absence, failure, or conflicting evidence must remain explicit. For frozen hindcasts, return research_evidence=[] and reference only existing catalog evidence within the stated vantage: later remembered knowledge is inadmissible. Neither a citation nor a Jev label proves a future true. Hypotheses and observations remain distinct.
+Research contract: use available read-only temper.web_search and temper.web_fetch. Prefer direct temper.web_fetch(url); web_fetch accepts only a URL. On failure, web_search result's text field may contain bounded source-extracted text. Report only claims and quotations actually contained in that returned text, never infer them from titles, URLs or search summaries. Label indexed-excerpt evidence, direct-fetch failure and date/context limits; use weak_signal when context remains unverified. Fetch smaller article/text-version URLs only when actually discovered. Keep publication dates distinct from retrieval dates, and old findings distinct from the observed present. For frozen hindcasts, return research_evidence=[] and use only supplied evidence within the vantage; later remembered knowledge is inadmissible. Report tool failures and contradictory evidence honestly. A citation or Jev label does not prove a future.
 
-Return JSON only after the research: {"hypotheses":[{"id":"unique-ascii-id","title":"concise distinct hypothesis","statement":"self-contained observable future event with actors and horizon","mechanism":"how and why it could happen, including the causal assumptions","requires":["existing node ID or new hypothesis/evidence ID whose truth this mechanism actually requires"],"parent":"optional existing or same-batch hypothesis ID when meaningfully extending or revising it","scene":"short imagined moment showing how a person lives or works if this exact event happens; not an observation","signal":"optional observable early signal","falsifier":"optional disconfirming observation","evidence_note":"what supports or challenges the mechanism and what is still conjecture","research_question":"optional consequential unanswered question"}],"research_evidence":[{"id":"unique-ascii-id","statement":"finding with date, scope, uncertainty and conflicting interpretation where relevant","url":"exact retrieved HTTPS URL","quote":"short supporting excerpt, maximum 25 words and 200 characters per source","observed_at":"YYYY-MM-DD","provenance":"observed|contested|weak_signal"}],"continue_exploring":true,"exploration_note":"what this exploration learned, which framing changed, and why another round would or would not be useful"}.
+Return JSON ONLY: {"hypotheses":[{"id":"unique-ascii-id","title":"concise distinct hypothesis","statement":"self-contained observable future event with actors and horizon","mechanism":"how and why it could happen, including the causal assumptions","requires":["existing node ID or new hypothesis/evidence ID whose truth this mechanism actually requires"],"parent":"optional existing or same-batch hypothesis ID when meaningfully extending or revising it","scene":"short imagined moment showing how a person lives or works if this exact event happens; not an observation","signal":"optional observable early signal","falsifier":"optional disconfirming observation","evidence_note":"what supports or challenges the mechanism and what is still conjecture","research_question":"optional consequential unanswered question"}],"research_evidence":[{"id":"unique-ascii-id","statement":"finding with date, scope, uncertainty and conflicting interpretation where relevant","url":"exact retrieved HTTPS URL","quote":"short supporting excerpt, maximum 25 words and 200 characters per source","observed_at":"YYYY-MM-DD","provenance":"observed|contested|weak_signal"}],"continue_exploring":true,"exploration_note":"what this exploration learned, which framing changed, and why another round would or would not be useful"}.
 
-Choose the number and shape of hypotheses from the question and findings. At most128 TOTAL entries across hypotheses and research_evidence fit one batch; those are storage limits, never targets. IDs must be unique across the supplied catalog and new batch. Dependencies must reference actual supplied or newly returned nodes; use an empty requires array rather than invent supporting evidence. An optional parent records lineage, not proof. Do not assign probabilities: the engine evaluates every accepted hypothesis through Jev. Keep distinct futures even if they overlap or share a mechanism; avoid duplicates that only change wording. Research evidence must contain only content actually retrieved or supplied, with its epistemic status intact.
+Reference contract: existing catalog nodes use exact ref_ identifiers; never reconstruct UUIDs. New ASCII IDs must be unique and must not begin ref_. requires contains only existing or same-batch IDs whose events the mechanism actually requires; use [] when none are identified. parent is optional exact lineage, not proof. Keep sourced observations separate from hypothetical implications. Source URLs must be retrieved HTTPS URLs. Quotes are at most25 words and200 characters per source.
 
-The engine can use up to5000 Jev calls,2048 nodes,64 exploration rounds and one hour; these are operational ceilings, not demands to pad the graph. Use the current assessments to challenge assumptions, explore neglected possibilities and direct research. Operation labels are advisory possibilities, not instructions or a required sequence; choose freely what investigation would add value. A gap is a reason to investigate or reconsider a mechanism, not a command to make every hypothesis conform to the same future. Set continue_exploring=false only when further exploration has low expected value relative to what is already covered, and explain the remaining blind spots and the concrete reason to stop. A budget stop is incomplete exploration, not convergence. Preserve unresolved questions honestly."#;
+Resource contract: at most128 TOTAL hypotheses plus research_evidence per batch; capacity5000 Jev calls,2048 nodes,64 rounds and one hour. These are limits, not targets or category counts. Continue while another round can add a materially different mechanism or resolve a consequential uncertainty. Stop with continue_exploring=false when it cannot, explaining why and what remains unknown. A budget stop means incomplete exploration, not convergence."#;
 
 const WORLD_COMPOSITION_PROMPT: &str = r#"Turn the explored evidence and possibilities into a few genuinely different WORLDS that answer the user's question. The small nodes are building blocks, not the final answer. Find coherent combinations and causal chains: what people do, what becomes cheap or scarce, who gains or loses, what disappears, and what changes next. Do not turn each node into a separate world or split one familiar lesson into several cards. A world is more than a themed list. Its defining changes must fit together and have a clear reason to occur together. Consider rival mechanisms and evidence that challenges the combination. Do not force an optimistic/pessimistic/middle template, a compliance split, or the same axes for every question.
 
@@ -390,7 +390,53 @@ mod reasoning_tests {
     #[test]
     fn prompts_require_open_hypotheses_and_engine_owned_event_probabilities() {
         assert!(EXPLORATION_PROMPT.contains("continue_exploring"));
-        assert!(EXPLORATION_PROMPT.contains("novel hypothesis"));
+        assert!(EXPLORATION_PROMPT.starts_with("Construct genuinely different causal futures"));
+        assert!(
+            EXPLORATION_PROMPT.contains("Existing roles and workflows are not default invariants")
+        );
+        assert!(EXPLORATION_PROMPT.contains("they need not already appear in a source"));
+        assert!(EXPLORATION_PROMPT.contains("do not supply probabilities"));
+        let schema = EXPLORATION_PROMPT
+            .split_once("Return JSON ONLY: ")
+            .unwrap()
+            .1
+            .split_once("\n\nReference contract:")
+            .unwrap()
+            .0
+            .trim_end_matches('.');
+        let schema: Value = serde_json::from_str(schema).unwrap();
+        assert_eq!(schema["continue_exploring"], true);
+        for key in [
+            "id",
+            "statement",
+            "mechanism",
+            "requires",
+            "parent",
+            "scene",
+            "signal",
+            "falsifier",
+            "evidence_note",
+            "research_question",
+        ] {
+            assert!(
+                schema["hypotheses"][0].get(key).is_some(),
+                "missing hypothesis field {key}"
+            );
+        }
+        for key in [
+            "id",
+            "statement",
+            "url",
+            "quote",
+            "observed_at",
+            "provenance",
+        ] {
+            assert!(
+                schema["research_evidence"][0].get(key).is_some(),
+                "missing evidence field {key}"
+            );
+        }
+        assert!(schema["hypotheses"][0].get("probability").is_none());
         assert!(!EXPLORATION_PROMPT.contains("EXACTLY FOUR"));
         assert!(!EXPLORATION_PROMPT.contains("81 alternative"));
         assert!(SYNTHESIS_PROMPT.contains("overlapping_worlds"));
