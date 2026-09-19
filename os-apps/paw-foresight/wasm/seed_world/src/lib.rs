@@ -146,6 +146,7 @@ fn open_research_prompt(
     agent_id: &str,
     question: &str,
     target_date: &str,
+    as_of_date: &str,
     corpus_inline: &str,
     hindcast: bool,
 ) -> String {
@@ -154,10 +155,20 @@ fn open_research_prompt(
     } else {
         "Use temper.web_search and temper.web_fetch to investigate the question with current          evidence. Follow surprising findings and competing explanations. Inspect source          content before citing it; search snippets alone are leads, not verified findings.          Seek evidence that could overturn your emerging account, not just confirm it."
     };
+    let chronology = if hindcast {
+        "The frozen corpus vantage date is authoritative. The live ingestion date does not move that boundary.".to_string()
+    } else if as_of_date.trim().is_empty() {
+        "Research as-of date is unavailable. Establish and report source publication and observation dates; do not invent a current date.".to_string()
+    } else {
+        format!(
+            "Research as-of date: {as_of_date}. This is the evidence vantage, distinct from the forecast horizon. Seek the most recent available relevant evidence and check whether newer findings change older accounts, without an arbitrary lookback window. Older sources may establish historical baselines; label them historical rather than current. State when the latest evidence is unavailable or could not be verified, and distinguish publication dates from dates of the events observed."
+        )
+    };
     format!(
         r#"You are investigating this question for world {world_id}:
 {question}
 Horizon: {target_date}
+{chronology}
 
 Build an open research map that can support genuinely different causal futures. Let the
 question and discovered evidence determine what to investigate. There is no prescribed
@@ -451,6 +462,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
                 "{AGENT_ID}",
                 &get("description"),
                 &get("target_date"),
+                &get("last_ingest_date"),
                 &corpus_inline,
                 hindcast,
             )
@@ -515,6 +527,7 @@ mod tests {
             "agent-a",
             "What changes?",
             "2027-01-01",
+            "2026-09-19",
             "",
             false,
         );
@@ -544,9 +557,38 @@ mod tests {
     }
 
     #[test]
-    fn open_hindcast_never_offers_live_web_and_preserves_corpus() {
+    fn live_research_distinguishes_evidence_vantage_from_forecast_horizon() {
         let prompt =
-            open_research_prompt("w", "a", "question", "2020-01-01", "frozen evidence", true);
+            open_research_prompt("w", "a", "question", "2027-09-19", "2026-09-19", "", false);
+        assert!(prompt.contains("Horizon: 2027-09-19"));
+        assert!(prompt.contains("Research as-of date: 2026-09-19"));
+        assert!(prompt.contains("label them historical rather than current"));
+        assert!(prompt.contains("latest evidence is unavailable"));
+        let frozen = open_research_prompt(
+            "w",
+            "a",
+            "question",
+            "2020-01-01",
+            "2026-09-19",
+            "corpus vantage 2019-01-01",
+            true,
+        );
+        assert!(!frozen.contains("2026-09-19"));
+        assert!(frozen.contains("corpus vantage 2019-01-01"));
+        assert!(frozen.contains("frozen corpus vantage date is authoritative"));
+    }
+
+    #[test]
+    fn open_hindcast_never_offers_live_web_and_preserves_corpus() {
+        let prompt = open_research_prompt(
+            "w",
+            "a",
+            "question",
+            "2020-01-01",
+            "2026-09-19",
+            "frozen evidence",
+            true,
+        );
         assert!(prompt.contains("NO web access"));
         assert!(prompt.contains("frozen evidence"));
         assert!(!prompt.contains("temper.web_search"));

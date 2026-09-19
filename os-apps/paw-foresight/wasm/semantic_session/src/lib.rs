@@ -18,7 +18,7 @@ fn check(ctx: &Context) -> Result<(), String> {
         .ok_or("Missing Temper URL")?;
     let r = ctx.http_call(
         "GET",
-        &format!("{api}/tdata/Sessions('{id}')"),
+        &format!("{api}/tdata/Sessions('{id}')?$select=Status,result,error_message"),
         &[
             ("x-tenant-id".into(), ctx.tenant.clone()),
             ("x-temper-principal-kind".into(), "agent".into()),
