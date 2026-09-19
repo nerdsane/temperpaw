@@ -129,6 +129,9 @@ name = "result"
 type = "string"
 initial = ""
 
+# Machine-consumed text stays inline through bounded app handoffs.
+overflow_inline_max_bytes = "8388608"
+
 [[state]]
 name = "reply_attachments_json"
 type = "string"
@@ -257,10 +260,9 @@ overflow_inline_max_bytes = "131072"
 name = "user_message"
 type = "string"
 initial = ""
-# Initial user prompt. Up to a few hundred KB in practice (foresight judge,
-# long research pastes). Audit-trail data → no TTL; ceiling declared for
-# explicitness. See temper ADR-0045.
-overflow_inline_max_bytes = "131072"
+# Preserve bounded multi-round reasoning prompts through Configure; JSON string
+# escaping can expand the 3 MiB input. Spawn copies values without blob hydration.
+overflow_inline_max_bytes = "8388608"
 
 [[state]]
 name = "conversation"

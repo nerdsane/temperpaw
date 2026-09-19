@@ -37,6 +37,9 @@ name = "request_json"
 type = "string"
 initial = ""
 
+# Machine-consumed text stays inline through bounded app handoffs.
+overflow_inline_max_bytes = "8388608"
+
 [[state]]
 name = "started_at_ms"
 type = "string"
@@ -214,6 +217,9 @@ name = "user_message"
 type = "string"
 initial = ""
 
+# Bounded 3 MiB reasoning JSON can expand when serialized as a field string.
+overflow_inline_max_bytes = "8388608"
+
 [[state]]
 name = "tools_enabled"
 type = "string"
@@ -249,10 +255,16 @@ name = "reasoning_result"
 type = "string"
 initial = ""
 
+# Machine-consumed text stays inline through bounded app handoffs.
+overflow_inline_max_bytes = "8388608"
+
 [[state]]
 name = "answer"
 type = "string"
 initial = ""
+
+# Machine-consumed text stays inline through bounded app handoffs.
+overflow_inline_max_bytes = "8388608"
 
 [[state]]
 name = "check_count"
