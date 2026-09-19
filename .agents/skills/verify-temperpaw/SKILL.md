@@ -48,7 +48,7 @@ curl -sf http://localhost:$PORT/healthz
 
 ## Evidence
 
-- Save every response and relevant log excerpt under `/tmp/verify-temperpaw/<date>/` and reference the files in the report or `.proofs/` entry.
+- Save every response and relevant log excerpt under `/tmp/verify-temperpaw/<date>/` and reference the files in the PR or effort summary.
 - Prove the real path: entity state transitions read back via OData, not just HTTP 200s. Side effects (rows created, files written, messages sent) are checked alongside what is visible.
 - Evidence survives cleanup - teardown kills the server, never deletes `/tmp/verify-temperpaw/`.
 

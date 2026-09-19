@@ -1,12 +1,14 @@
 {
-  "hooks": {
-    "SessionStart": [
-      { "matcher": "startup|resume|clear|compact",
-        "hooks": [ { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/global-context.sh" } ] }
-    ]
-  },
+  "hooks": {},
   "extraKnownMarketplaces": {
-    "arni-stack": { "source": { "source": "github", "repo": "arni-labs/stack" } }
+    "arni-stack": {
+      "source": {
+        "source": "github",
+        "repo": "arni-labs/stack"
+      }
+    }
   },
-  "enabledPlugins": { "stack@arni-stack": true }
+  "enabledPlugins": {
+    "stack@arni-stack": true
+  }
 }

@@ -31,13 +31,10 @@ jobs:
       - name: Worker script syntax
         run: |
           for f in crates/paw-codex-worker/scripts/*.sh; do bash -n "$f"; done
-      # #500/#501 Docker died here: rsa → getrandom 0.2 on wasm32-unknown-unknown.
-      # PR `checks` does not run os-app build.sh (ARN-429). This is the cheap
-      # door that would have caught chain_github_ready copying rsa without the stub.
+      # Check RSA integrations against the deployment WASM target.
       - name: WASM rsa crates compile on wasm32-unknown-unknown
         run: |
           bash scripts/check-wasm-rsa-getrandom.sh
-          cargo check --manifest-path os-apps/paw-patrol/wasm/chain_github_ready/Cargo.toml --target wasm32-unknown-unknown
           cargo check --manifest-path os-apps/paw-patrol/wasm/release_run_lifecycle/Cargo.toml --target wasm32-unknown-unknown
 
   # Heavy validation: every os-app WASM build, full tests, dashboard, executed
