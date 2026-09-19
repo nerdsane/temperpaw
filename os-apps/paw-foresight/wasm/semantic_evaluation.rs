@@ -109,7 +109,7 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
         }
         // Supply actual source claims, including provenance and quoted excerpts,
         // rather than treating component likelihoods as evidence for a joint event.
-        evidence=nodes.iter().filter(|n|field(n,"kind")=="evidence").map(digest).collect();
+        evidence=nodes.iter().filter(|n|matches!(field(n,"kind"),"evidence"|"research_evidence")).map(digest).collect();
         if task["function"] == "estimate_likelihood" {
             question["instructions"]=json!("Estimate the probability of the WHOLE JOINT WORLD defined by state.node.statement AND ALL its defining component events in state.prerequisites, within the world horizon. Every defining component must occur for this joint world to occur. Evaluate causal interactions, correlations, shared assumptions, supplied source evidence, baseline unknowns, and counter hypotheses. Component estimates are context only: never average, multiply, inherit, or substitute them for a fresh assessment of the joint world. Counter hypotheses are contrary context, not required events. This is event likelihood, not narrative coherence or confidence. Worlds may overlap and need not sum to one.");
         }

@@ -271,11 +271,15 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
         let counters = world["counter_ids"]
             .as_array()
             .ok_or("Missing world counter hypotheses")?;
+        let mut counter_ids = std::collections::BTreeSet::new();
         if counters.len() > 12
             || counters.iter().any(|id| {
-                by_id
-                    .get(id.as_str().unwrap_or(""))
-                    .is_none_or(|n| !matches!(core::field(n, "kind"), "scenario" | "revision"))
+                let reference = id.as_str().unwrap_or("");
+                components.contains(reference)
+                    || !counter_ids.insert(reference)
+                    || by_id
+                        .get(id.as_str().unwrap_or(""))
+                        .is_none_or(|n| !matches!(core::field(n, "kind"), "scenario" | "revision"))
             })
         {
             return Err("Unknown counter hypothesis".into());
@@ -397,12 +401,21 @@ fn attach_world_probabilities(
     answer["probability_basis"] = json!("model_implied_world_estimate");
     answer["probability_model"] = json!("overlapping_worlds");
     answer["calibrated"] = json!(false);
-    answer["evaluation_note"] = json!(format!(
-        "{evaluated}/{count} whole worlds received fresh Jev likelihood estimates. Exploration stop: {}. Evaluation stop: {}. {}",
-        core::field(program, "exploration_stop_reason"),
-        core::field(program, "stop_reason"),
-        core::field(program, "last_error")
-    ));
+    answer["evaluation_note"] = json!(if evaluated == count && count > 0 {
+        format!("All {count} worlds were evaluated separately by Jev.")
+    } else {
+        let reason = match core::field(program, "stop_reason") {
+            "provider_error" => format!(
+                "Jev could not finish: {}",
+                core::field(program, "last_error")
+            ),
+            "time_budget" => "The available evaluation time ended.".to_owned(),
+            "call_budget" => "The available evaluation calls were used.".to_owned(),
+            "trace_budget" => "The evaluation record reached its size limit.".to_owned(),
+            _ => "The remaining worlds have no whole-world probability estimate.".to_owned(),
+        };
+        format!("{evaluated} of {count} worlds were evaluated separately by Jev. {reason}")
+    });
     Ok(())
 }
 
@@ -534,6 +547,7 @@ mod tests {
     #[test]
     fn worlds_are_evaluated_fresh_and_never_inherit_component_probabilities() {
         let (mut snapshot, generated, old) = world_fixture();
+        snapshot["nodes"].as_array_mut().unwrap().push(json!({"Id":"recent","kind":"research_evidence","statement":"Recent extracted claim","quote":"Actual source excerpt","edges":"[]"}));
         let mut program = compose(&mut snapshot, &generated, &old).unwrap();
         assert_eq!(program["tasks"].as_array().unwrap().len(), 4);
         assert!(
@@ -547,6 +561,11 @@ mod tests {
         let request = core::request(&snapshot, &program).unwrap();
         assert_eq!(request["state"]["counter_hypotheses"][0]["node"]["Id"], "c");
         assert_eq!(request["state"]["source_evidence"][0]["Id"], "e");
+        assert_eq!(request["state"]["source_evidence"][1]["Id"], "recent");
+        assert_eq!(
+            request["state"]["source_evidence"][1]["quote"],
+            "Actual source excerpt"
+        );
         program["cursor"] = json!(1);
         let request = core::request(&snapshot, &program).unwrap();
         assert!(
@@ -579,6 +598,8 @@ mod tests {
             ("component_ids", json!(["ref_0002", "invented"])),
             ("component_ids", json!(["ref_0002", "ref_0002"])),
             ("counter_ids", json!(["ref_0001"])),
+            ("counter_ids", json!(["ref_0004", "ref_0004"])),
+            ("counter_ids", json!(["ref_0002"])),
         ] {
             let mut bad = generated.clone();
             bad["worlds"][0][key] = value;
