@@ -3579,12 +3579,10 @@ fn paw_patrol_carries_the_stage3_s0_record_entities_and_ingest_module() {
             "chain_file_ready lib.rs should contain {needle}"
         );
     }
-    for prop in ["ArtifactFileReady"] {
-        assert!(
-            csdl.contains(&format!("<Property Name=\"{prop}\"")),
-            "CSDL should carry {prop}"
-        );
-    }
+    assert!(
+        csdl.contains("<Property Name=\"ArtifactFileReady\""),
+        "CSDL should carry ArtifactFileReady"
+    );
 
     // The new entities are governed under the existing Admin permit.
     let policy = read(patrol.join("policies/patrol.cedar"));
