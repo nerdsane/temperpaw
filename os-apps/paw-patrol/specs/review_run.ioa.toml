@@ -1,7 +1,6 @@
 [automaton]
-# One ReviewRun is one panel agent's pass (Grok, Codex, or Claude), not the
-# whole panel. Effort.review_run_ids holds every agent's run. Attach three
-# Recorded runs; L1 cannot require count 3.
+# Optional autonomous WorkCycle review record. Ordinary Efforts use plain
+# evidence and do not require a ReviewRun or a reviewer quorum.
 name = "ReviewRun"
 states = ["Requested", "Claimed", "Reviewing", "ChangesRequested", "Approved", "Escalated", "Failed", "Recorded", "Superseded"]
 initial = "Requested"
@@ -145,7 +144,7 @@ from = ["Requested", "Claimed", "Reviewing"]
 to = "Recorded"
 params = ["effort_id", "reviewer_id", "review_summary", "verdict", "findings", "rubrics", "risk_flags", "commit", "reviewers_ran", "risk"]
 effect = [{ type = "set_bool", var = "record_present", value = "true" }]
-hint = "Write this panel agent's record (commit, reviewers, findings, risk) when fix-it passed. Use RecordPanelFixItFailed when it did not."
+hint = "Write this review record (commit, reviewers, findings, risk) when fix-it passed. Use RecordPanelFixItFailed when it did not."
 
 [[action]]
 name = "RecordPanelFixItFailed"
@@ -157,7 +156,7 @@ effect = [
   { type = "set_bool", var = "record_present", value = "true" },
   { type = "set_bool", var = "fix_it_failed", value = "true" }
 ]
-hint = "Write this panel agent's record when fix-it failed. PassReview will retract."
+hint = "Write this review record when fix-it failed. Findings do not advance or block an Effort."
 
 [[action]]
 name = "Request"
@@ -180,7 +179,7 @@ name = "StartReview"
 kind = "input"
 from = ["Claimed"]
 to = "Reviewing"
-hint = "Start review of diff, proof, tests, and live verification requirements."
+hint = "Read the changed code and independently exercise the changed feature; report demonstrated defects within scope."
 
 [[action]]
 name = "RequestChanges"

@@ -2,23 +2,21 @@
 
 Operational control plane for TemperPaw maintaining itself.
 
-All external requests and machine signals enter Patrol first. Patrol decides
-whether the input becomes real work, links or creates paw-pm Issues when useful,
-and runs the implementation loop through Temper-visible state transitions.
+Ordinary agent sessions create a lightweight Effort directly. The autonomous
+Patrol factory is a separate, optional workflow for scheduled or machine-routed
+work; its WorkCycle protocol is not a prerequisite for ordinary tasks.
 
 ## Entity Types
 
 ### WorkRequest
-WorkRequest means human or manager-agent intent: "do this work", "clean this
+WorkRequest means human or manager-agent intent for the optional factory: "do this work", "clean this
 up", or "investigate this thing." OpenClaw, Discord, or a human dashboard
 submits here instead of writing directly to paw-pm.
 
 ### Intent
-Intent is WorkRequest renamed to the SDLC vocabulary (ARN-441, stage 3 phase 4):
-the same intake shape. `Accept` creates an `Effort`. Triage ("worth
-doing?") is a different lifecycle than execution ("done right?"), so Intent stays
-the intake. Additive during the shadow phase — WorkRequest stays live for the
-paw-codex-worker and dashboard until the phase-3 flip, then retires.
+Optional intake for requests that need triage. `Accept` creates an Effort,
+without checking for committed documents. Ordinary sessions create Efforts
+directly and do not walk the intake sequence.
 
 ### PatrolRequest
 Legacy name for request intake. New intake must use WorkRequest; PatrolRequest
@@ -55,25 +53,21 @@ the WorkCycle plan through `WorkCycle.RevisePlan`, increments
 run.
 
 ### Effort
-Effort is WorkCycle EXTENDED to the full SDLC lifecycle (ARN-441, stage 3 phase
-4): born at intent and carried to a verified deploy. The implementer is a
-harness Agent: edits are native, recorded acts go through Temper MCP, machine
-work is Computer.Exec. It begins `Intended` → `Specified` → `Planned` →
-`Building` → `InReview` → `Proving` → `Merged` → `Deploying` → `Verified`.
-`Stalled` is recoverable; `Abandoned` is the give-up terminal. The row holds
-the chain (intent_id, review_run_ids, proof_packet_ids, ask_ids, deployment_id,
-pm_issue_id). Ask is the inbox (decide / do / fyi). `spec_ref` / `plan_ref` / `intent_ref` /
-`decisions_ref` are git paths (`docs/efforts/<issue>/*.md`). AttachSpec /
-AttachPlan / AttachDecisions / AttachIntentFile run `chain_github_ready`
-(the path must be a file on GitHub at repo@branch). Review and proof stay
-Temper Files. `ConfigureDeploy` names the GHCR `image_tag`, `computer_id` (default
-`arni-big`), and probe. `Merge` is the Cedar door (L0/L1 permit; L2+
-denies and surfaces as MCP elicitation) and then creates a `TemperDeploy`
-into `Deploying`. That child waits for the GHCR tag, swaps Railway
-`IMAGE_TAG`, polls `/paw/version`, and rolls back. Healthy →
-`MarkDeployVerified` → Verified; RolledBack → Merged; `Deploy` retries
-the same child. A kernel Effort pins TemperPaw and sets `image_tag` to
-that new image before Merge. WorkCycle is not this path.
+A simple task record: **Open → Done or Cancelled**. Create one for a new task,
+reuse it when resuming, and keep the objective in `task_summary` and context in
+`task_detail`. `intent_ref` can link a useful document; it is optional.
+
+- `Update`: edit the objective and context; resumes legacy records as Open.
+- `AttachPullRequest(pull_request_urls)`: append one URL. Attach all related
+  PRs, including several PRs from the same repository.
+- `RecordEvidence(evidence)`: append a plain result or evidence link.
+- `Complete(result_summary)`: record the delivered result as Done.
+- `Cancel(result_summary)` and `Reopen`: stop or resume the same task.
+
+No review quorum, proof packet, GitHub file check, deployment, or lifecycle
+ceremony is required. Completion never merges code or deploys an application.
+Use the existing repository delivery route for authorized operations. Legacy
+states remain readable and can move directly to Open, Done, or Cancelled.
 
 ### DsfDeploy
 Deep Sci-Fi deploy tool. Merge the PR on the named computer, watch
@@ -99,20 +93,11 @@ mini local Codex worker. It claims queued work from Railway Temper over SSE,
 starts local Codex with ChatGPT auth, and self-reports results.
 
 ### ReviewRun
-One panel agent's pass (Grok, Codex, or Claude), not the whole panel. Each
-agent writes their own ReviewRun. `Effort.review_run_ids` lists them.
-`PassReview` sets `review_passed`. `chain_review_ready` retracts unless
-the attached ReviewRuns are Recorded and pass the same rules as
-`validate.py` (panel, no open act-on, shared commit). `AttachProofPacket`
-and `Merge` do the same for the ProofPacket and the merge `head_sha`.
-The implementer still fires the verbs; the rows are the book. `Approve`
-still fans into WorkCycle for the old loop and is not the Effort path.
-The
-reviewer
-inspects the diff and proof, reruns relevant checks, and returns approve,
-request changes, or escalate. Findings live on the ReviewRun row. A Temper
-File (HTML or JSON) can hang off the run as the readable artifact; GitHub
-comments are not the record.
+A review record used by the optional autonomous WorkCycle factory. It is not
+required for an Effort. For ordinary tasks, apply the shared review guidance:
+read changed code, independently exercise a meaningful changed feature, and
+report demonstrated defects within the accepted scope. Plain findings and
+verification results can be recorded as Effort evidence or on the PR.
 
 ### EvaluationRun
 Automated gate execution and result capture for tests, proof requirements,
@@ -121,11 +106,8 @@ an evaluation fails while the WorkCycle is in review, Patrol treats it like
 requested rework and queues the implementer again with the failing evidence.
 
 ### ProofPacket
-Human-readable and machine-readable proof. The record is the Temper row plus
-an optional Temper File (HTML or JSON via `$value`). Vercel and GitHub are
-not the source. The human view should include a visual one-page summary,
-state-transition diagram, changed-files map, test matrix, reviewer verdict,
-residual risks, PR links, entity links, and trace/log links.
+Structured evidence used by the optional autonomous WorkCycle factory. Ordinary
+Efforts use plain evidence and do not need a packet, schema, or hosted report.
 
 ### RiskRule
 Explicit rule that sets a minimum risk lane from concrete evidence. Agents may
@@ -224,7 +206,7 @@ Use the three intake shapes this way:
 | Signal | Observed evidence or error from Datadog, Discord, GitHub, a webhook, or another agent | Normalized/triaged Signal, then a FactoryCase and WorkCycle if actionable |
 | PatrolRun | Active investigation by an agent, such as Datadog or GitHub patrol | WorkerRun for the patrol agent, evidence, Signals, findings, cases, work, and ProofPackets |
 
-Do not submit new work directly to paw-pm. Paw-pm is durable project memory;
+For the optional factory: Do not submit new work directly to paw-pm. Paw-pm is durable project memory;
 Patrol owns intake, triage, risk, worker assignment, review, evaluation, and
 proof. Patrol creates or links paw-pm Issues only after it decides the input is
 real work.
@@ -256,49 +238,32 @@ Use these OData action paths when an agent, OpenClaw, Discord bridge, script, or
 human operator submits work directly to Temper. The examples omit auth headers;
 callers still need a valid bearer token and principal headers that Cedar allows.
 
-### SDLC Intent (ARN-441)
+### Ordinary task
 
-Create an Intent, commit intent.md, name its git path, triage, accept.
-Accept creates the Effort. Then commit spec.md / plan.md / decisions.md,
-name those git paths, and walk Specify → Plan → StartBuild → … → Merge →
-Deploy (record a DsfDeploy or TemperDeploy id).
+Create an empty record (or supply only `Id`), then set its context with `Update`.
+Strict entity creation rejects task fields; they belong to the declared action.
 
 ```http
-POST /tdata/Intents
+POST /tdata/Efforts
 {}
 
-POST /tdata/Intents('<id>')/TemperPaw.Patrol.Submit
-{
-  "source": "harness",
-  "request_text": "Ship the locked Stage 3 walk.",
-  "requester_id": "cursor"
-}
+POST /tdata/Efforts('<id>')/TemperPaw.Patrol.Update
+{"task_summary": "Fix gallery loading", "task_detail": "Show loaded images after navigation", "repo": "arni-labs/foundry", "branch": "fix-gallery", "intent_ref": ""}
 
-POST /tdata/Intents('<id>')/TemperPaw.Patrol.Triage
-{
-  "triage_summary": "worth doing",
-  "task_summary": "Stage 3 walk",
-  "task_detail": "",
-  "risk_lane": "L0",
-  "repo": "nerdsane/temperpaw",
-  "branch": "cursor/arn-441-stage3",
-  "intent_ref": "docs/efforts/ARN-441/intent.md"
-}
+POST /tdata/Efforts('<id>')/TemperPaw.Patrol.AttachPullRequest
+{"pull_request_urls": "https://github.com/arni-labs/foundry/pull/123"}
 
-POST /tdata/Intents('<id>')/TemperPaw.Patrol.AttachIntentFile
-{
-  "intent_ref": "docs/efforts/ARN-441/intent.md"
-}
+POST /tdata/Efforts('<id>')/TemperPaw.Patrol.RecordEvidence
+{"evidence": "Opened the gallery, navigated away and back, and verified images loaded."}
 
-POST /tdata/Intents('<id>')/TemperPaw.Patrol.Accept
-{
-  "factory_case_id": ""
-}
+POST /tdata/Efforts('<id>')/TemperPaw.Patrol.Complete
+{"result_summary": "Gallery loading fixed and verified."}
 ```
 
-Expected result: Intent is Accepted. An Effort exists in Intended, seeded
-with the intent.md git path. WorkRequest stays the live worker/dashboard path
-until the phase-3 flip.
+### Optional autonomous factory
+
+The following WorkRequest protocol is for the resident Patrol worker. It is not
+the default for interactive Codex, Claude, or Foundry task sessions.
 
 ### Human or manager-agent task
 
@@ -463,13 +428,8 @@ server hosts Temper and triggers, but these modules own the workflow decisions:
   by creating repo sweeps and daily briefs from schedule transitions.
 - `daily_brief_lifecycle`: queues the local Codex DailyBrief WorkerRun from
   finished proof packets, findings, and open risks.
-- `chain_github_ready`: GET the repo with a GitHub App installation token
-  (tenant `github_app_id` + `github_app_private_key`), falling back to
-  `github_token`, then GET contents for `docs/efforts/<id>/*.md`. Fired by
-  AttachIntentFile / AttachSpec / AttachPlan / AttachDecisions. A 404 on the
-  repo is "this credential cannot see this repo", not a missing file.
 - `release_run_lifecycle`: DsfDeploy / ReleaseRun merge, watch, and revert.
-  Merge uses the same GitHub App as the door. `github_token` is fallback
+  Merge uses the configured GitHub App. `github_token` is fallback
   only. Do not put a PAT in the vault when the App is installed.
 - `chain_file_ready`: GET a Temper File and require Ready/Locked. Fired by
   AttachReviewFile / AttachProofFile.

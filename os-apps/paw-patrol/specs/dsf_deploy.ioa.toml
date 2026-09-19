@@ -6,11 +6,8 @@
 #
 # Side effects reuse release_run_lifecycle (merge via GitHub App install
 # token, tenant github_token only as fallback; watch health_url git_sha on
-# the computer, git-revert). This automaton owns
-# Effort callbacks:
-#   Healthy    → Effort.MarkDeployVerified
-#   RolledBack → Effort.MarkDeployRolledBack
-#   Failed     → Effort.Stall
+# the computer, git-revert). Results remain on this deployment record.
+# An Effort may link it as evidence without changing its own lifecycle.
 
 [automaton]
 name = "DsfDeploy"
@@ -188,17 +185,6 @@ to = "Healthy"
 params = ["observed_sha"]
 hint = "health_url serves merge_sha. Reports the Effort verified."
 
-[[action.triggers]]
-name = "dsf_healthy_marks_effort"
-kind = "entity"
-principal = "patrol-release-service"
-target_entity = "Effort"
-target_action = "MarkDeployVerified"
-
-[action.triggers.resolve_target]
-type = "field"
-field = "effort_id"
-
 [[action]]
 name = "CheckUnhealthy"
 kind = "input"
@@ -236,17 +222,6 @@ to = "RolledBack"
 params = ["revert_sha"]
 hint = "Revert pushed. Effort returns to Merged."
 
-[[action.triggers]]
-name = "dsf_rolled_back_returns_effort"
-kind = "entity"
-principal = "patrol-release-service"
-target_entity = "Effort"
-target_action = "MarkDeployRolledBack"
-
-[action.triggers.resolve_target]
-type = "field"
-field = "effort_id"
-
 [[action]]
 name = "Fail"
 kind = "input"
@@ -254,32 +229,3 @@ from = ["Requested", "Merging", "Watching", "Unhealthy"]
 to = "Failed"
 params = ["error_message"]
 hint = "Step could not run. Effort Stalls — the world may be inconsistent."
-
-[[action.triggers]]
-name = "dsf_failed_stalls_effort"
-kind = "entity"
-principal = "patrol-release-service"
-target_entity = "Effort"
-target_action = "Stall"
-
-[action.triggers.params_from]
-error_message = "error_message"
-
-[action.triggers.resolve_target]
-type = "field"
-field = "effort_id"
-
-[[invariant]]
-name = "HealthyIsFinal"
-when = ["Healthy"]
-assert = "no_further_transitions"
-
-[[invariant]]
-name = "RolledBackIsFinal"
-when = ["RolledBack"]
-assert = "no_further_transitions"
-
-[[invariant]]
-name = "FailedIsFinal"
-when = ["Failed"]
-assert = "no_further_transitions"

@@ -78,7 +78,7 @@ from = ["Open"]
 to = "Open"
 params = ["effort_id", "kind", "need", "options", "act", "pr_url"]
 effect = [{ type = "set_bool", var = "stalls", value = true }]
-hint = "Open the stall Ask. stalls becomes true. The agent also fires Effort.Stall."
+hint = "Open the stall Ask. stalls becomes true. The Effort remains an open record while independent work continues."
 
 [[action]]
 name = "RecordFyi"
