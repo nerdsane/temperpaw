@@ -3,6 +3,10 @@
   <edmx:DataServices>
     <Schema Namespace="TemperPaw.Foresight" xmlns="http://docs.oasis-open.org/odata/ns/edm">
 
+      <Action Name="SpawnReasoning" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.SemanticRun"/>
+        <ReturnType Type="TemperPaw.Foresight.SemanticRun"/>
+      </Action>
       <EntityType Name="SemanticRun">
         <Key><PropertyRef Name="Id"/></Key>
         <Property Name="Id" Type="Edm.String"/>

@@ -581,3 +581,14 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Options:** Give the UI operator Session management; let Seed explicitly hand off to a system action. **Chose the system handoff** because the browser only requests a World, while Temper owns creating and running researchers. StartSeed rejects direct non-system calls. Existing ResumeSeed remains system-only.
 
 **Where:** World IOA/CSDL and Foresight Cedar; contract tests in `foresight_registration_contract.rs`; PR #526.
+
+
+## D49 — Persist reasoning prompts before spawning the Session
+
+**Decision:** LaunchReasoning saves the prompt and schedules SpawnReasoning; the latter copies the persisted fields into its Session.
+
+**Came up because:** The first automatic SemanticRun completed its evidence snapshot but the child Session received empty prompts. The pinned actor evaluates spawn effects before synchronizing the same action's parameters, so the old action copied its prior empty values.
+
+**Options:** Change kernel effect ordering; use two existing app transitions. **Chose two app transitions** because this expresses the persistence boundary without a kernel change and applies to seed, deepening and synthesis alike. SpawnReasoning is system-only.
+
+**Where:** `semantic_run.ioa.toml`, Foresight CSDL/policy; real actor regression in `foresight_registration_contract.rs`; PR #526.

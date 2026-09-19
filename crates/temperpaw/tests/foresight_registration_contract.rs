@@ -875,3 +875,45 @@ fn operator_seed_enters_the_declared_system_research_action() {
         .unwrap();
     assert_eq!(start["triggers"][0]["module"].as_str(), Some("seed_world"));
 }
+
+#[test]
+fn reasoning_spawn_copies_the_durably_saved_prompt() {
+    use temper_server::entity_actor::{EntityState, process_action};
+    let _clock = temper_runtime::scheduler::install_deterministic_context(518);
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../os-apps/paw-foresight/specs/semantic_run.ioa.toml"),
+    )
+    .unwrap();
+    let table = temper_jit::TransitionTable::from_ioa_source(&source);
+    let mut state: EntityState = serde_json::from_value(serde_json::json!({
+        "entity_type":"SemanticRun", "entity_id":"run-test", "status":"ReasoningSetup",
+        "item_count":0, "fields":{"system_prompt":"", "user_message":"", "model":"gpt-5.5"}
+    }))
+    .unwrap();
+    let saved = process_action(
+        &mut state,
+        &table,
+        "LaunchReasoning",
+        &serde_json::json!({
+            "system_prompt":"Design the branching worlds.", "user_message":"Question and twelve sourced facts."
+        }),
+    );
+    assert!(saved.success);
+    assert!(
+        saved.spawn_requests.is_empty(),
+        "spawn must follow prompt persistence"
+    );
+    assert!(
+        saved
+            .scheduled_actions
+            .iter()
+            .any(|a| a.action == "SpawnReasoning")
+    );
+    let spawned = process_action(&mut state, &table, "SpawnReasoning", &serde_json::json!({}));
+    assert!(spawned.success);
+    assert_eq!(spawned.spawn_requests.len(), 1);
+    let fields = &spawned.spawn_requests[0].copied_field_values;
+    assert_eq!(fields["system_prompt"], "Design the branching worlds.");
+    assert_eq!(fields["user_message"], "Question and twelve sourced facts.");
+}
