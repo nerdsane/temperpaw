@@ -14,6 +14,7 @@ fn check(ctx: &Context) -> Result<(), String> {
     let api = ctx
         .config
         .get("temper_api_url")
+        .filter(|url| !url.is_empty() && !url.contains("{secret:"))
         .ok_or("Missing Temper URL")?;
     let r = ctx.http_call(
         "GET",

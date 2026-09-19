@@ -693,7 +693,7 @@ permit(principal, action in [Action::"create", Action::"Start", Action::"Cancel"
 when { ["human", "supervisor", "system"].contains(principal.agent_type) };
 permit(principal, action, resource is SemanticRun)
 when { principal.agent_type == "system" };
-permit(principal is Admin, action, resource is SemanticRun);
+permit(principal is Admin, action in [Action::"create", Action::"Start", Action::"Cancel"], resource is SemanticRun);
 
 permit(principal, action == Action::"RequestSemanticExploration", resource is World)
 when { ["human", "supervisor", "system"].contains(principal.agent_type) };
@@ -742,4 +742,9 @@ unless { principal has agent_type && principal.agent_type == "system" };
 
 // Scheduled after LaunchReasoning has durably saved its prompt parameters.
 forbid(principal, action == Action::"SpawnReasoning", resource is SemanticRun)
+unless { principal has agent_type && principal.agent_type == "system" };
+
+forbid(principal, action == Action::"Fail", resource is SemanticRun)
+unless { principal == Agent::"service:wasm-runtime" || (principal has agent_type && principal.agent_type == "system") };
+forbid(principal, action == Action::"CheckReasoning", resource is SemanticRun)
 unless { principal has agent_type && principal.agent_type == "system" };

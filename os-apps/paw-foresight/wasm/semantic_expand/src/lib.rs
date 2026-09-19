@@ -43,7 +43,10 @@ fn generated_node(
         json!({"Id":id,"statement":statement,"kind":kind,"Status":"Hypothesis","provenance":"generated_hypothesis","edges":serde_json::to_string(&edges).unwrap(),"source_refs":"[]","evidence_note":v["evidence_note"],"signal":v["signal"],"falsifier":v["falsifier"],"scene":v["scene"],"parent":v["parent"]}),
     )
 }
-fn expand(snapshot: &mut Value, generated: &Value, phase: &str) -> Result<(), String> {
+fn expand(snapshot: &mut Value, generated: &Value, phase: &str, program: &Value) -> Result<(), String> {
+    let allowed: std::collections::BTreeSet<String> = core::repair_candidates(snapshot, program)
+        .iter().map(|candidate| core::field(&candidate["node"], "Id").to_owned()).collect();
+    let mut revised = std::collections::BTreeSet::new();
     let nodes = snapshot["nodes"].as_array_mut().ok_or("Missing snapshot")?;
     let mut known: std::collections::BTreeSet<String> = nodes
         .iter()
@@ -100,6 +103,9 @@ fn expand(snapshot: &mut Value, generated: &Value, phase: &str) -> Result<(), St
             .ok_or("Expected 1–8 deepened futures")?;
         for v in revisions {
             let parent = identifier(&v["parent"])?;
+            if !allowed.contains(parent) || !revised.insert(parent.to_owned()) {
+                return Err("Revision parent was not selected for repair or was repeated".into());
+            }
             if !nodes
                 .iter()
                 .any(|n| core::field(n, "Id") == parent && core::field(n, "kind") == "scenario")
@@ -139,7 +145,7 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
         raw
     };
     let mut snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
-    expand(&mut snapshot, &core::parse(raw)?, phase)?;
+    expand(&mut snapshot, &core::parse(raw)?, phase, &core::parse(core::field(&ctx.entity_state, "program_json"))?)?;
     let mut program = core::plan(snapshot["nodes"].as_array().ok_or("Missing nodes")?)?;
     // Recursion reuses persisted assessments for unchanged nodes when deepening.
     if phase == "deepen" {
@@ -170,10 +176,19 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
 mod tests {
     use super::*;
     #[test]
+    fn deepen_only_accepts_unique_jev_selected_parents() {
+        let snapshot = json!({"nodes":[{"Id":"e","edges":"[]"},{"Id":"a","kind":"scenario","edges":"[]"},{"Id":"b","kind":"scenario","edges":"[]"}]});
+        let program = json!({"results":{"a":{"choose_next_operation":"repair"},"b":{"choose_next_operation":"monitor"}}});
+        let revision = |id: &str,parent: &str| json!({"id":id,"parent":parent,"statement":"Revised mechanism","requires":["e"]});
+        assert!(expand(&mut snapshot.clone(), &json!({"revisions":[revision("r1","a")]}), "deepen", &program).is_ok());
+        assert!(expand(&mut snapshot.clone(), &json!({"revisions":[revision("r1","b")]}), "deepen", &program).is_err());
+        assert!(expand(&mut snapshot.clone(), &json!({"revisions":[revision("r1","a"),revision("r2","a")]}), "deepen", &program).is_err());
+    }
+    #[test]
     fn cross_product_builds_81_worlds_without_invented_evidence() {
         let mut s = json!({"nodes":[{"Id":"e","edges":"[]"}]});
         let axes:Vec<_>=(0..4).map(|a|json!({"title":format!("axis {a}"),"options":(0..3).map(|b|json!({"id":format!("a{a}o{b}"),"statement":"hypothesis","requires":["e"]})).collect::<Vec<_>>()})).collect();
-        expand(&mut s, &json!({"axes":axes}), "seed").unwrap();
+        expand(&mut s, &json!({"axes":axes}), "seed", &json!({})).unwrap();
         assert_eq!(s["nodes"].as_array().unwrap().len(), 94);
         assert_eq!(
             s["nodes"]

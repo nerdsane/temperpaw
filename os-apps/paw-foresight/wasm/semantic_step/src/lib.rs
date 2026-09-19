@@ -41,7 +41,7 @@ fn step(ctx: &Context) -> Result<(), String> {
         let request = core::request(&snapshot, &p)?;
         set_success_result(
             "Evaluate",
-            &json!({"request_json":request.to_string(),"program_json":p.to_string(),"trace_json":trace.to_string()}),
+            &json!({"request_json":request.to_string()}),
         );
     }
     Ok(())

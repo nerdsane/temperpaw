@@ -616,3 +616,40 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the existing settings because:** Five transient events avoid multiplying the cumulative trace fifty times, while durable events and the complete current trace remain stored. The semantic modules receive extra bounded headroom without changing unrelated modules or waiting on a kernel release.
 
 **Where:** `os-apps/paw-foresight/specs/semantic_run.ioa.toml`; dedicated Foresight Railway service configuration; PR #526.
+
+
+## D52 — Measure intrinsic dependency depth and share assessment definitions
+
+**Decision:** Compute each node's longest prerequisite path before scheduling Jev calls, and pass the same gap definitions to Jev and synthesis.
+
+**Came up because:** Independent verification found that first-visit DFS depth depended on sorted IDs, allowing prerequisite-first chains to bypass the eight-level limit. A completed synthesis also interpreted the `evidence` gap label as supporting evidence.
+
+**Options:** Relabel the displayed traversal depth and add another prose caveat; compute intrinsic graph depth and supply the existing criterion dictionary at the synthesis boundary.
+
+**Chose intrinsic depth and a shared dictionary because:** They correct the causal errors without changing the graph's evidence or manufacturing results. Node-count bounds cap traversal at 256 nodes; dependencies deeper than eight are explicitly excluded. Missing references and cycles remain recorded. Earlier incorrect runs stay preserved.
+
+**Where:** `os-apps/paw-foresight/wasm/semantic_core.rs`, `semantic_reasoning/src/lib.rs`; PR #526; independent red/green tests in both identifier orders, including 256-node chains.
+
+## D53 — Enforce cancellation and machine-owned result boundaries
+
+**Decision:** Cancel the spawned reasoning Session when its SemanticRun is cancelled, restrict admin actions to starting/cancelling runs, and accept deepening only for unique Jev-selected repair parents.
+
+**Came up because:** Final round-two review found that cancellation left the child running, a blanket admin permit allowed forged failure callbacks, and generated revisions could target an unselected scenario. Review also identified duplicate unchanged trace writes and missing URL setup validation.
+
+**Options:** Leave these as documented operational limitations; enforce the existing declared contract at the state-machine, authorization and generated-output boundaries.
+
+**Chose enforcement because:** These are violations of the accepted app behavior. System timeouts and the runtime's failure callback remain authorized. Evaluate now saves only its changed request, keeping the same persisted program and trace while avoiding redundant cumulative payloads. Empty or unresolved session-reader URLs fail with the existing setup message.
+
+**Where:** `specs/semantic_run.ioa.toml`, `policies/foresight.cedar`, `wasm/semantic_expand`, `wasm/semantic_step`, `wasm/semantic_session`; PR #526.
+
+## D54 — Restore published sandbox cleanup in the owning source
+
+**Decision:** Restore the already-published sandbox release dispatch and destroy helper in the owning agent source and rebuild that module.
+
+**Came up because:** Review identified that the preserved release-capable WASM and terminal Session triggers no longer matched the overlaid Git source, which only provisioned sandboxes. A future source rebuild would regress cleanup or create a new sandbox during a terminal transition.
+
+**Options:** Keep relying on the frozen published binary; remove cleanup; restore only the published release behavior while preserving current provisioning features.
+
+**Chose the narrow restoration because:** It makes source builds retain the deployed capability without a Genesis change or a broader merge of divergent agent implementations. No-handle and static sessions remain no-ops; deletion is idempotent on provider 404 responses and release failure is reported without undoing completion.
+
+**Where:** `os-apps/paw-agent/wasm/sandbox_provisioner/src/lib.rs`, `os-apps/paw-agent/wasm/wasm-helpers/src/sandbox.rs`; source taken from the preserved package parent of `1fe41a7a5efd4b71bb72c349cab94b28b211f4ff`; PR #526.

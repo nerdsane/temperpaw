@@ -86,7 +86,7 @@ name = "Evaluate"
 kind = "input"
 from = ["Choosing"]
 to = "Calling"
-params = ["request_json", "program_json", "trace_json"]
+params = ["request_json"]
 [[action.triggers]]
 name = "semantic_call"
 kind = "wasm"
@@ -130,6 +130,17 @@ kind = "input"
 from = ["Preparing", "Choosing", "Calling", "ReasoningSetup", "Reasoning", "Expanding"]
 to = "Cancelled"
 params = []
+[[action.triggers]]
+name = "cancel_reasoning_session"
+kind = "entity"
+principal = "system"
+target_entity = "Session"
+target_action = "Cancel"
+guard = {type="not",guard={type="field_equals",field="reasoning_session_id",value=""}}
+[action.triggers.resolve_target]
+type = "field"
+field = "reasoning_session_id"
+
 
 [[state_timeout]]
 state = "Preparing"
