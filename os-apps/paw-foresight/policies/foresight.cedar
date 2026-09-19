@@ -725,3 +725,12 @@ when { context.module == "semantic_call" };
 
 permit(principal is Agent, action == Action::"access_secret", resource == Secret::"temper_api_url")
 when { ["semantic_prepare", "semantic_session"].contains(context.module) };
+
+// The server-side question route uses the tenant's verified operator credential.
+permit(principal is Agent,
+  action in [Action::"ConfigureLearning", Action::"Configure", Action::"RequestSemanticExploration", Action::"Seed"],
+  resource is World)
+when {
+  principal has agent_type && principal.agent_type == "operator" &&
+  principal has agentTypeVerified && principal.agentTypeVerified == true
+};

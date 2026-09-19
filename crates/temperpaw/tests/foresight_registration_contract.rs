@@ -792,8 +792,8 @@ fn failed_registration_drains_only_work_queued_after_its_start() {
 
 #[test]
 fn every_foresight_spec_loads_with_the_runtime_parser() {
-    let specs = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../os-apps/paw-foresight/specs");
+    let specs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../os-apps/paw-foresight/specs");
     for entry in std::fs::read_dir(specs).unwrap() {
         let path = entry.unwrap().path();
         if path.to_string_lossy().ends_with(".ioa.toml") {
@@ -802,4 +802,48 @@ fn every_foresight_spec_loads_with_the_runtime_parser() {
                 .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         }
     }
+}
+
+#[test]
+fn verified_operator_can_start_worlds_but_cannot_write_machine_results() {
+    use temper_authz::{AuthzEngine, SecurityContext};
+    let engine = AuthzEngine::new(include_str!(
+        "../../../os-apps/paw-foresight/policies/foresight.cedar"
+    ))
+    .unwrap();
+    let operator = SecurityContext::from_resolved_identity("operator", "operator", None);
+    let session = SecurityContext::from_resolved_identity("session", "agent", None);
+    let attrs = std::collections::HashMap::new();
+    for action in [
+        "ConfigureLearning",
+        "Configure",
+        "RequestSemanticExploration",
+        "Seed",
+    ] {
+        assert!(
+            engine
+                .authorize(&operator, action, "World", &attrs)
+                .is_allowed(),
+            "{action}"
+        );
+        assert!(
+            !engine
+                .authorize(&session, action, "World", &attrs)
+                .is_allowed(),
+            "{action}"
+        );
+    }
+    for action in ["SeedComplete", "StartSemanticExploration", "AdoptModel"] {
+        assert!(
+            !engine
+                .authorize(&operator, action, "World", &attrs)
+                .is_allowed(),
+            "{action}"
+        );
+    }
+    assert!(
+        !engine
+            .authorize(&operator, "Complete", "SemanticRun", &attrs)
+            .is_allowed()
+    );
 }

@@ -559,3 +559,14 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the bundled image because:** The runtime already loads and reconciles bundled specs, policies, and WASM by content digest. This removes the registry repair from the delivery path while retaining Temper-owned orchestration and the existing persistent acceptance service. It does not bypass the denied Genesis review operation or claim registry publication. Preserve the previous deployment for rollback and verify the installed modules, real forecast flow, and restart recovery before production promotion.
 
 **Where:** TemperPaw startup Phase 6b; native source `9836b4bc21b67b02a575fc241050e179ab2022c1`; app source `350ff8435102cc422eda45c2c8766abc5f05d554`; prepared agent `1fe41a7a5efd4b71bb72c349cab94b28b211f4ff` and Foresight `3aff81d797d20ee8de817c32fd2ebc861080693b`.
+
+
+## D47 — Recognize the verified deployment operator for question starts
+
+**Decision:** Permit the verified tenant operator to ConfigureLearning, Configure, RequestSemanticExploration and Seed a World.
+
+**Came up because:** The first real browser question on the direct acceptance deployment created its World but ConfigureLearning was denied: the pinned runtime resolves the existing server credential as a verified operator, not an Admin.
+
+**Options:** Correct the app's explicit input permission; change identity headers; grant broad operator mutation. **Chose the narrow app permission** because it uses the runtime's credential verification and preserves machine-only callbacks. Caller identity headers cannot confer authority. No provider/result actions are added.
+
+**Where:** `os-apps/paw-foresight/policies/foresight.cedar`; regression in `crates/temperpaw/tests/foresight_registration_contract.rs`; PR #526.
