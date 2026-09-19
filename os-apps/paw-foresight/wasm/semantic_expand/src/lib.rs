@@ -107,6 +107,44 @@ fn expand(
         }
     }
     let resolve = |id: &str| mapped.get(id).cloned().unwrap_or_else(|| id.to_owned());
+    let mut hypothesis_ids: std::collections::BTreeSet<String> = nodes
+        .iter()
+        .filter(|n| matches!(core::field(n, "kind"), "scenario" | "revision"))
+        .map(|n| core::field(n, "Id").to_owned())
+        .collect();
+    for hypothesis in hypotheses {
+        hypothesis_ids.insert(resolve(identifier(&hypothesis["id"])?));
+    }
+    let mut lineage: std::collections::BTreeMap<String, String> = nodes
+        .iter()
+        .filter_map(|n| {
+            n["parent"]
+                .as_str()
+                .filter(|p| !p.is_empty())
+                .map(|parent| (core::field(n, "Id").to_owned(), parent.to_owned()))
+        })
+        .collect();
+    for hypothesis in hypotheses {
+        if let Some(parent) = hypothesis["parent"].as_str().filter(|p| !p.is_empty()) {
+            let parent = resolve(identifier(&json!(parent))?);
+            if !hypothesis_ids.contains(&parent) {
+                return Err("Unknown hypothesis parent".into());
+            }
+            lineage.insert(resolve(identifier(&hypothesis["id"])?), parent);
+        }
+    }
+    // Parent is lineage, not an implicit causal dependency. It may name a new
+    // hypothesis in any batch order, but it must never create a lineage cycle.
+    for hypothesis in hypotheses {
+        let mut current = resolve(identifier(&hypothesis["id"])?);
+        let mut visited = std::collections::BTreeSet::new();
+        while let Some(parent) = lineage.get(&current) {
+            if !visited.insert(current.clone()) {
+                return Err("Cyclic hypothesis parent lineage".into());
+            }
+            current = parent.clone();
+        }
+    }
     let mut added = vec![];
     for report in reports {
         let statement = report["statement"]
@@ -139,15 +177,11 @@ fn expand(
             .map(|id| identifier(id).map(|id| json!(resolve(id))))
             .collect::<Result<Vec<_>, _>>()?;
         v["requires"] = json!(requires);
-        let parent = hypothesis["parent"].as_str().filter(|s| !s.is_empty());
-        if let Some(parent) = parent
-            && !nodes.iter().any(|n| {
-                core::field(n, "Id") == parent
-                    && matches!(core::field(n, "kind"), "scenario" | "revision")
-            })
-        {
-            return Err("Unknown hypothesis parent".into());
-        }
+        let parent = hypothesis["parent"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(resolve);
+        v["parent"] = json!(parent);
         let mut node = generated_node(
             &v,
             if parent.is_some() {
@@ -160,8 +194,8 @@ fn expand(
         node["title"] = v["title"].clone();
         node["mechanism"] = v["mechanism"].clone();
         if let Some(parent) = parent {
-            node["before_gap"] = program["results"][parent]["classify_gap"].clone();
-            node["operation"] = program["results"][parent]["choose_next_operation"].clone();
+            node["before_gap"] = program["results"][&parent]["classify_gap"].clone();
+            node["operation"] = program["results"][&parent]["choose_next_operation"].clone();
         }
         node["research_status"] = json!(if reports.is_empty() {
             "no_new_sources"
@@ -283,6 +317,54 @@ mod tests {
     fn batch(id: &str) -> Value {
         json!({"hypotheses":[{"id":id,"statement":"A distinct hypothetical event","requires":["e"]}],"research_evidence":[],"continue_exploring":true,"exploration_note":"Explore another mechanism"})
     }
+    #[test]
+    fn invalid_parent_lineage_rejects_the_whole_batch() {
+        let original = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":"e","kind":"evidence","edges":"[]"}]});
+        for parent in ["unknown", "ref_0001", "h"] {
+            let mut snapshot = original.clone();
+            let mut generated = batch("h");
+            generated["hypotheses"][0]["parent"] = json!(parent);
+            assert!(
+                expand(&mut snapshot, &generated, "explore", &json!({})).is_err(),
+                "parent {parent}"
+            );
+            assert_eq!(snapshot, original);
+        }
+        let mut snapshot = original.clone();
+        let mut generated = batch("h");
+        generated["hypotheses"][0]["parent"] = json!("other");
+        generated["hypotheses"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":"other","statement":"Another future","requires":[],"parent":"h"}));
+        assert!(
+            expand(&mut snapshot, &generated, "explore", &json!({}))
+                .unwrap_err()
+                .contains("Cyclic")
+        );
+        assert_eq!(snapshot, original);
+    }
+
+    #[test]
+    fn same_batch_parent_resolves_exactly_even_when_child_appears_first() {
+        let mut snapshot = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":"existing-hypothesis","kind":"scenario","statement":"Original","edges":"[]"}]});
+        let generated = json!({"hypotheses":[
+            {"id":"hyp_ai_feature_geofencing_0148","statement":"AI feature providers restrict regions","requires":["hyp_eu_ai_scope_0147"],"parent":"hyp_eu_ai_scope_0147"},
+            {"id":"hyp_eu_ai_scope_0147","statement":"AI feature providers face product regulation","requires":["ref_0001"],"parent":"ref_0001"}
+        ],"research_evidence":[],"continue_exploring":true,"exploration_note":"A new implication extends a new mechanism"});
+        expand(&mut snapshot, &generated, "explore", &json!({"round":14})).unwrap();
+        assert_eq!(snapshot["nodes"][1]["parent"], "r15-hyp_eu_ai_scope_0147");
+        assert_eq!(snapshot["nodes"][1]["kind"], "revision");
+        assert_eq!(snapshot["nodes"][2]["parent"], "existing-hypothesis");
+        let plan = core::plan(snapshot["nodes"].as_array().unwrap()).unwrap();
+        assert_eq!(plan["issues"], json!([]));
+        assert_eq!(plan["tasks"][5]["nodeId"], "r15-hyp_eu_ai_scope_0147");
+        assert_eq!(
+            plan["tasks"][10]["nodeId"],
+            "r15-hyp_ai_feature_geofencing_0148"
+        );
+    }
+
     #[test]
     fn short_references_resolve_exactly_and_mixed_uuid_still_fails() {
         let a = "en-01a0ba3d-11c5-79f1-b578-741b76950dee";
