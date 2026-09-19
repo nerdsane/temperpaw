@@ -15,16 +15,22 @@ initial = ""
 name = "snapshot_json"
 type = "string"
 initial = ""
+# Bounded native graph/trace payload; keep the declared string visible to consumers.
+overflow_inline_max_bytes = "1048576"
 
 [[state]]
 name = "program_json"
 type = "string"
 initial = ""
+# Bounded native graph/trace payload; keep the declared string visible to consumers.
+overflow_inline_max_bytes = "1048576"
 
 [[state]]
 name = "trace_json"
 type = "string"
 initial = ""
+# Bounded native graph/trace payload; keep the declared string visible to consumers.
+overflow_inline_max_bytes = "16777216"
 
 [[state]]
 name = "request_json"

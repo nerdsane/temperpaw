@@ -72,6 +72,10 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
         ] {
             safe[k] = json!(core::field(n, k));
         }
+        // EventNode's empty default means it declares no dependency edges.
+        if core::field(&safe, "edges").trim().is_empty() {
+            safe["edges"] = json!("[]");
+        }
         nodes.push(safe);
     }
     let program = core::plan(&nodes)?;

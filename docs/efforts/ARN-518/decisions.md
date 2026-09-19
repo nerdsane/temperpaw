@@ -592,3 +592,14 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Options:** Change kernel effect ordering; use two existing app transitions. **Chose two app transitions** because this expresses the persistence boundary without a kernel change and applies to seed, deepening and synthesis alike. SpawnReasoning is system-only.
 
 **Where:** `semantic_run.ioa.toml`, Foresight CSDL/policy; real actor regression in `foresight_registration_contract.rs`; PR #526.
+
+
+## D50 — Declare the native payload sizes and normalize empty evidence edges
+
+**Decision:** Keep bounded semantic snapshots/programs inline up to 1 MiB and traces up to 16 MiB using the existing per-field storage contract; normalize EventNode's empty edge default to an empty list. Synthesis includes full option text once and scenario dependency references instead of duplicating all option statements 81 times.
+
+**Came up because:** The first live four-axis response produced an 81-world snapshot of 190,847 bytes. The default 128 KiB field policy replaced it with a blob reference, which string consumers rejected. The UI also rejected valid evidence nodes whose default edges value is empty. These are app contract mismatches, not provider or Genesis failures.
+
+**Options:** Introduce new blob-fetch plumbing across every consumer; declare the existing bounded native payload sizes and avoid duplicated synthesis input. **Chose explicit app field bounds** to retain one durable trace and keep the existing replay/API contract. Existing 256-node, 320-call and provider response bounds remain enforced. Malformed nonempty edge data still fails validation.
+
+**Where:** SemanticRun spec; semantic_prepare and semantic_reasoning modules; corresponding actor/TypeScript regressions; PRs #526 and deep-sci-fi #121.

@@ -917,3 +917,33 @@ fn reasoning_spawn_copies_the_durably_saved_prompt() {
     assert_eq!(fields["system_prompt"], "Design the branching worlds.");
     assert_eq!(fields["user_message"], "Question and twelve sourced facts.");
 }
+
+#[test]
+fn native_graph_and_trace_remain_readable_above_default_overflow_size() {
+    use temper_server::entity_actor::{EntityState, process_action};
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../os-apps/paw-foresight/specs/semantic_run.ioa.toml"),
+    )
+    .unwrap();
+    let table = temper_jit::TransitionTable::from_ioa_source(&source);
+    for (status, action, field, size) in [
+        ("Expanding", "Expanded", "snapshot_json", 200_000),
+        ("Calling", "Recorded", "trace_json", 1_000_000),
+    ] {
+        let mut state: EntityState = serde_json::from_value(serde_json::json!({
+            "entity_type":"SemanticRun", "entity_id":"run-test", "status":status,
+            "item_count":0, "fields":{}
+        }))
+        .unwrap();
+        let payload = format!("[\"{}\"]", "x".repeat(size));
+        let mut params = serde_json::json!({});
+        params[field] = serde_json::json!(payload);
+        let result = process_action(&mut state, &table, action, &params);
+        assert!(result.success);
+        assert_eq!(
+            state.fields[field], payload,
+            "{field} must stay available to the next module"
+        );
+    }
+}
