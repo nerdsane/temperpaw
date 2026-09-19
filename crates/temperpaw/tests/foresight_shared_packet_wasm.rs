@@ -175,7 +175,12 @@ async fn both_evaluators_receive_identical_full_packet_without_refetching_docume
     )
     .unwrap();
     assert_eq!(config["tools_enabled"], "temper_action,temper_write");
-    assert!(config["user_message"].as_str().unwrap().contains("not already represented in state.repair_flags"));
+    assert!(
+        config["user_message"]
+            .as_str()
+            .unwrap()
+            .contains("not already represented in state.repair_flags")
+    );
     assert!(config["user_message"].as_str().unwrap().ends_with(raw));
     assert!(
         config["user_message"]
