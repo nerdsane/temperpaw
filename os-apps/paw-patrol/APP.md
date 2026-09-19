@@ -240,9 +240,15 @@ callers still need a valid bearer token and principal headers that Cedar allows.
 
 ### Ordinary task
 
+Create an empty record (or supply only `Id`), then set its context with `Update`.
+Strict entity creation rejects task fields; they belong to the declared action.
+
 ```http
 POST /tdata/Efforts
-{"task_summary": "Fix gallery loading", "task_detail": "Show loaded images after navigation", "repo": "arni-labs/foundry"}
+{}
+
+POST /tdata/Efforts('<id>')/TemperPaw.Patrol.Update
+{"task_summary": "Fix gallery loading", "task_detail": "Show loaded images after navigation", "repo": "arni-labs/foundry", "branch": "fix-gallery", "intent_ref": ""}
 
 POST /tdata/Efforts('<id>')/TemperPaw.Patrol.AttachPullRequest
 {"pull_request_urls": "https://github.com/arni-labs/foundry/pull/123"}
