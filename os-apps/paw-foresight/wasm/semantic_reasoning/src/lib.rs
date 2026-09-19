@@ -18,6 +18,8 @@ mod definitions {
 
 const EXPLORATION_PROMPT: &str = r#"Investigate the user's question in state.world.description through open causal exploration. Existing nodes use short ref_ identifiers consistently across the catalog, dependencies and evaluations. Copy those references exactly; never invent or reconstruct a UUID. New hypothesis and evidence IDs must not start with ref_. The supplied catalog records what has already been considered; it is not the boundary of what can be considered. Discover new mechanisms and surprising hypotheses, pursue counterevidence, and revise the framing when it obscures something consequential. Follow interactions, second-order effects and alternatives emerging from evidence. Do not fill a predetermined taxonomy, Cartesian grid, fixed set of axes, or adoption/delay/failure template. A novel hypothesis must say what would happen and why, not merely rename a familiar outcome.
 
+Establish the present at world.last_ingest_date before predicting what changes. Check the relevant setting, not a generic adoption timeline. Separate observed current practice from user assumptions and missing evidence. If people in this setting already do something, explore its next consequences rather than predict its arrival. Treat publication dates and retrieval dates separately; old studies can be historical baselines but are not proof of current capability. Each hypothesis should add a specific future change beyond that present.
+
 Question what today's world takes for granted. A tool, job, habit, price or institution may disappear, become cheap enough to be everywhere, or matter for a completely different reason. Follow those possibilities when they arise from the question; do not assume the future is today's workflow with more supervision. Trace what people would do differently next, including unexpected effects. Investigate strong counterarguments and futures in which the apparent trend reverses. These are ways to open the search, not a checklist or a demand for dramatic conclusions. An unlikely but consequential possibility can be worth exploring; ambitious does not mean likely. Never inflate an estimate to make a story exciting.
 
 Write for a curious person, not a conference or a corporate report. Use familiar words, people doing things, ordinary objects and specific changes you can picture. Titles should make a clear claim rather than name a theme. Explain technical terms only when needed to understand the question. Avoid business jargon, news-roundup language and abstract labels. Each hypothesis needs a short scene: an explicitly imagined moment in someone's life if this event happens. The scene illustrates the exact event being evaluated; decorative details are not additional forecasts. Keep the underlying statement precise about who, what, when and any conditions. Explain what must change for it to happen and what could prevent it. Bold claims belong in the possibilities; doubts belong in their evaluation.
@@ -30,15 +32,21 @@ Choose the number and shape of hypotheses from the question and findings. At mos
 
 The engine can use up to5000 Jev calls,2048 nodes,64 exploration rounds and one hour; these are operational ceilings, not demands to pad the graph. Use the current assessments to challenge assumptions, explore neglected possibilities and direct research. Operation labels are advisory possibilities, not instructions or a required sequence; choose freely what investigation would add value. A gap is a reason to investigate or reconsider a mechanism, not a command to make every hypothesis conform to the same future. Set continue_exploring=false only when further exploration has low expected value relative to what is already covered, and explain the remaining blind spots and the concrete reason to stop. A budget stop is incomplete exploration, not convergence. Preserve unresolved questions honestly."#;
 
-const SYNTHESIS_PROMPT: &str = r#"Use the exact short ref_ identifiers in this input for hypothesis_id and scenario_ids; the engine resolves them to persisted identities. Answer the user's question with rich, contrasting futures supported by this actual exploration. Preserve different causal mechanisms and discoveries; do not collapse them onto one convenient axis or a compliance/not-compliance partition. Explain what could happen, why, what would make it happen, and what observations would change the assessment. A few futures may be most useful, but there is no prescribed number; select what materially improves the answer from evaluated hypotheses.
+const WORLD_COMPOSITION_PROMPT: &str = r#"Turn the explored evidence and possibilities into a few genuinely different WORLDS that answer the user's question. The small nodes are building blocks, not the final answer. Find coherent combinations and causal chains: what people do, what becomes cheap or scarce, who gains or loses, what disappears, and what changes next. Do not turn each node into a separate world or split one familiar lesson into several cards. A world is more than a themed list. Its defining changes must fit together and have a clear reason to occur together. Consider rival mechanisms and evidence that challenges the combination. Do not force an optimistic/pessimistic/middle template, a compliance split, or the same axes for every question.
 
-Make the answer easy to consume, relate to and envision. Lead with what would change in someone's life, not a label for an industry trend. Use plain words and short, direct sentences. No corporate jargon, management abstractions, press-release voice or news digest. Be sharp about the claim and honest about uncertainty. Do not make a modest finding sound revolutionary. Do not choose only the highest odds: a well-explained, consequential alternative may teach more, but it still needs an actual evaluation. Preserve genuinely different futures instead of repeating one lesson in different words.
+Begin with the present at world.last_ingest_date. Separate supported observations, assumptions supplied by the user, and unresolved facts. A practice already common in the relevant setting is the starting point, not a future breakthrough. Describe what changes AFTER that starting point. Do not universalize a user's own workflow or an early-adopter example to everyone. Source retrieval dates are not publication dates. If current evidence is missing, state that plainly. The final worlds should differ in consequences and ways of living, not only in speed of adoption.
 
-For each outcome, write a brief scene someone can picture, clearly hypothetical. Explain why it could happen and who gains or struggles in the narrative, using the exploration's actual evidence and assumptions. State useful things the reader could do or watch now in what_you_can_do, tied to this particular future; leave it empty if none are supported. The scene must not broaden the referenced event, invent observed people or incidents, or imply its illustrative details carry the displayed probability. Keep the exact claim and horizon in definition. Signals and falsifiers must be things a person could actually notice or check, written in ordinary language. Avoid repeating the same text across headline, summary, scene and narrative. Before returning, reread every title and sentence as if explaining it to a friend outside the industry. Replace abstract labels with what someone does or notices: say what takes most of their day, what they stop buying, or what they can now make. Explain the causal link in familiar words instead of listing study names, company announcements or benchmarks. Keep necessary source qualifications and uncertainty, but do not turn the narrative into a research digest. Use short paragraphs. Remove slogans, sales language and sentences that could describe almost any future. The reader may not work in this industry. In titles, scenes, narrative, actions, signals and falsifiers, do not assume they know professional shorthand. In a software question, for example, write "suggested code changes" rather than "PRs", "the project's code" rather than "repo", "who can sign in or see private data" rather than "auth", and "connections to other tools" rather than unexplained protocol initials. Apply the same translation in other subjects. If a technical name is indispensable, explain what it means on first use. Prefer one concrete, ordinary sentence over an impressive label. This changes only the writing, never the event being estimated or its evidence.
+Return JSON ONLY: {"baseline":{"as_of":"exact world.last_ingest_date","observed":[{"claim":"<=400 characters; present fact with scope and source-date limits","evidence_ids":["actual evidence node refs, not hypotheses"]}],"assumptions":["<=240 characters; user conditions or openly assumed premises"],"unknowns":["<=240 characters; missing current evidence"]},"worlds":[{"id":"unique short ASCII ID, not ref_","title":"<=100 characters; a clear claim people can picture","statement":"<=1000 characters; precise joint future event: ALL defining component changes happen together within the target horizon, with actors and scope","mechanism":"<=1200 characters; why these changes fit together and what could break the chain","component_ids":["2–12 different existing scenario/revision refs defining this world's joint event"],"counter_ids":["0–12 existing hypothesis refs that challenge this world; not its prerequisites"],"scene":"<=600 characters; an imagined everyday moment in this world","narrative":"<=1200 characters; why this world could happen, who gains or struggles, and a serious challenge","what_you_can_do":["0–4 practical steps, each <=240 characters"],"signals":["1–8 observable early signs, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
 
-Return JSON ONLY: {"schema":"foresight-outlook-v2","headline":"<=160 characters","horizon":"exact world.target_date","probability_basis":"model_implied_event_estimate","probability_model":"overlapping_events","calibrated":false,"summary":"<=400 characters","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"stable-short-id","hypothesis_id":"exact evaluated hypothesis node ID","title":"<=100 characters","definition":"<=1000 characters; faithful to the referenced hypothesis event and horizon","scenario_ids":["related actual node IDs: supporting evidence or other hypotheses, possibly shared across outcomes"],"scene":"<=600 characters; a short hypothetical moment in everyday life showing the referenced event","narrative":"<=1200 characters; plain explanation of why it could happen, what must change, who gains or struggles, and what could prevent it","what_you_can_do":["0–4 specific things the reader could do or watch now, each <=240 characters"],"signals":["1–8 observable early signals, each <=240 characters"],"falsifiers":["1–8 observable disconfirmations, each <=240 characters"]}]}.
+Choose 2–6 distinct worlds, a compact answer rather than a quota to fill. Use only exact existing ref_ IDs for components and challenges. A component is a defining future change, not merely a source citation. Do not pick unrelated claims to make a story look rich. Do not invent new core events at this stage: they would bypass exploration. If exploration is weak or stopped early, say so in the baseline unknowns and the narratives. Each world will receive its OWN fresh Jev evaluation of the whole joint event, including dependencies and counterevidence. Never supply probabilities or combine the component estimates yourself. These worlds may overlap; they are not a complete partition of every possible future."#;
 
-Return1–64 outcomes as useful within this output capacity, not a quota. Every outcome must reference a hypothesis with an actual estimate_likelihood evaluation. Keep its event definition faithful; do not broaden or replace it while retaining its probability. Do not supply or invent a probability field: the engine attaches the referenced hypothesis's exact Jev event estimate. These are model-implied estimates of individual overlapping events, not mutually exclusive buckets, calibrated forecasts, empirical frequencies, or Jev gap-label confidence. They need not sum to one. Related scenario_ids may reference any actual catalog node, including supporting evidence and other hypotheses. They are optional context, not extra events with the displayed probability or an exhaustive partition. No residual other outcome is required. Distinguish retrieved observations from hypotheses. A causal gap does not imply probability zero; no detected gap does not imply truth. Explain important disagreements, limitations, unresolved research and why the exploration stopped without claiming it exhausted the future."#;
+const WRITING_STYLE: &str = r#"Write for a curious person outside the industry. Be direct, concrete and easy to picture. No corporate language, news roundups, slogans or unexplained professional shorthand. Say what a person does, buys, stops needing or notices on an ordinary day. A scene is explicitly imagined, not evidence. A title makes a clear claim; it does not name a management theme. Explain why in familiar words, including what could stop it. Do not exaggerate to sound ambitious. Translate technical terms: suggested code changes, the project's code, who can see private data, connections to other tools. If a technical name is essential, explain it. Keep short paragraphs and avoid repeating the same point in every field."#;
+
+const SYNTHESIS_PROMPT: &str = r#"Present the composed WORLDS as the answer. These are joint futures built from many explored pieces, not individual event cards. The worlds have already been constructed and evaluated separately. Return one outcome for each supplied world, preserving its defining event, components and challenges. Do not invent, merge or split worlds at this writing step. Explain the different lives they imply, the causal path, and what could break each one. Start beyond what the baseline says is already happening. Present a few distinct worlds in plain, vivid prose rather than a summary of industry news.
+
+Return JSON ONLY: {"schema":"foresight-worlds-v3","headline":"<=160 characters; the important choice or contrast between these worlds","horizon":"exact world.target_date","probability_basis":"model_implied_world_estimate","probability_model":"overlapping_worlds","calibrated":false,"summary":"<=400 characters; what the reader learns from comparing the worlds","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"short stable ID","world_id":"exact supplied world ref_ ID","title":"<=100 characters; concrete claim","definition":"copy the exact world statement, <=1000 characters","component_ids":["copy world component refs"],"counter_ids":["copy world counter refs"],"scenario_ids":["related actual node refs, evidence or hypotheses"],"scene":"<=600 characters; a short imagined moment in this world","narrative":"<=1200 characters; why, who gains or loses, what could break it","what_you_can_do":["0–4 concrete steps, each <=240 characters"],"signals":["1–8 things to watch, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
+
+The engine attaches the baseline, exact world definition, component and challenge links, evaluation status, and each world's own Jev estimate. Do not supply a probability or infer one from component odds. Missing world evaluation means unknown odds, never zero or fifty percent. Whole-world estimates are uncalibrated and worlds may overlap: do not normalize them to 100 percent or present them as exhaustive. A stopped or incomplete search must remain explicit. A low estimate can still describe an important alternative. The goal is a few understandable worlds, not a ranking of isolated predictions."#;
 
 fn node_catalog(snapshot: &Value) -> Vec<Value> {
     snapshot["nodes"]
@@ -61,6 +69,12 @@ fn node_catalog(snapshot: &Value) -> Vec<Value> {
                 "evidence_note",
                 "research_question",
                 "scene",
+                "component_ids",
+                "counter_ids",
+                "narrative",
+                "what_you_can_do",
+                "signals",
+                "falsifiers",
             ] {
                 if let Some(value) = node.get(key) {
                     compact[key] = value.clone();
@@ -96,13 +110,13 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
         .filter(|node| {
             !matches!(
                 core::field(node, "kind"),
-                "hypothesis" | "scenario" | "revision" | "option"
+                "hypothesis" | "scenario" | "revision" | "option" | "world"
             )
         })
         .collect();
     let input = json!({
         "world":snapshot["world"], "catalog":node_catalog(snapshot),
-        "source_evidence":evidence,
+        "source_evidence":evidence, "baseline":program["baseline"],
         "assessments":program["results"], "evaluations": compact_evaluations(program), "assessment_semantics":core::gap_criteria(),
         "evaluation_semantics":{
             "score_scale":"Expected category index on a 0–4 scale, not a probability or a percentage.",
@@ -124,6 +138,29 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
     Ok(input)
 }
 
+fn world_writing_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
+    let worlds: Vec<_> = node_catalog(snapshot)
+        .into_iter()
+        .filter(|n| n["kind"] == "world")
+        .collect();
+    if !(2..=6).contains(&worlds.len()) {
+        return Err("Writing requires 2–6 composed worlds".into());
+    }
+    let all_evaluations = compact_evaluations(program);
+    let mut evaluations = json!({});
+    for world in &worlds {
+        let id = core::field(world, "Id");
+        evaluations[id] = all_evaluations[id].clone();
+    }
+    references::References::new(snapshot).map(|refs| {
+        refs.project(&json!({
+            "world":snapshot["world"], "baseline":program["baseline"], "worlds":worlds,
+            "evaluations":evaluations, "stop_reason":program["stop_reason"],
+            "evaluation_error":program["last_error"], "exploration_note":program["exploration_note"]
+        }))
+    })
+}
+
 fn research_enabled(phase: &str, snapshot: &Value) -> bool {
     matches!(phase, "seed" | "explore")
         && core::field(&snapshot["world"], "hindcast_mode") == "false"
@@ -135,10 +172,16 @@ fn setup(ctx: &Context) -> Result<(), String> {
     let program = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let prompt = match phase {
         "seed" | "explore" => EXPLORATION_PROMPT,
+        "compose" => WORLD_COMPOSITION_PROMPT,
         "synthesize" => SYNTHESIS_PROMPT,
         _ => return Err("Unknown reasoning phase".into()),
     };
-    let input = reasoning_input(&snapshot, &program)?;
+    let input = if phase == "synthesize" {
+        world_writing_input(&snapshot, &program)?
+    } else {
+        reasoning_input(&snapshot, &program)?
+    };
+    let prompt = format!("{WRITING_STYLE}\n\n{prompt}");
     let web_research = research_enabled(phase, &snapshot);
     set_success_result(
         "LaunchReasoning",
@@ -221,51 +264,18 @@ mod reasoning_tests {
     }
 
     #[test]
-    fn advertised_synthesis_text_limits_pass_the_real_outlook_validator() {
-        let raw = SYNTHESIS_PROMPT
-            .split("Return JSON ONLY: ")
-            .nth(1)
-            .unwrap()
-            .split("}.\n")
-            .next()
-            .unwrap();
-        let mut answer: Value = serde_json::from_str(&format!("{raw}}}")).unwrap();
-        fn expand(value: &Value) -> String {
-            let limit = value
-                .as_str()
-                .unwrap()
-                .split("<=")
-                .nth(1)
-                .unwrap()
-                .split_whitespace()
-                .next()
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            "x".repeat(limit)
-        }
-        for key in ["headline", "summary"] {
-            answer[key] = json!(expand(&answer[key]));
-        }
-        answer["horizon"] = json!("2027");
-        for key in ["evidence_limits", "research_questions"] {
-            answer[key] = json!([expand(&answer[key][0])]);
-        }
-        let outcome = &mut answer["outcomes"][0];
-        for key in ["title", "definition", "narrative"] {
-            outcome[key] = json!(expand(&outcome[key]));
-        }
-        for key in ["signals", "falsifiers"] {
-            outcome[key] = json!(vec![expand(&outcome[key][0]); 8]);
-        }
-        outcome["hypothesis_id"] = json!("h1");
-        outcome["scenario_ids"] = json!(["h1"]);
-        outcome["probability"] = json!(0.37);
-        let snapshot =
-            json!({"world":{"target_date":"2027"},"nodes":[{"Id":"h1","kind":"scenario"}]});
-        outlook_contract::validate(&answer, &snapshot).unwrap();
-        answer["summary"] = json!("x".repeat(401));
-        assert!(outlook_contract::validate(&answer, &snapshot).is_err());
+    fn world_writer_receives_only_composed_worlds_and_their_own_estimates() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"h","kind":"scenario","statement":"component"},{"Id":"w1","kind":"world","statement":"joint one","component_ids":["h"]},{"Id":"w2","kind":"world","statement":"joint two","component_ids":["h"]}]});
+        let program = json!({"baseline":{"as_of":"2026-09-19"},"evaluations":{"h":{"estimate_likelihood":{"probability":0.9}},"w1":{"estimate_likelihood":{"probability":0.23}}}});
+        let input = world_writing_input(&snapshot, &program).unwrap();
+        assert_eq!(input["worlds"].as_array().unwrap().len(), 2);
+        assert!(input["evaluations"].get("ref_0001").is_none());
+        assert_eq!(
+            input["evaluations"]["ref_0002"]["estimate_likelihood"]["probability"],
+            0.23
+        );
+        assert_eq!(input["baseline"]["as_of"], "2026-09-19");
+        assert!(world_writing_input(&json!({"nodes":[]}), &program).is_err());
     }
 
     #[test]
@@ -330,8 +340,8 @@ mod reasoning_tests {
         assert!(EXPLORATION_PROMPT.contains("novel hypothesis"));
         assert!(!EXPLORATION_PROMPT.contains("EXACTLY FOUR"));
         assert!(!EXPLORATION_PROMPT.contains("81 alternative"));
-        assert!(SYNTHESIS_PROMPT.contains("overlapping_events"));
-        assert!(SYNTHESIS_PROMPT.contains("exact Jev event estimate"));
+        assert!(SYNTHESIS_PROMPT.contains("overlapping_worlds"));
+        assert!(SYNTHESIS_PROMPT.contains("own Jev estimate"));
         assert!(!SYNTHESIS_PROMPT.contains("summing EXACTLY1"));
     }
 }

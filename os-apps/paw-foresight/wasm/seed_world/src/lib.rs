@@ -170,6 +170,14 @@ fn open_research_prompt(
 Horizon: {target_date}
 {chronology}
 
+Establish what is ALREADY happening at the research as-of date, in the setting the user
+actually means. Check recent first-hand demonstrations, current product behavior, and
+observed practice, as well as research. Separate current observations from user-supplied
+assumptions and unknowns. Do not mistake an older study or an adoption average for the
+present at the frontier. Do not universalize a user's own workflow to everyone. If a tool
+or habit already exists in this setting, investigate its NEXT consequences rather than
+predicting its arrival. State the additional change a future hypothesis would entail.
+
 Build an open research map that can support genuinely different causal futures. Let the
 question and discovered evidence determine what to investigate. There is no prescribed
 topic checklist, axis count, branch count, consensus pole, or required narrative. Revise
