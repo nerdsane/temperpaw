@@ -18,7 +18,7 @@ fn check(ctx: &Context) -> Result<(), String> {
         .ok_or("Missing Temper URL")?;
     let r = ctx.http_call(
         "GET",
-        &format!("{api}/tdata/Sessions('{id}')?$select=Status,result,error_message"),
+        &format!("{api}/tdata/Sessions('{id}')?$select=Status,result,error_message,error"),
         &[
             ("x-tenant-id".into(), ctx.tenant.clone()),
             ("x-temper-principal-kind".into(), "agent".into()),
@@ -43,10 +43,13 @@ fn check(ctx: &Context) -> Result<(), String> {
             set_success_result("ReasoningComplete", &json!({"reasoning_result":result}));
         }
         "Failed" | "Cancelled" => {
-            return Err(format!(
-                "Reasoning session {id} did not complete: {}",
-                core::field(&s, "error_message")
-            ));
+            let message = core::field(&s, "error_message");
+            let error = if message.trim().is_empty() {
+                core::field(&s, "error")
+            } else {
+                message
+            };
+            return Err(format!("Reasoning session {id} did not complete: {error}"));
         }
         _ => {
             let count = ctx

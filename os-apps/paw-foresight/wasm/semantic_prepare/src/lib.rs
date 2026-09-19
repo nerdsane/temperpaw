@@ -27,6 +27,32 @@ fn read(ctx: &Context, path: &str) -> Result<Value, String> {
     }
     core::parse(&response.body)
 }
+fn snapshot_node(n: &Value) -> Value {
+    let mut safe = json!({});
+    for k in [
+        "Id",
+        "statement",
+        "edges",
+        "source_refs",
+        "resolve_by",
+        "provenance",
+        "probability",
+        "resolution",
+        "Status",
+    ] {
+        safe[k] = json!(core::field(n, k));
+    }
+    // EventNode's empty default means it declares no dependency edges.
+    if core::field(&safe, "edges").trim().is_empty() {
+        safe["edges"] = json!("[]");
+    }
+    safe["kind"] = json!(if core::field(n, "provenance") == "hypothesis" {
+        "scenario"
+    } else {
+        "evidence"
+    });
+    safe
+}
 fn run_inner(ctx: &Context) -> Result<(), String> {
     let direct = core::field(&ctx.entity_state, "world_id");
     let id = if direct.is_empty() {
@@ -59,24 +85,7 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
         if core::field(n, "world_id") != id {
             return Err("Cross-world snapshot rejected".into());
         }
-        let mut safe = json!({});
-        for k in [
-            "Id",
-            "statement",
-            "edges",
-            "source_refs",
-            "resolve_by",
-            "provenance",
-            "probability",
-            "resolution",
-            "Status",
-        ] {
-            safe[k] = json!(core::field(n, k));
-        }
-        // EventNode's empty default means it declares no dependency edges.
-        if core::field(&safe, "edges").trim().is_empty() {
-            safe["edges"] = json!("[]");
-        }
+        let safe = snapshot_node(n);
         nodes.push(safe);
     }
     let program = core::plan(&nodes)?;
@@ -123,4 +132,31 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
         Err(e) => set_success_result("Fail", &json!({"error_message":e})),
     };
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn researched_hypotheses_remain_hypotheses_in_the_evaluation_graph() {
+        let h = snapshot_node(
+            &json!({"Id":"h","provenance":"hypothesis","statement":"An inferred future"}),
+        );
+        let e = snapshot_node(
+            &json!({"Id":"e","provenance":"contested","statement":"A disputed source claim"}),
+        );
+        assert_eq!(h["kind"], "scenario");
+        assert_eq!(e["kind"], "evidence");
+        assert_eq!(e["provenance"], "contested");
+        let plan = core::plan(&[h, e]).unwrap();
+        assert_eq!(
+            plan["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|t| t["nodeId"] == "h")
+                .count(),
+            5
+        );
+    }
 }

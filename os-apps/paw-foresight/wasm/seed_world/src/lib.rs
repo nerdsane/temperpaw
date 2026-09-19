@@ -153,7 +153,7 @@ fn open_research_prompt(
     let research = if hindcast {
         "HINDCAST: NO web access. Use only the frozen corpus, respecting its vantage date.          Later knowledge is inadmissible, even if you remember it. Record missing evidence."
     } else {
-        "Use temper.web_search and temper.web_fetch to investigate the question with current          evidence. Follow surprising findings and competing explanations. Inspect source          content before citing it; search snippets alone are leads, not verified findings.          Seek evidence that could overturn your emerging account, not just confirm it."
+        "Use temper.web_search and temper.web_fetch to investigate the question with current          evidence. Follow surprising findings and competing explanations. Inspect source          content before citing it; search snippets alone are leads, not verified findings.          Seek evidence that could overturn your emerging account, not just confirm it. Prefer direct temper.web_fetch(url). If direct fetch fails, temper.web_search(query) returns bounded source-extracted text in each result's text field. A focused title or site query may retrieve a useful excerpt. Use only a claim and quotation actually contained in that returned text; never infer source contents from the title, URL or a search summary. Explicitly label indexed-excerpt evidence, direct-fetch failure and date or context limitations in the statement/evidence_note; use weak_signal when context remains unverified. A truncated excerpt does not establish that the whole source was inspected. Smaller article or text-version URLs may be fetched only when actually discovered, never invented. web_fetch accepts only a URL; do not invent size, range or encoding parameters."
     };
     let chronology = if hindcast {
         "The frozen corpus vantage date is authoritative. The live ingestion date does not move that boundary.".to_string()
@@ -197,7 +197,8 @@ identify whose estimate it is, its horizon and its conditions in the statement.
 Hypotheses may cite their motivating evidence, but explicitly say they are inferred and
 unverified; never fabricate a source for the hypothesis. If no source was available, say so
 and use an empty source_refs array. Preserve enough actual source content to let subsequent
-evaluations assess what was observed. Do not pad the map to a target count or collapse
+evaluations assess what was observed. Across all findings, quote no more than25 words total
+from any one source URL; additional findings can paraphrase with the source reference. Do not pad the map to a target count or collapse
 conflicting observations to one consensus. Group only genuinely redundant findings.
 
 The session uses a Monty execute REPL. Work in incremental execute calls: research, persist
@@ -554,6 +555,23 @@ mod tests {
                 "research regressed to {obsolete}"
             );
         }
+    }
+
+    #[test]
+    fn open_research_has_bounded_excerpt_fallback_without_invented_fetch_parameters() {
+        let prompt = open_research_prompt("w", "a", "question", "2027", "2026", "", false);
+        for required in [
+            "result's text field",
+            "actually contained in that returned text",
+            "indexed-excerpt evidence",
+            "weak_signal",
+            "only when actually discovered",
+            "no more than25 words total",
+        ] {
+            assert!(prompt.contains(required), "missing {required}");
+        }
+        let frozen = open_research_prompt("w", "a", "question", "2020", "2026", "corpus", true);
+        assert!(!frozen.contains("focused title or site query"));
     }
 
     #[test]

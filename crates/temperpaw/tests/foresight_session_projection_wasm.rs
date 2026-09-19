@@ -32,10 +32,15 @@ async fn polling_projects_result_without_echoing_three_megabyte_prompt() {
             &source.to_string(),
         )
         .with_response(
-            "http://fixture/tdata/Sessions('child')?$select=Status,result,error_message",
+            "http://fixture/tdata/Sessions('child')?$select=Status,result,error_message,error",
             200,
             &selected.to_string(),
         );
+    let host = host.with_response(
+        "http://fixture/tdata/Sessions('child')?$select=Status,result,error_message",
+        200,
+        &selected.to_string(),
+    );
     let ctx = WasmInvocationContext {
         tenant: "test".into(),
         entity_type: "SemanticRun".into(),
@@ -74,5 +79,39 @@ async fn polling_projects_result_without_echoing_three_megabyte_prompt() {
     assert_eq!(
         result["callback_params"]["reasoning_result"],
         source["result"]
+    );
+    let failure = json!({"Status":"Failed","result":"","error_message":"","error":"WASM module steering_checker not found"});
+    let host = SimWasmHost::new()
+        .with_default_response(500, "unexpected route")
+        .with_response(
+            "http://fixture/tdata/Sessions('child')?$select=Status,result,error_message,error",
+            200,
+            &failure.to_string(),
+        )
+        .with_response(
+            "http://fixture/tdata/Sessions('child')?$select=Status,result,error_message",
+            200,
+            &json!({"Status":"Failed","result":"","error_message":""}).to_string(),
+        );
+    let failed: Value = serde_json::to_value(
+        engine
+            .invoke(
+                &hash,
+                &ctx,
+                Arc::new(host),
+                &WasmResourceLimits::default(),
+                Arc::new(RwLock::new(StreamRegistry::default())),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(failed["callback_action"], "Fail");
+    assert!(
+        failed["callback_params"]["error_message"]
+            .as_str()
+            .unwrap()
+            .contains("WASM module steering_checker not found"),
+        "{failed}"
     );
 }

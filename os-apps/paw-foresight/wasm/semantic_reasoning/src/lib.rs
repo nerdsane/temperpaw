@@ -8,7 +8,7 @@ const FRONTIER_LIMIT: usize = 64;
 
 const EXPLORATION_PROMPT: &str = r#"Investigate the user's question in state.world.description through open causal exploration. The supplied catalog records what has already been considered; it is not the boundary of what can be considered. Discover new mechanisms and surprising hypotheses, pursue counterevidence, and revise the framing when it obscures something consequential. Follow interactions, second-order effects and alternatives emerging from evidence. Do not fill a predetermined taxonomy, Cartesian grid, fixed set of axes, or adoption/delay/failure template. A novel hypothesis must say what would happen and why, not merely rename a familiar outcome.
 
-Use available read-only temper.web_search and temper.web_fetch tools to investigate useful missing premises and evidence beyond the current frontier. Search results are leads; inspect source content before citing it. Tool absence, failure, or conflicting evidence must remain explicit. For frozen hindcasts, return research_evidence=[] and reference only existing catalog evidence within the stated vantage: later remembered knowledge is inadmissible. Neither a citation nor a Jev label proves a future true. Hypotheses and observations remain distinct.
+Use available read-only temper.web_search and temper.web_fetch tools to investigate useful missing premises and evidence beyond the current frontier. Prefer direct temper.web_fetch(url). If direct fetch fails, temper.web_search(query) returns bounded source-extracted text in each result's text field. A focused title or site query may retrieve a useful excerpt. Use only a claim and quotation actually contained in that returned text; never infer source contents from the title, URL or a search summary. Explicitly label indexed-excerpt evidence, direct-fetch failure and date or context limitations in the statement/evidence_note; use weak_signal when context remains unverified. A truncated excerpt does not establish that the whole source was inspected. Smaller article or text-version URLs may be fetched only when actually discovered, never invented. web_fetch accepts only a URL; do not invent size, range or encoding parameters. Tool absence, failure, or conflicting evidence must remain explicit. For frozen hindcasts, return research_evidence=[] and reference only existing catalog evidence within the stated vantage: later remembered knowledge is inadmissible. Neither a citation nor a Jev label proves a future true. Hypotheses and observations remain distinct.
 
 Return JSON only after the research: {"hypotheses":[{"id":"unique-ascii-id","title":"concise distinct hypothesis","statement":"self-contained observable future event with actors and horizon","mechanism":"how and why it could happen, including the causal assumptions","requires":["existing node ID or new hypothesis/evidence ID whose truth this mechanism actually requires"],"parent":"optional existing hypothesis ID when meaningfully extending or revising it","scene":"optional vivid hypothetical future, explicitly not an observation","signal":"optional observable early signal","falsifier":"optional disconfirming observation","evidence_note":"what supports or challenges the mechanism and what is still conjecture","research_question":"optional consequential unanswered question"}],"research_evidence":[{"id":"unique-ascii-id","statement":"finding with date, scope, uncertainty and conflicting interpretation where relevant","url":"exact retrieved HTTPS URL","quote":"short supporting excerpt, maximum 25 words and 200 characters per source","observed_at":"YYYY-MM-DD","provenance":"observed|contested|weak_signal"}],"continue_exploring":true,"exploration_note":"what this exploration learned, which framing changed, and why another round would or would not be useful"}.
 
@@ -168,6 +168,22 @@ mod reasoning_tests {
 
     mod outlook_contract {
         include!("../../semantic_outlook.rs");
+    }
+
+    #[test]
+    fn exploration_can_use_bounded_indexed_text_with_explicit_limits() {
+        for required in [
+            "result's text field",
+            "actually contained in that returned text",
+            "indexed-excerpt evidence",
+            "direct-fetch failure",
+            "weak_signal",
+            "only when actually discovered",
+            "web_fetch accepts only a URL",
+        ] {
+            assert!(EXPLORATION_PROMPT.contains(required), "missing {required}");
+        }
+        assert!(EXPLORATION_PROMPT.contains("return research_evidence=[]"));
     }
 
     #[test]
