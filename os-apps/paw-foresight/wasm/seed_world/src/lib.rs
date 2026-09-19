@@ -182,6 +182,16 @@ Identify competing causal explanations and novel hypotheses worth testing. Prese
 contradictions, uncertainty, missing evidence and the reasons a finding could mislead us.
 Do not turn a disagreement or an unsourced possibility into an established fact.
 
+Look beyond announcements and company talking points. When relevant, seek what people
+actually do, pay for, struggle with or stop needing, alongside studies and direct evidence.
+Do not assume today's jobs, tools and habits survive unchanged. Follow evidence that could
+make something disappear or become ordinary, and look for reasons that change might fail.
+Those are questions to investigate, not required conclusions or a fixed list of futures.
+Write findings in plain language with concrete people, actions, dates and limits. Translate
+necessary technical terms. Avoid corporate jargon and news-digest summaries. For each
+inferred future, explain what a person would notice in daily life and why it could happen;
+keep this imagined possibility separate from the observations that motivated it.
+
 {research}
 --- BEGIN CORPUS ---
 {corpus_inline}
