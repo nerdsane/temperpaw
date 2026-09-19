@@ -273,7 +273,7 @@ max_memory = "268435456"
 name = "LaunchReasoning"
 kind = "input"
 from = ["ReasoningSetup"]
-params = ["system_prompt", "user_message"]
+params = ["system_prompt", "user_message", "tools_enabled", "tool_choice", "max_turns"]
 effect = [{type="schedule",action="SpawnReasoning",delay_seconds=0}]
 
 [[action]]

@@ -70,19 +70,19 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
     if req.to_string().len()>128*1024 { return Err("Semantic request exceeds 128 KB".into()); }
     Ok(req)
 }
-/// Select actual repair recommendations, spreading work across causal options.
-/// Monitoring and research recommendations remain visible, never claimed executed.
-pub fn repair_candidates(snapshot: &Value, program: &Value) -> Vec<Value> {
+/// Select bounded repairs and evidence-gap exploration across causal options.
+/// A recommendation alone never establishes that research ran or a gap closed.
+pub fn deepening_candidates(snapshot: &Value, program: &Value) -> Vec<Value> {
     let Some(nodes)=snapshot["nodes"].as_array() else { return vec![]; };
     let mut candidates:Vec<_>=nodes.iter().filter(|n|field(n,"kind")=="scenario")
-        .filter(|n|program["results"][field(n,"Id")]["choose_next_operation"]=="repair").collect();
+        .filter(|n|matches!(program["results"][field(n,"Id")]["choose_next_operation"].as_str(),Some("repair" | "research" | "uncertain"))).collect();
     let mut selected=vec![]; let mut covered=BTreeSet::new();
     while selected.len()<8 && !candidates.is_empty() {
         let novel=|n:&Value| -> Vec<String> {parse(field(n,"edges")).ok().and_then(|e|e.as_array().cloned()).unwrap_or_default().iter()
             .filter_map(|e|e["to_id"].as_str().map(str::to_owned)).filter(|id|!covered.contains(id)).collect()};
         let index=(0..candidates.len()).max_by_key(|i|novel(candidates[*i]).len()).unwrap();
         let node=candidates.remove(index);let new_ids=novel(node);covered.extend(new_ids);
-        selected.push(json!({"node":node,"assessment":program["results"][field(node,"Id")]}));
+        selected.push(json!({"node":node,"assessment":program["results"][field(node,"Id")],"operation":program["results"][field(node,"Id")]["choose_next_operation"]}));
     }
     selected
 }
@@ -128,8 +128,8 @@ mod tests {
         let mut b=node("b", &["y"]);b["kind"]=json!("scenario");
         let snapshot=json!({"nodes":[a,b]});
         let p=json!({"results":{"a":{"choose_next_operation":"monitor"},"b":{"choose_next_operation":"repair"}}});
-        let selected=repair_candidates(&snapshot,&p);assert_eq!(selected.len(),1);assert_eq!(selected[0]["node"]["Id"],"b");
-        assert!(repair_candidates(&snapshot,&json!({"results":{}})).is_empty());
+        let selected=deepening_candidates(&snapshot,&p);assert_eq!(selected.len(),1);assert_eq!(selected[0]["node"]["Id"],"b");
+        assert!(deepening_candidates(&snapshot,&json!({"results":{}})).is_empty());
     }
     #[test] fn provider_uncertainty_and_malformed_results_fail_closed() {
         let req=json!({"questions":{"result":{"criteria":{"none":"","uncertain":""}}}});
@@ -151,4 +151,16 @@ fn chain(size:usize,reverse:bool)->Vec<Value>{let id=|i|format!("n{:03}",if reve
 #[test]fn cycle_excluded_missing_explicit_independent_survives(){let p=super::plan(&[node("a",vec!["b".into()]),node("b",vec!["a".into()]),node("c",vec!["missing".into()]),node("ok",vec![])]).unwrap();let s=p["issues"].to_string();assert!(s.contains("cycle_detected"));assert!(s.contains("missing_prerequisite"));let t=p["tasks"].as_array().unwrap();assert!(t.iter().all(|x|x["nodeId"]!="a"&&x["nodeId"]!="b"));assert!(t.iter().any(|x|x["nodeId"]=="ok"));}
 #[test]fn input_bounds(){assert!(super::plan(&[]).is_err());assert!(super::plan(&chain(257,false)).is_err());let n=node("a",vec![]);assert!(super::plan(&[n.clone(),n]).is_err());}
 
+}
+
+#[cfg(test)]
+mod exploration_tests {
+    use super::*;
+    #[test]
+    fn research_and_uncertain_gaps_receive_bounded_deepening() {
+        let nodes:Vec<_>=(0..12).map(|i|json!({"Id":format!("s{i}"),"kind":"scenario","edges":"[]"})).collect();
+        let mut results=json!({});for i in 0..12 {results[format!("s{i}")]=json!({"classify_gap":"evidence","choose_next_operation":if i%2==0{"research"}else{"uncertain"}});}
+        let chosen=deepening_candidates(&json!({"nodes":nodes}),&json!({"results":results}));
+        assert_eq!(chosen.len(),8,"unsupported futures need bounded alternative analysis, not silent skipping");
+    }
 }

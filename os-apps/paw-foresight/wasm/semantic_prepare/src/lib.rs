@@ -101,6 +101,7 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
         "last_ingest_date",
         "target_date",
         "learning_mode",
+        "hindcast_mode",
     ] {
         safe_world[k] = json!(core::field(&world, k));
     }

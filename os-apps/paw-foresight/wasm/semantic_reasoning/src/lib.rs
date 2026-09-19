@@ -24,6 +24,10 @@ fn synthesis_input(snapshot: &Value, program: &Value) -> Value {
     json!({"world":snapshot["world"],"nodes":synthesis_nodes(snapshot),"assessments":program["results"],"assessment_semantics":core::gap_criteria(),"issues":program["issues"],"stop_reason":program["stop_reason"],"remaining_calls":program["remaining_calls"]})
 }
 
+fn research_enabled(phase: &str, snapshot: &Value) -> bool {
+    phase == "deepen" && core::field(&snapshot["world"], "hindcast_mode") == "false"
+}
+
 fn setup(ctx: &Context) -> Result<(), String> {
     let phase = core::field(&ctx.entity_state, "phase");
     let snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
@@ -35,21 +39,22 @@ fn setup(ctx: &Context) -> Result<(), String> {
         ),
         "deepen" => {
             let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
-            let selected = core::repair_candidates(&snapshot, &program);
+            let selected = core::deepening_candidates(&snapshot, &program);
             (
-                r#"Repair and deepen the selected hypothetical futures, using the supplied frozen evidence and Jev's specific gap assessments. Return JSON only: {"revisions":[{"id":"r01","parent":"exact scenario ID from selected","statement":"concrete revised future with a causal mechanism, actors, date and observable threshold","requires":["existing option or evidence node IDs"],"scene":"two vivid hypothetical sentences showing ordinary life/work","signal":"dated measurable early indicator","falsifier":"observable disconfirmation","evidence_note":"what is supported and what remains conjecture"}]}. At most 8 revisions, one per selected parent. Preserve uncertainty. Do not invent sources or assert research happened. Choose genuinely distinct causal repairs, not mere rephrasing."#,
+                r#"Deepen each selected hypothetical future. The operation label is a recommendation, not work already done. For research/uncertain selections, use only the available read-only temper.web_search and temper.web_fetch tools to investigate the most decision-relevant missing premises. At most 2 search queries and 4 fetched sources in this single round; prefer primary sources. If tools are unavailable, denied, or unhelpful, return no new evidence and retain the unanswered questions. Never invent a fetched source, infer source contents from a URL alone, or present a hypothetical future as observed. For repair selections, revise the causal mechanism. Return JSON only: {"research_evidence":[{"id":"research-01","statement":"bounded factual finding from retrieved content, with uncertainty","url":"exact fetched public URL","quote":"short relevant excerpt at most 25 words and 200 characters","observed_at":"YYYY-MM-DD"}],"revisions":[{"id":"revision-01","parent":"exact selected scenario ID","statement":"concrete revised hypothetical future, actors, date and observable threshold","requires":["existing option/evidence ID or research evidence ID"],"scene":"two vivid hypothetical sentences","signal":"dated measurable early indicator","falsifier":"observable disconfirmation","evidence_note":"what supports this and which premise remains unsupported","research_question":"the most consequential unanswered question, or explicitly none identified"}]}. Return at most 4 research_evidence entries and 1–8 revisions, at most one per selected parent. Keep original evidence and gaps unchanged. A new source is a research report, not proof of the future. Distinguish alternatives with changed causal assumptions, not cosmetic rewording. No probabilities at this stage."#,
                 json!({"world":snapshot["world"],"selected":selected,"evidence":nodes.iter().filter(|n|core::field(n,"kind")!="scenario").collect::<Vec<_>>()}),
             )
         }
         "synthesize" => (
-            r#"Answer the user's future-world question using this actual exploration and its recorded semantic assessments. Write a clear, vivid answer with 3–5 distinct plausible worlds, concrete actors, causal mechanisms, dates, early signals and falsifiers. Cite the exact scenario IDs and supplied source references. Distinguish observed evidence, hypotheses, and unknowns. Explain meaningful disagreements and the impact on the user's decisions. Jev's choice distributions are NOT forecast probabilities. A no-gap judgement is not validation. Do not claim measured accuracy improvements or successful research beyond the supplied evidence. State coverage/budget limits. Interpret labels using assessment_semantics: evidence means a key premise LACKS supporting evidence, never that evidence supports it; uncertain means the available evidence cannot distinguish the options. Do not call either label an evidentiary anchor. Use readable Markdown."#,
+            r#"Synthesize this actual exploration into a compact decision outlook. Return JSON ONLY, no markdown: {"schema":"foresight-outlook-v1","headline":"<=160 characters","horizon":"exact world.target_date","probability_basis":"subjective_model_estimate","calibrated":false,"summary":"<=400 characters","evidence_limits":["1–6 limits, each <=240 characters"],"research_questions":["0–8 remaining questions, each <=240 characters"],"outcomes":[{"id":"stable-short-id","title":"<=70 characters","definition":"<=240 characters: observable rule distinguishing this bucket from every other","probability":0.25,"scenario_ids":["exact scenario IDs assigned to this bucket"],"narrative":"<=360 characters, concrete actors and causal mechanism","signals":["1–3 dated signals, each <=160 characters"],"falsifiers":["1–3 disconfirmations, each <=160 characters"]}]}. Exactly 3–5 outcomes TOTAL, including one id='other' with scenario_ids=[] for futures outside this incomplete modeled space. Group ALL supplied kind=scenario IDs into the other 2–4 mutually exclusive buckets: every modeled scenario must appear exactly once, no invented IDs or omitted combinations. Use a clear observable partition rule (for example one axis with disjoint thresholds), not overlapping labels. Revisions can inform judgments but their IDs are not scenario membership. Probabilities are your explicitly subjective, uncalibrated estimates for the user's question and horizon, using evidence and judgment; finite numbers between0 and1 summing EXACTLY1. These numbers are NOT Jev classification probabilities, measured frequencies, calibrated forecasts, or accuracy claims. Include honest probability mass for residual other. Use assessment_semantics: evidence means a key premise LACKS supporting evidence, never support; uncertain means evidence cannot distinguish options; none does not validate truth. Do not force gaps to disappear or claim requested research succeeded. Keep unresolved questions and distinguish retrieved reports, frozen evidence, and hypothetical revisions. Mention incomplete coverage and source limitations. Make the summary directly answer what the user should expect, in ordinary language."#,
             synthesis_input(&snapshot, &program),
         ),
         _ => return Err("Unknown reasoning phase".into()),
     };
+    let web_research = research_enabled(phase, &snapshot);
     set_success_result(
         "LaunchReasoning",
-        &json!({"system_prompt":prompt,"user_message":input.to_string()}),
+        &json!({"system_prompt":prompt,"user_message":input.to_string(),"tools_enabled":if web_research {"temper_web_search,temper_web_fetch"} else {""},"tool_choice":if web_research {"auto"} else {"none"},"max_turns":if web_research {"8"} else {"1"}}),
     );
     Ok(())
 }
@@ -71,8 +76,14 @@ mod reasoning_tests {
         let program = core::plan(snapshot["nodes"].as_array().unwrap()).unwrap();
         let request = core::request(&snapshot, &program).unwrap();
         let input = synthesis_input(&snapshot, &program);
-        assert_eq!(input["assessment_semantics"], request["questions"]["result"]["criteria"]);
-        assert_eq!(input["assessment_semantics"]["evidence"], "The key premise lacks supporting evidence in the supplied input.");
+        assert_eq!(
+            input["assessment_semantics"],
+            request["questions"]["result"]["criteria"]
+        );
+        assert_eq!(
+            input["assessment_semantics"]["evidence"],
+            "The key premise lacks supporting evidence in the supplied input."
+        );
     }
 
     #[test]
@@ -85,5 +96,21 @@ mod reasoning_tests {
         assert_eq!(nodes[1]["Id"], scenario["Id"]);
         assert!(nodes[1].get("statement").is_none());
         assert!(scenario.get("statement").is_some());
+    }
+}
+
+#[cfg(test)]
+mod research_tests {
+    use super::*;
+    #[test]
+    fn only_live_deepening_enables_read_only_research() {
+        let live = json!({"world":{"hindcast_mode":"false"}});
+        assert!(research_enabled("deepen", &live));
+        assert!(!research_enabled("seed", &live));
+        assert!(!research_enabled("synthesize", &live));
+        assert!(!research_enabled(
+            "deepen",
+            &json!({"world":{"hindcast_mode":"true"}})
+        ));
     }
 }

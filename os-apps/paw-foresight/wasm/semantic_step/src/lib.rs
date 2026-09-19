@@ -6,9 +6,14 @@ fn step(ctx: &Context) -> Result<(), String> {
     let mut p = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let trace = core::parse(core::field(&ctx.entity_state, "trace_json"))?;
     let cursor = p["cursor"].as_u64().ok_or("Missing cursor")? as usize;
-    let started = core::field(&ctx.entity_state, "started_at_ms")
-        .parse::<u64>()
-        .map_err(|_| "Missing start time")?;
+    let started = p["traversal_started_at_ms"]
+        .as_u64()
+        .or_else(|| {
+            core::field(&ctx.entity_state, "started_at_ms")
+                .parse::<u64>()
+                .ok()
+        })
+        .ok_or("Missing traversal start time")?;
     let now = Context::get_time_millis() as u64;
     let count = p["tasks"].as_array().ok_or("Missing tasks")?.len();
     if cursor >= count
@@ -26,7 +31,7 @@ fn step(ctx: &Context) -> Result<(), String> {
             && now.saturating_sub(started) < core::MAX_MS;
         let phase = if core::field(&ctx.entity_state, "phase") == "seed"
             && budget_available
-            && !core::repair_candidates(&snapshot, &p).is_empty()
+            && !core::deepening_candidates(&snapshot, &p).is_empty()
         {
             "deepen"
         } else {
@@ -39,10 +44,7 @@ fn step(ctx: &Context) -> Result<(), String> {
     } else {
         let snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
         let request = core::request(&snapshot, &p)?;
-        set_success_result(
-            "Evaluate",
-            &json!({"request_json":request.to_string()}),
-        );
+        set_success_result("Evaluate", &json!({"request_json":request.to_string()}));
     }
     Ok(())
 }

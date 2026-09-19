@@ -653,3 +653,27 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the narrow restoration because:** It makes source builds retain the deployed capability without a Genesis change or a broader merge of divergent agent implementations. No-handle and static sessions remain no-ops; deletion is idempotent on provider 404 responses and release failure is reported without undoing completion.
 
 **Where:** `os-apps/paw-agent/wasm/sandbox_provisioner/src/lib.rs`, `os-apps/paw-agent/wasm/wasm-helpers/src/sandbox.rs`; source taken from the preserved package parent of `1fe41a7a5efd4b71bb72c349cab94b28b211f4ff`; PR #526.
+
+## D55 — Deepen unsupported futures with bounded read-only research
+
+**Decision:** Select research and uncertain recommendations alongside repairs for one bounded deepening round, using only the existing Session web-search and web-fetch tools on live worlds.
+
+**Came up because:** The completed 81-world run recommended research rather than causal repair, and the repair-only selector therefore skipped deepening entirely. The user asked why all gaps remained and requested actual deeper exploration.
+
+**Options:** Relabel unresolved nodes as resolved; generate cosmetic revisions without research; reuse supported read-only research and retain every unresolved premise.
+
+**Chose bounded research because:** It can add relevant information without inventing evidence or replacing the original assessments. At most two searches, four source reports, eight revisions and eight Session turns are requested. Reports remain explicitly reported/unverified, link to the actual research Session, and are reassessed with revisions. Tool denial or lack of useful sources leaves an explicit research question. Hindcasts retain frozen evidence and never enable web tools. The total Jev call limit stays 320, with exactly one deepening round; each traversal gets its own ten-minute window so research waiting cannot consume the follow-up assessment window. The original run start time remains unchanged for elapsed-time display.
+
+**Where:** `os-apps/paw-foresight/wasm/semantic_core.rs`, `semantic_step`, `semantic_reasoning`, `semantic_prepare`, `semantic_expand`, and `specs/semantic_run.ioa.toml`; red/green selection regression and source-report boundary tests; PR #526.
+
+## D56 — Present a validated subjective outcome distribution
+
+**Decision:** Persist a compact structured outlook with three to five mutually exclusive outcome buckets, including residual other, and explicitly subjective uncalibrated probability weights.
+
+**Came up because:** The user asked for a clear final few outcomes and probability distributions; the former long Markdown answer and 81-cell causal-gap matrix did not answer that question directly.
+
+**Options:** Reuse Jev classifier probabilities as forecasts; imply measured calibration; keep probability-free prose; produce a separate model-estimated distribution with explicit uncertainty and membership validation.
+
+**Chose the separate distribution because:** Causal-gap classifications do not estimate outcome likelihood. The new `foresight-outlook-v1` answer labels its numbers `subjective_model_estimate` and `calibrated:false`, requires finite weights summing to one, assigns every modeled scenario exactly once to a substantive bucket, and reserves an explicit other bucket for futures outside that model. Text bounds support a readable overview. Evidence limitations and unanswered research questions remain visible. Partition membership is mechanically checked; the model's causal judgment and bucket definitions remain subjective and are not a calibration claim.
+
+**Where:** `os-apps/paw-foresight/wasm/semantic_outlook.rs`, `semantic_expand`, `semantic_reasoning`; validation rejects overlapping/missing/invented memberships, invalid weights, false calibration claims and oversized display text; PR #526.
