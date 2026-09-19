@@ -157,48 +157,49 @@ async fn both_evaluators_receive_identical_full_packet_without_refetching_docume
     assert_eq!(adversary["success"], true, "{adversary}");
     let evaluation = invoke("evaluate_semantics", fields.clone(), host.clone()).await;
     assert_eq!(evaluation["callback_action"], "Record", "{evaluation}");
-    let calls = host.calls.lock().unwrap();
-    assert_eq!(
-        calls
-            .iter()
-            .filter(|(_, url, _)| url.contains("/$value"))
-            .count(),
-        3,
-        "consumers must not refetch or truncate documents"
-    );
-    let config: Value = serde_json::from_str(
-        &calls
-            .iter()
-            .find(|(_, url, _)| url.ends_with("/TemperPaw.Configure"))
-            .unwrap()
-            .2,
-    )
-    .unwrap();
-    assert_eq!(config["tools_enabled"], "temper_action,temper_write");
-    assert!(
-        config["user_message"]
-            .as_str()
-            .unwrap()
-            .contains("not already represented in state.repair_flags")
-    );
-    assert!(config["user_message"].as_str().unwrap().ends_with(raw));
-    assert!(
-        config["user_message"]
-            .as_str()
-            .unwrap()
-            .contains(fields["challenge_packet_sha256"].as_str().unwrap())
-    );
-    let jev: Value = serde_json::from_str(
-        &calls
-            .iter()
-            .find(|(_, url, _)| url == "https://api.typesafe.ai/v1/systemone")
-            .unwrap()
-            .2,
-    )
-    .unwrap();
-    assert_eq!(jev["state"], packet["state"]);
-    assert_eq!(jev["questions"], packet["questions"]);
-    drop(calls);
+    {
+        let calls = host.calls.lock().unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|(_, url, _)| url.contains("/$value"))
+                .count(),
+            3,
+            "consumers must not refetch or truncate documents"
+        );
+        let config: Value = serde_json::from_str(
+            &calls
+                .iter()
+                .find(|(_, url, _)| url.ends_with("/TemperPaw.Configure"))
+                .unwrap()
+                .2,
+        )
+        .unwrap();
+        assert_eq!(config["tools_enabled"], "temper_action,temper_write");
+        assert!(
+            config["user_message"]
+                .as_str()
+                .unwrap()
+                .contains("not already represented in state.repair_flags")
+        );
+        assert!(config["user_message"].as_str().unwrap().ends_with(raw));
+        assert!(
+            config["user_message"]
+                .as_str()
+                .unwrap()
+                .contains(fields["challenge_packet_sha256"].as_str().unwrap())
+        );
+        let jev: Value = serde_json::from_str(
+            &calls
+                .iter()
+                .find(|(_, url, _)| url == "https://api.typesafe.ai/v1/systemone")
+                .unwrap()
+                .2,
+        )
+        .unwrap();
+        assert_eq!(jev["state"], packet["state"]);
+        assert_eq!(jev["questions"], packet["questions"]);
+    }
     fields["challenge_packet_json"] = json!(raw.replace("BEFORE", "AFTER"));
     let rejected = invoke("evaluate_semantics", fields, host).await;
     assert_eq!(
