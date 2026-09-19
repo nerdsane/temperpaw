@@ -740,6 +740,15 @@ when { principal has agent_type && principal.agent_type == "system" };
 forbid(principal, action == Action::"StartSeed", resource is World)
 unless { principal has agent_type && principal.agent_type == "system" };
 
+// The verified dashboard operator may retry an existing world's exploration.
+permit(principal is Agent,
+  action in [Action::"create", Action::"Start"],
+  resource is SemanticRun)
+when {
+  principal has agent_type && principal.agent_type == "operator" &&
+  principal has agentTypeVerified && principal.agentTypeVerified == true
+};
+
 // Scheduled after LaunchReasoning has durably saved its prompt parameters.
 forbid(principal, action == Action::"SpawnReasoning", resource is SemanticRun)
 unless { principal has agent_type && principal.agent_type == "system" };
