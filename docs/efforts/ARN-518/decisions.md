@@ -603,3 +603,16 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Options:** Introduce new blob-fetch plumbing across every consumer; declare the existing bounded native payload sizes and avoid duplicated synthesis input. **Chose explicit app field bounds** to retain one durable trace and keep the existing replay/API contract. Existing 256-node, 320-call and provider response bounds remain enforced. Malformed nonempty edge data still fails validation.
 
 **Where:** SemanticRun spec; semantic_prepare and semantic_reasoning modules; corresponding actor/TypeScript regressions; PRs #526 and deep-sci-fi #121.
+
+
+### D51 — Bound transient event context and size semantic WASM memory
+
+**Decision:** Run the dedicated Foresight service with `TEMPER_RECENT_EVENTS_BUDGET=5` and give SemanticRun WASM integrations a 256 MiB memory ceiling.
+
+**Came up because:** The real 81-world run recorded 81 Jev decisions, then failed while the SDK cloned invocation context containing repeated cumulative traces from the default 50 recent events.
+
+**Options:** Keep the 50-event transient window and only raise memory; change the kernel or remove trace evidence; use the existing runtime event-tail setting with a scoped module memory bound.
+
+**Chose the existing settings because:** Five transient events avoid multiplying the cumulative trace fifty times, while durable events and the complete current trace remain stored. The semantic modules receive extra bounded headroom without changing unrelated modules or waiting on a kernel release.
+
+**Where:** `os-apps/paw-foresight/specs/semantic_run.ioa.toml`; dedicated Foresight Railway service configuration; PR #526.
