@@ -21,6 +21,12 @@ fn list(value: &Value, min: usize, max: usize, limit: usize) -> Result<(), Strin
 /// The modeled scenarios are an explicit finite partition; `other` retains
 /// probability mass for real futures outside that deliberately incomplete model.
 pub fn validate(answer: &Value, snapshot: &Value) -> Result<(), String> {
+    if answer["schema"] == "foresight-outlook-v2" {
+        return validate_v2(answer, snapshot);
+    }
+    validate_v1(answer, snapshot)
+}
+fn validate_v1(answer: &Value, snapshot: &Value) -> Result<(), String> {
     if answer["schema"] != "foresight-outlook-v1"
         || answer["probability_basis"] != "subjective_model_estimate"
         || answer["calibrated"] != false
@@ -153,5 +159,116 @@ mod tests {
         let mut bad = a;
         bad["outcomes"][0]["narrative"] = json!("");
         assert!(validate(&bad, &s).is_err());
+    }
+}
+
+/// Independent event estimates may overlap and must never be normalized into a partition.
+fn validate_v2(answer: &Value, snapshot: &Value) -> Result<(), String> {
+    if answer["probability_model"] != "overlapping_events"
+        || answer["probability_basis"] != "model_implied_event_estimate"
+        || answer["calibrated"] != false
+    {
+        return Err("Outlook must identify overlapping uncalibrated event estimates".into());
+    }
+    text(&answer["headline"], 160)?;
+    text(&answer["summary"], 400)?;
+    if answer["horizon"] != snapshot["world"]["target_date"] {
+        return Err("Outlook horizon differs from the question".into());
+    }
+    list(&answer["evidence_limits"], 1, 32, 240)?;
+    list(&answer["research_questions"], 0, 64, 240)?;
+    let hypotheses: BTreeSet<_> = snapshot["nodes"]
+        .as_array()
+        .ok_or("Missing snapshot nodes")?
+        .iter()
+        .filter(|n| matches!(n["kind"].as_str(), Some("scenario" | "revision")))
+        .filter_map(|n| n["Id"].as_str())
+        .collect();
+    let outcomes = answer["outcomes"]
+        .as_array()
+        .filter(|v| (1..=64).contains(&v.len()))
+        .ok_or("Expected 1–64 hypothesis outcomes")?;
+    let mut ids = BTreeSet::new();
+    for outcome in outcomes {
+        if !ids.insert(text(&outcome["id"], 50)?) {
+            return Err("Repeated outcome identity".into());
+        }
+        let hypothesis = outcome["hypothesis_id"]
+            .as_str()
+            .ok_or("Missing hypothesis identity")?;
+        if !hypotheses.contains(hypothesis) {
+            return Err("Outcome references an absent hypothesis".into());
+        }
+        text(&outcome["title"], 100)?;
+        text(&outcome["definition"], 1000)?;
+        text(&outcome["narrative"], 1200)?;
+        list(&outcome["signals"], 1, 8, 240)?;
+        list(&outcome["falsifiers"], 1, 8, 240)?;
+        outcome["probability"]
+            .as_f64()
+            .filter(|p| p.is_finite() && (0.0..=1.0).contains(p))
+            .ok_or("Invalid event probability")?;
+        for reference in outcome["scenario_ids"]
+            .as_array()
+            .ok_or("Missing hypothesis references")?
+        {
+            if !reference.as_str().is_some_and(|id| hypotheses.contains(id)) {
+                return Err("Invented hypothesis reference".into());
+            }
+        }
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod v2_tests {
+    use super::*;
+    use serde_json::json;
+    fn fixture() -> (Value, Value) {
+        let outcome = |id: &str, h: &str| json!({"id":id,"hypothesis_id":h,"title":"Future","definition":"Event by the horizon","narrative":"A mechanism and its implications","probability":0.8,"scenario_ids":["h1"],"signals":["Signal"],"falsifiers":["Disconfirmation"]});
+        (
+            json!({"schema":"foresight-outlook-v2","probability_model":"overlapping_events","probability_basis":"model_implied_event_estimate","calibrated":false,"headline":"Independent events","summary":"Both events may happen","horizon":"2027","evidence_limits":["Limited observations"],"research_questions":[],"outcomes":[outcome("a","h1"),outcome("b","h2")]}),
+            json!({"world":{"target_date":"2027"},"nodes":[{"Id":"h1","kind":"scenario"},{"Id":"h2","kind":"revision"},{"Id":"e1","kind":"evidence"}]}),
+        )
+    }
+    #[test]
+    fn overlapping_probabilities_are_not_a_partition() {
+        let (a, s) = fixture();
+        assert!(validate(&a, &s).is_ok());
+        let mut a = a;
+        a["outcomes"].as_array_mut().unwrap().truncate(1);
+        a["outcomes"][0]["scenario_ids"] = json!([]);
+        assert!(validate(&a, &s).is_ok());
+    }
+    #[test]
+    fn invented_or_evidence_hypotheses_fail() {
+        let (a, s) = fixture();
+        for id in ["missing", "e1"] {
+            let mut b = a.clone();
+            b["outcomes"][0]["hypothesis_id"] = json!(id);
+            assert!(validate(&b, &s).is_err());
+            let mut b = a.clone();
+            b["outcomes"][0]["scenario_ids"] = json!([id]);
+            assert!(validate(&b, &s).is_err());
+        }
+    }
+    #[test]
+    fn event_probability_and_resource_bounds() {
+        let (a, s) = fixture();
+        for p in [-0.1, 1.1] {
+            let mut b = a.clone();
+            b["outcomes"][0]["probability"] = json!(p);
+            assert!(validate(&b, &s).is_err());
+        }
+        for (key, n) in [("title", 101), ("definition", 1001), ("narrative", 1201)] {
+            let mut b = a.clone();
+            b["outcomes"][0][key] = json!("x".repeat(n));
+            assert!(validate(&b, &s).is_err());
+        }
+        let mut b = a.clone();
+        b["outcomes"] = json!([]);
+        assert!(validate(&b, &s).is_err());
+        let mut b = a;
+        b["calibrated"] = json!(true);
+        assert!(validate(&b, &s).is_err());
     }
 }

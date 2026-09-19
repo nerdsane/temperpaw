@@ -1,7 +1,7 @@
 //! seed_world — spawns the skeleton builders for a world (ADR-002).
 //!
-//! On World.Seed: spawn a surveyor session (determined facts only — the
-//! skeleton). The surveyor self-reports World.SeedComplete. Bookmaker
+//! On World.Seed: spawn an open researcher for semantic exploration, or
+//! a determined-fact surveyor for legacy corridor sampling. The surveyor self-reports World.SeedComplete. Bookmaker
 //! (market-priced marginals) is disabled — it wasted eval time searching
 //! prediction markets the user did not ask for.
 //!
@@ -137,6 +137,81 @@ fn surveyor_prompt(
          \"[{{\\\"axis\\\": \\\"...\\\", \\\"consensus_pole\\\": \\\"...\\\"}}, ...]\"}}).\n\
          Then temper.done(\"complete\") in its own execute()."
     )
+}
+
+/// Open exploration starts with a research map, not a set of fixed commitments.
+/// Keep the legacy corridor prompt separate: its sampler requires a skeleton.
+fn open_research_prompt(
+    world_id: &str,
+    agent_id: &str,
+    question: &str,
+    target_date: &str,
+    corpus_inline: &str,
+    hindcast: bool,
+) -> String {
+    let research = if hindcast {
+        "HINDCAST: NO web access. Use only the frozen corpus, respecting its vantage date.          Later knowledge is inadmissible, even if you remember it. Record missing evidence."
+    } else {
+        "Use temper.web_search and temper.web_fetch to investigate the question with current          evidence. Follow surprising findings and competing explanations. Inspect source          content before citing it; search snippets alone are leads, not verified findings.          Seek evidence that could overturn your emerging account, not just confirm it."
+    };
+    format!(
+        r#"You are investigating this question for world {world_id}:
+{question}
+Horizon: {target_date}
+
+Build an open research map that can support genuinely different causal futures. Let the
+question and discovered evidence determine what to investigate. There is no prescribed
+topic checklist, axis count, branch count, consensus pole, or required narrative. Revise
+your framing when evidence points somewhere unexpected. A dated commitment is one kind
+of evidence, not the boundary of the research. Explore observed changes, contested claims,
+weak signals, counterexamples and emerging mechanisms when they bear on this question.
+Distinguish an observation from its interpretation and from a hypothesis about the future.
+A source's prediction is evidence that the source made that prediction, not that it is true.
+Identify competing causal explanations and novel hypotheses worth testing. Preserve
+contradictions, uncertainty, missing evidence and the reasons a finding could mislead us.
+Do not turn a disagreement or an unsourced possibility into an established fact.
+
+{research}
+--- BEGIN CORPUS ---
+{corpus_inline}
+--- END CORPUS ---
+
+Persist useful research as it emerges so the person can watch it build. Use the exact API:
+temper.create("EventNodes", {{"world_id": "{world_id}", "statement": "<finding, date, scope, uncertainty and competing interpretation>", "layer": "mid", "probability": "", "provenance": "observed", "source_refs": "[\"<URL or corpus reference with a short supporting quotation and source date>\"]", "resolve_by": "{target_date}", "author_agent_id": "{agent_id}"}})
+Use provenance observed, contested, weak_signal, or hypothesis to identify the claim's
+status. Use determined only for an actually fixed fact. Leave probability empty for research
+claims: unknown does not mean 0.5 and sourced does not mean 1.0. A genuinely quoted,
+quantified forecast may use provenance market or authored with its stated probability;
+identify whose estimate it is, its horizon and its conditions in the statement.
+Hypotheses may cite their motivating evidence, but explicitly say they are inferred and
+unverified; never fabricate a source for the hypothesis. If no source was available, say so
+and use an empty source_refs array. Preserve enough actual source content to let subsequent
+evaluations assess what was observed. Do not pad the map to a target count or collapse
+conflicting observations to one consensus. Group only genuinely redundant findings.
+
+The session uses a Monty execute REPL. Work in incremental execute calls: research, persist
+findings, inspect the saved EventNodes, then continue investigating. Avoid one monolithic
+script; check action results before moving on. You have an operational turn budget, so leave
+time to save partial findings and report remaining research questions honestly.
+Verify saved nodes with temper.list("EventNodes", "world_id eq '{world_id}'").
+Write the research map, competing explanations, new hypotheses, evidence limitations and
+unanswered questions using temper.write("/skeleton.md", "<research map markdown>").
+This legacy filename is storage only; it does not constrain the substance of the research.
+Do NOT create Files, Directories, or Workspaces yourself. Save the returned file_id.
+Then in a separate execute call use:
+temper.action("Worlds", "{world_id}", "SeedComplete", {{"skeleton_node_count": "<actual saved count>", "graph_snapshot_file_id": "<returned file_id>", "uncertainty_axes": "[]"}})
+The empty legacy uncertainty_axes field deliberately does not preselect the futures.
+Only after SeedComplete succeeds, call temper.done("complete") in its own execute call.
+"#
+    )
+}
+
+fn open_exploration_requested(state: &Value) -> bool {
+    state
+        .get("booleans")
+        .and_then(|fields| fields.get("semantic_exploration_requested"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// The bookmaker's working contract: import live market-priced questions as
@@ -369,16 +444,28 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
 
         let corpus_inline = fetch_corpus(&ctx, &api, &headers, &get("corpus_file_id"))?;
 
-        let surveyor_msg = surveyor_prompt(
-            &world_id,
-            "{AGENT_ID}",
-            &get("name"),
-            &get("domain"),
-            &get("description"),
-            &get("target_date"),
-            &corpus_inline,
-            hindcast,
-        );
+        let open_exploration = open_exploration_requested(&ctx.entity_state);
+        let surveyor_msg = if open_exploration {
+            open_research_prompt(
+                &world_id,
+                "{AGENT_ID}",
+                &get("description"),
+                &get("target_date"),
+                &corpus_inline,
+                hindcast,
+            )
+        } else {
+            surveyor_prompt(
+                &world_id,
+                "{AGENT_ID}",
+                &get("name"),
+                &get("domain"),
+                &get("description"),
+                &get("target_date"),
+                &corpus_inline,
+                hindcast,
+            )
+        };
         let research_session_id = spawn_session(
             &ctx,
             &api,
@@ -388,7 +475,7 @@ pub extern "C" fn run(_ctx_ptr: i32, _ctx_len: i32) -> i32 {
             &model,
             &provider,
             &tools,
-            "40",
+            if open_exploration { "64" } else { "40" },
             &surveyor_msg,
             &workspace_id,
         )?;
@@ -420,6 +507,62 @@ mod tests {
     // Prompt-contract tests: the generated prompts must reference the exact
     // entity sets, action names, and parameter names the specs declare.
     // The API silently drops unknown fields — drift here is a silent failure.
+
+    #[test]
+    fn open_research_keeps_uncertain_findings_without_fixed_axes_or_certainty() {
+        let prompt = open_research_prompt(
+            "world-a",
+            "agent-a",
+            "What changes?",
+            "2027-01-01",
+            "",
+            false,
+        );
+        for required in [
+            "temper.web_search",
+            "temper.web_fetch",
+            "competing causal explanations",
+            "observed, contested, weak_signal, or hypothesis",
+            "Leave probability empty",
+            "\"uncertainty_axes\": \"[]\"",
+            "SeedComplete",
+        ] {
+            assert!(prompt.contains(required), "missing {required}");
+        }
+        for obsolete in [
+            "ALREADY DETERMINED",
+            "forbidden from predicting",
+            "Aim for 8-20",
+            "3-5 load-bearing",
+            "\"probability\": \"1.0\"",
+        ] {
+            assert!(
+                !prompt.contains(obsolete),
+                "research regressed to {obsolete}"
+            );
+        }
+    }
+
+    #[test]
+    fn open_hindcast_never_offers_live_web_and_preserves_corpus() {
+        let prompt =
+            open_research_prompt("w", "a", "question", "2020-01-01", "frozen evidence", true);
+        assert!(prompt.contains("NO web access"));
+        assert!(prompt.contains("frozen evidence"));
+        assert!(!prompt.contains("temper.web_search"));
+        assert!(!prompt.contains("temper.web_fetch"));
+    }
+
+    #[test]
+    fn semantic_request_selects_open_research_without_changing_corridors() {
+        assert!(open_exploration_requested(
+            &json!({"booleans": {"semantic_exploration_requested": true}})
+        ));
+        assert!(!open_exploration_requested(
+            &json!({"booleans": {"semantic_exploration_requested": false}})
+        ));
+        assert!(!open_exploration_requested(&json!({})));
+    }
 
     #[test]
     fn surveyor_prompt_carries_the_event_node_and_seed_complete_contract() {

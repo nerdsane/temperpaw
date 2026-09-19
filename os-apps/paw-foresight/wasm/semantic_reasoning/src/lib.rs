@@ -3,61 +3,156 @@ mod core {
     include!("../../semantic_core.rs");
 }
 
-// Scenario statements repeat the full text of their four option dependencies.
-// Keep those references and the complete option text once in the model input.
-fn synthesis_nodes(snapshot: &Value) -> Vec<Value> {
+const MAX_REASONING_INPUT_BYTES: usize = 3 * 1024 * 1024;
+const FRONTIER_LIMIT: usize = 64;
+
+const EXPLORATION_PROMPT: &str = r#"Investigate the user's question in state.world.description through open causal exploration. The supplied catalog records what has already been considered; it is not the boundary of what can be considered. Discover new mechanisms and surprising hypotheses, pursue counterevidence, and revise the framing when it obscures something consequential. Follow interactions, second-order effects and alternatives emerging from evidence. Do not fill a predetermined taxonomy, Cartesian grid, fixed set of axes, or adoption/delay/failure template. A novel hypothesis must say what would happen and why, not merely rename a familiar outcome.
+
+Use available read-only temper.web_search and temper.web_fetch tools to investigate useful missing premises and evidence beyond the current frontier. Search results are leads; inspect source content before citing it. Tool absence, failure, or conflicting evidence must remain explicit. For frozen hindcasts, return research_evidence=[] and reference only existing catalog evidence within the stated vantage: later remembered knowledge is inadmissible. Neither a citation nor a Jev label proves a future true. Hypotheses and observations remain distinct.
+
+Return JSON only after the research: {"hypotheses":[{"id":"unique-ascii-id","title":"concise distinct hypothesis","statement":"self-contained observable future event with actors and horizon","mechanism":"how and why it could happen, including the causal assumptions","requires":["existing node ID or new hypothesis/evidence ID whose truth this mechanism actually requires"],"parent":"optional existing hypothesis ID when meaningfully extending or revising it","scene":"optional vivid hypothetical future, explicitly not an observation","signal":"optional observable early signal","falsifier":"optional disconfirming observation","evidence_note":"what supports or challenges the mechanism and what is still conjecture","research_question":"optional consequential unanswered question"}],"research_evidence":[{"id":"unique-ascii-id","statement":"finding with date, scope, uncertainty and conflicting interpretation where relevant","url":"exact retrieved HTTPS URL","quote":"short supporting excerpt, maximum 25 words and 200 characters per source","observed_at":"YYYY-MM-DD","provenance":"observed|contested|weak_signal"}],"continue_exploring":true,"exploration_note":"what this exploration learned, which framing changed, and why another round would or would not be useful"}.
+
+Choose the number and shape of hypotheses from the question and findings. At most128 TOTAL entries across hypotheses and research_evidence fit one batch; those are storage limits, never targets. IDs must be unique across the supplied catalog and new batch. Dependencies must reference actual supplied or newly returned nodes; use an empty requires array rather than invent supporting evidence. An optional parent records lineage, not proof. Do not assign probabilities: the engine evaluates every accepted hypothesis through Jev. Keep distinct futures even if they overlap or share a mechanism; avoid duplicates that only change wording. Research evidence must contain only content actually retrieved or supplied, with its epistemic status intact.
+
+The engine can use up to5000 Jev calls,2048 nodes,64 exploration rounds and one hour; these are operational ceilings, not demands to pad the graph. Use the current assessments to challenge assumptions, explore neglected possibilities and direct research. A gap is a reason to investigate or reconsider a mechanism, not a command to make every hypothesis conform to the same future. Set continue_exploring=false only when further exploration has low expected value relative to what is already covered, and explain the remaining blind spots and the concrete reason to stop. A budget stop is incomplete exploration, not convergence. Preserve unresolved questions honestly."#;
+
+const SYNTHESIS_PROMPT: &str = r#"Answer the user's question with rich, contrasting futures supported by this actual exploration. Preserve different causal mechanisms and discoveries; do not collapse them onto one convenient axis or a compliance/not-compliance partition. Explain what could happen, why, what would make it happen, and what observations would change the assessment. A few futures may be most useful, but there is no prescribed number; select what materially improves the answer from evaluated hypotheses.
+
+Return JSON ONLY: {"schema":"foresight-outlook-v2","headline":"<=160 characters","horizon":"exact world.target_date","probability_basis":"model_implied_event_estimate","probability_model":"overlapping_events","calibrated":false,"summary":"<=400 characters","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"stable-short-id","hypothesis_id":"exact evaluated hypothesis node ID","title":"<=100 characters","definition":"<=1000 characters; faithful to the referenced hypothesis event and horizon","scenario_ids":["related actual hypothesis IDs, possibly shared across outcomes"],"narrative":"<=1200 characters, concrete actors, mechanism, interactions and alternative explanations","signals":["1–8 observable early signals, each <=240 characters"],"falsifiers":["1–8 observable disconfirmations, each <=240 characters"]}]}.
+
+Return1–64 outcomes as useful within this output capacity, not a quota. Every outcome must reference a hypothesis with an actual estimate_likelihood evaluation. Keep its event definition faithful; do not broaden or replace it while retaining its probability. Do not supply or invent a probability field: the engine attaches the referenced hypothesis's exact Jev event estimate. These are model-implied estimates of individual overlapping events, not mutually exclusive buckets, calibrated forecasts, empirical frequencies, or Jev gap-label confidence. They need not sum to one. Related scenario_ids are optional context, not an exhaustive partition. No residual other outcome is required. Distinguish retrieved observations from hypotheses. A causal gap does not imply probability zero; no detected gap does not imply truth. Explain important disagreements, limitations, unresolved research and why the exploration stopped without claiming it exhausted the future."#;
+
+fn node_catalog(snapshot: &Value) -> Vec<Value> {
     snapshot["nodes"]
         .as_array()
         .into_iter()
         .flatten()
         .map(|node| {
-            let mut node = node.clone();
-            if core::field(&node, "kind") == "scenario" {
-                node.as_object_mut().unwrap().remove("statement");
+            let mut compact = json!({});
+            for key in [
+                "Id",
+                "kind",
+                "title",
+                "statement",
+                "mechanism",
+                "edges",
+                "parent",
+                "provenance",
+            ] {
+                if let Some(value) = node.get(key) {
+                    compact[key] = value.clone();
+                }
             }
-            node
+            compact
         })
         .collect()
 }
 
-fn synthesis_input(snapshot: &Value, program: &Value) -> Value {
-    json!({"world":snapshot["world"],"nodes":synthesis_nodes(snapshot),"assessments":program["results"],"assessment_semantics":core::gap_criteria(),"issues":program["issues"],"stop_reason":program["stop_reason"],"remaining_calls":program["remaining_calls"]})
+fn frontier_priority(node: &Value, program: &Value) -> u8 {
+    let id = core::field(node, "Id");
+    let result = &program["results"][id];
+    if result.is_null() {
+        return 0;
+    }
+    let gap = result["classify_gap"].as_str().unwrap_or("");
+    if gap != "none" { 1 } else { 2 }
+}
+
+fn compact_evaluations(program: &Value) -> Value {
+    let mut compact = json!({});
+    if let Some(nodes) = program["evaluations"].as_object() {
+        for (id, evaluations) in nodes {
+            if let Some(evaluations) = evaluations.as_object() {
+                for (function, evaluation) in evaluations {
+                    for key in ["probability", "score", "selected"] {
+                        if let Some(value) = evaluation.get(key) {
+                            compact[id][function][key] = value.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    compact
+}
+
+fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
+    let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
+    let mut frontier: Vec<_> = nodes
+        .iter()
+        .rev()
+        .filter(|node| {
+            matches!(
+                core::field(node, "kind"),
+                "hypothesis" | "scenario" | "revision"
+            )
+        })
+        .collect();
+    // Prefer unresolved, consequential hypotheses, with recent discoveries first
+    // on ties. Every statement remains available in the complete catalog.
+    frontier.sort_by(|a, b| {
+        let value = |node: &&Value| {
+            program["evaluations"][core::field(node, "Id")]["decision_value"]["score"]
+                .as_f64()
+                .unwrap_or(0.0)
+        };
+        frontier_priority(a, program)
+            .cmp(&frontier_priority(b, program))
+            .then_with(|| value(b).total_cmp(&value(a)))
+    });
+    let frontier: Vec<_> = frontier
+        .into_iter()
+        .take(FRONTIER_LIMIT)
+        .map(|node| json!({"node":node,"assessment":program["results"][core::field(node,"Id")],"evaluations":program["evaluations"][core::field(node,"Id")]}))
+        .collect();
+    let evidence: Vec<_> = nodes
+        .iter()
+        .filter(|node| {
+            !matches!(
+                core::field(node, "kind"),
+                "hypothesis" | "scenario" | "revision" | "option"
+            )
+        })
+        .collect();
+    let input = json!({
+        "world":snapshot["world"], "catalog":node_catalog(snapshot),
+        "frontier":frontier, "source_evidence":evidence,
+        "assessments":program["results"], "evaluations": compact_evaluations(program), "assessment_semantics":core::gap_criteria(),
+        "issues":program["issues"], "stop_reason":program["stop_reason"],
+        "remaining_calls":program["remaining_calls"], "round":program["round"],
+        "exploration_note":program["exploration_note"]
+    });
+    if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
+        return Err(
+            "Reasoning context exceeds 3 MiB; refusing to silently omit explored hypotheses".into(),
+        );
+    }
+    Ok(input)
 }
 
 fn research_enabled(phase: &str, snapshot: &Value) -> bool {
-    phase == "deepen" && core::field(&snapshot["world"], "hindcast_mode") == "false"
+    matches!(phase, "seed" | "explore")
+        && core::field(&snapshot["world"], "hindcast_mode") == "false"
 }
 
 fn setup(ctx: &Context) -> Result<(), String> {
     let phase = core::field(&ctx.entity_state, "phase");
     let snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
     let program = core::parse(core::field(&ctx.entity_state, "program_json"))?;
-    let (prompt, input) = match phase {
-        "seed" => (
-            r#"You design a branching Foresight search space for the user's question in state.world.description. Use ONLY the supplied dated evidence; mark unsupported assumptions. Return JSON only, no markdown: {"axes":[{"id":"a1","title":"...","options":[{"id":"a1o1","statement":"concrete hypothetical dated outcome with actors and a measurable threshold","requires":["supplied evidence node ID"],"evidence_note":"what the evidence does and does not support","signal":"dated measurable early signal","falsifier":"observable disconfirmation"}]}]}. EXACTLY FOUR independent causal axes, EXACTLY THREE mutually distinguishable options each. Include adoption, delay and failure mechanisms, not cosmetic rewordings. The engine will cross these options into 81 alternative worlds and inspect their prerequisites recursively. IDs must be unique ASCII. Requires must name supplied evidence IDs, never invented evidence. Hypothetical details must never be described as observations. Do not assign probabilities."#,
-            json!({"world":snapshot["world"],"evidence":snapshot["nodes"]}),
-        ),
-        "deepen" => {
-            let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
-            let selected = core::deepening_candidates(&snapshot, &program);
-            (
-                r#"Deepen each selected hypothetical future. The operation label is a recommendation, not work already done. For research/uncertain selections, use only the available read-only temper.web_search and temper.web_fetch tools to investigate the most decision-relevant missing premises. At most 2 search queries and 4 fetched sources in this single round; prefer primary sources. If tools are unavailable, denied, or unhelpful, return no new evidence and retain the unanswered questions. Never invent a fetched source, infer source contents from a URL alone, or present a hypothetical future as observed. For repair selections, revise the causal mechanism. Return JSON only: {"research_evidence":[{"id":"research-01","statement":"bounded factual finding from retrieved content, with uncertainty","url":"exact fetched public URL","quote":"short relevant excerpt at most 25 words and 200 characters","observed_at":"YYYY-MM-DD"}],"revisions":[{"id":"revision-01","parent":"exact selected scenario ID","statement":"concrete revised hypothetical future, actors, date and observable threshold","requires":["existing option/evidence ID or research evidence ID"],"scene":"two vivid hypothetical sentences","signal":"dated measurable early indicator","falsifier":"observable disconfirmation","evidence_note":"what supports this and which premise remains unsupported","research_question":"the most consequential unanswered question, or explicitly none identified"}]}. Return at most 4 research_evidence entries and 1–8 revisions, at most one per selected parent. Keep original evidence and gaps unchanged. A new source is a research report, not proof of the future. Distinguish alternatives with changed causal assumptions, not cosmetic rewording. No probabilities at this stage."#,
-                json!({"world":snapshot["world"],"selected":selected,"evidence":nodes.iter().filter(|n|core::field(n,"kind")!="scenario").collect::<Vec<_>>()}),
-            )
-        }
-        "synthesize" => (
-            r#"Synthesize this actual exploration into a compact decision outlook. Return JSON ONLY, no markdown: {"schema":"foresight-outlook-v1","headline":"<=160 characters","horizon":"exact world.target_date","probability_basis":"subjective_model_estimate","calibrated":false,"summary":"<=400 characters","evidence_limits":["1–6 limits, each <=240 characters"],"research_questions":["0–8 remaining questions, each <=240 characters"],"outcomes":[{"id":"stable-short-id","title":"<=70 characters","definition":"<=240 characters: observable rule distinguishing this bucket from every other","probability":0.25,"scenario_ids":["exact scenario IDs assigned to this bucket"],"narrative":"<=360 characters, concrete actors and causal mechanism","signals":["1–3 dated signals, each <=160 characters"],"falsifiers":["1–3 disconfirmations, each <=160 characters"]}]}. Exactly 3–5 outcomes TOTAL, including one id='other' with scenario_ids=[] for futures outside this incomplete modeled space. Group ALL supplied kind=scenario IDs into the other 2–4 mutually exclusive buckets: every modeled scenario must appear exactly once, no invented IDs or omitted combinations. Use a clear observable partition rule (for example one axis with disjoint thresholds), not overlapping labels. Revisions can inform judgments but their IDs are not scenario membership. Probabilities are your explicitly subjective, uncalibrated estimates for the user's question and horizon, using evidence and judgment; finite numbers between0 and1 summing EXACTLY1. These numbers are NOT Jev classification probabilities, measured frequencies, calibrated forecasts, or accuracy claims. Include honest probability mass for residual other. Use assessment_semantics: evidence means a key premise LACKS supporting evidence, never support; uncertain means evidence cannot distinguish options; none does not validate truth. Do not force gaps to disappear or claim requested research succeeded. Keep unresolved questions and distinguish retrieved reports, frozen evidence, and hypothetical revisions. Mention incomplete coverage and source limitations. Make the summary directly answer what the user should expect, in ordinary language."#,
-            synthesis_input(&snapshot, &program),
-        ),
+    let prompt = match phase {
+        "seed" | "explore" => EXPLORATION_PROMPT,
+        "synthesize" => SYNTHESIS_PROMPT,
         _ => return Err("Unknown reasoning phase".into()),
     };
+    let input = reasoning_input(&snapshot, &program)?;
     let web_research = research_enabled(phase, &snapshot);
     set_success_result(
         "LaunchReasoning",
-        &json!({"system_prompt":prompt,"user_message":input.to_string(),"tools_enabled":if web_research {"temper_web_search,temper_web_fetch"} else {""},"tool_choice":if web_research {"auto"} else {"none"},"max_turns":if web_research {"8"} else {"1"}}),
+        &json!({"system_prompt":prompt,"user_message":input.to_string(),"tools_enabled":if web_research {"temper_web_search,temper_web_fetch"} else {""},"tool_choice":if web_research {"auto"} else {"none"},"max_turns":if web_research {"32"} else {"1"}}),
     );
     Ok(())
 }
+
 #[unsafe(no_mangle)]
 pub extern "C" fn run(_: i32, _: i32) -> i32 {
     match Context::from_host().and_then(|ctx| setup(&ctx)) {
@@ -70,47 +165,123 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
 #[cfg(test)]
 mod reasoning_tests {
     use super::*;
+
+    mod outlook_contract {
+        include!("../../semantic_outlook.rs");
+    }
+
     #[test]
-    fn synthesis_receives_the_exact_gap_definitions_used_by_jev() {
-        let snapshot = json!({"world":{},"nodes":[{"Id":"a","edges":"[]"}]});
-        let program = core::plan(snapshot["nodes"].as_array().unwrap()).unwrap();
-        let request = core::request(&snapshot, &program).unwrap();
-        let input = synthesis_input(&snapshot, &program);
+    fn advertised_synthesis_text_limits_pass_the_real_outlook_validator() {
+        let raw = SYNTHESIS_PROMPT
+            .split("Return JSON ONLY: ")
+            .nth(1)
+            .unwrap()
+            .split("}.\n")
+            .next()
+            .unwrap();
+        let mut answer: Value = serde_json::from_str(&format!("{raw}}}")).unwrap();
+        fn expand(value: &Value) -> String {
+            let limit = value
+                .as_str()
+                .unwrap()
+                .split("<=")
+                .nth(1)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            "x".repeat(limit)
+        }
+        for key in ["headline", "summary"] {
+            answer[key] = json!(expand(&answer[key]));
+        }
+        answer["horizon"] = json!("2027");
+        for key in ["evidence_limits", "research_questions"] {
+            answer[key] = json!([expand(&answer[key][0])]);
+        }
+        let outcome = &mut answer["outcomes"][0];
+        for key in ["title", "definition", "narrative"] {
+            outcome[key] = json!(expand(&outcome[key]));
+        }
+        for key in ["signals", "falsifiers"] {
+            outcome[key] = json!(vec![expand(&outcome[key][0]); 8]);
+        }
+        outcome["hypothesis_id"] = json!("h1");
+        outcome["scenario_ids"] = json!(["h1"]);
+        outcome["probability"] = json!(0.37);
+        let snapshot =
+            json!({"world":{"target_date":"2027"},"nodes":[{"Id":"h1","kind":"scenario"}]});
+        outlook_contract::validate(&answer, &snapshot).unwrap();
+        answer["summary"] = json!("x".repeat(401));
+        assert!(outlook_contract::validate(&answer, &snapshot).is_err());
+    }
+
+    #[test]
+    fn synthesis_sees_actual_numeric_estimates_without_duplicate_answer_payloads() {
+        let snapshot = json!({"nodes":[{"Id":"h","kind":"scenario","statement":"Future"}]});
+        let program = json!({"evaluations":{"h":{"estimate_likelihood":{"probability":0.37,"answer":{"noul":0.37}}}}});
+        let input = reasoning_input(&snapshot, &program).unwrap();
         assert_eq!(
-            input["assessment_semantics"],
-            request["questions"]["result"]["criteria"]
+            input["evaluations"]["h"]["estimate_likelihood"]["probability"],
+            0.37
         );
-        assert_eq!(
-            input["assessment_semantics"]["evidence"],
-            "The key premise lacks supporting evidence in the supplied input."
+        assert!(
+            input["evaluations"]["h"]["estimate_likelihood"]
+                .get("answer")
+                .is_none()
         );
     }
 
     #[test]
-    fn synthesis_preserves_option_text_and_scenario_dependencies_without_repeating_them() {
-        let option = json!({"Id":"a1o1","kind":"option","statement":"dated mechanism"});
-        let scenario = json!({"Id":"scenario-0000","kind":"scenario","statement":"dated mechanism repeated","edges":"[{\"kind\":\"requires\",\"to_id\":\"a1o1\"}]"});
-        let nodes = synthesis_nodes(&json!({"nodes":[option.clone(),scenario.clone()]}));
-        assert_eq!(nodes[0], option);
-        assert_eq!(nodes[1]["edges"], scenario["edges"]);
-        assert_eq!(nodes[1]["Id"], scenario["Id"]);
-        assert!(nodes[1].get("statement").is_none());
-        assert!(scenario.get("statement").is_some());
+    fn catalog_preserves_actual_future_statement_and_mechanism() {
+        let node = json!({"Id":"future-a","kind":"scenario","statement":"A novel future, not repeated option text","mechanism":"unexpected interaction","edges":"[]"});
+        let catalog = node_catalog(&json!({"nodes":[node.clone()]}));
+        assert_eq!(catalog[0], node);
     }
-}
 
-#[cfg(test)]
-mod research_tests {
-    use super::*;
     #[test]
-    fn only_live_deepening_enables_read_only_research() {
+    fn bounded_frontier_does_not_hide_unselected_hypotheses() {
+        let nodes: Vec<_> = (0..150).map(|i| json!({"Id":format!("h-{i}"),"kind":"hypothesis","statement":format!("Unique future {i}")})).collect();
+        let input = reasoning_input(&json!({"nodes":nodes}), &json!({})).unwrap();
+        assert_eq!(input["frontier"].as_array().unwrap().len(), 64);
+        assert_eq!(input["catalog"].as_array().unwrap().len(), 150);
+        assert_eq!(input["catalog"][149]["statement"], "Unique future 149");
+        assert_eq!(input["assessment_semantics"], core::gap_criteria());
+    }
+
+    #[test]
+    fn oversized_context_is_explicit_failure_not_silent_truncation() {
+        let snapshot =
+            json!({"nodes":[{"Id":"huge","statement":"x".repeat(MAX_REASONING_INPUT_BYTES)}]});
+        assert!(
+            reasoning_input(&snapshot, &json!({}))
+                .unwrap_err()
+                .contains("refusing")
+        );
+    }
+
+    #[test]
+    fn live_seed_and_exploration_can_research_but_hindcast_and_synthesis_cannot() {
         let live = json!({"world":{"hindcast_mode":"false"}});
-        assert!(research_enabled("deepen", &live));
-        assert!(!research_enabled("seed", &live));
+        let frozen = json!({"world":{"hindcast_mode":"true"}});
+        for phase in ["seed", "explore"] {
+            assert!(research_enabled(phase, &live));
+            assert!(!research_enabled(phase, &frozen));
+        }
         assert!(!research_enabled("synthesize", &live));
-        assert!(!research_enabled(
-            "deepen",
-            &json!({"world":{"hindcast_mode":"true"}})
-        ));
+        assert!(!research_enabled("explore", &json!({})));
+    }
+
+    #[test]
+    fn prompts_require_open_hypotheses_and_engine_owned_event_probabilities() {
+        assert!(EXPLORATION_PROMPT.contains("continue_exploring"));
+        assert!(EXPLORATION_PROMPT.contains("novel hypothesis"));
+        assert!(!EXPLORATION_PROMPT.contains("EXACTLY FOUR"));
+        assert!(!EXPLORATION_PROMPT.contains("81 alternative"));
+        assert!(SYNTHESIS_PROMPT.contains("overlapping_events"));
+        assert!(SYNTHESIS_PROMPT.contains("exact Jev event estimate"));
+        assert!(!SYNTHESIS_PROMPT.contains("summing EXACTLY1"));
     }
 }

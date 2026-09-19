@@ -56,7 +56,7 @@ async fn invoke(engine: &WasmEngine, module: &str, fields: Value) -> Value {
     serde_json::to_value(r).unwrap()
 }
 #[tokio::test]
-async fn research_recommendation_deepens_and_gets_a_fresh_bounded_recheck_window() {
+async fn research_recommendation_explores_without_resetting_global_budget() {
     let engine = WasmEngine::new().unwrap();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -67,8 +67,8 @@ async fn research_recommendation_deepens_and_gets_a_fresh_bounded_recheck_window
     let mut fields = json!({"phase":"seed","snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"trace_json":"[]","started_at_ms":now.to_string(),"reasoning_session_id":"research-session"});
     let step = invoke(&engine, "semantic_step", fields.clone()).await;
     assert_eq!(step["callback_action"], "Reason", "{step}");
-    assert_eq!(step["callback_params"]["phase"], "deepen");
-    fields["phase"] = json!("deepen");
+    assert_eq!(step["callback_params"]["phase"], "explore");
+    fields["phase"] = json!("explore");
     fields["program_json"] = step["callback_params"]["program_json"].clone();
     let reasoning = invoke(&engine, "semantic_reasoning", fields.clone()).await;
     assert_eq!(
@@ -79,10 +79,10 @@ async fn research_recommendation_deepens_and_gets_a_fresh_bounded_recheck_window
         reasoning["callback_params"]["tools_enabled"],
         "temper_web_search,temper_web_fetch"
     );
-    assert_eq!(reasoning["callback_params"]["max_turns"], "8");
+    assert_eq!(reasoning["callback_params"]["max_turns"], "32");
     assert_eq!(reasoning["callback_params"]["tool_choice"], "auto");
-    fields["started_at_ms"] = json!((now - 3_600_000).to_string());
-    fields["reasoning_result"]=json!(json!({"research_evidence":[],"revisions":[{"id":"r1","parent":"s","statement":"A revised hypothetical mechanism","requires":["e"],"research_question":"What adoption evidence is still missing?"}]}).to_string());
+
+    fields["reasoning_result"]=json!(json!({"continue_exploring":true,"exploration_note":"Investigate an alternate mechanism","research_evidence":[],"hypotheses":[{"id":"r1","parent":"s","statement":"A revised hypothetical mechanism","requires":["e"],"research_question":"What adoption evidence is still missing?"}]}).to_string());
     let expanded = invoke(&engine, "semantic_expand", fields.clone()).await;
     assert_eq!(expanded["callback_action"], "Expanded", "{expanded}");
     let saved: Value = serde_json::from_str(
@@ -92,40 +92,52 @@ async fn research_recommendation_deepens_and_gets_a_fresh_bounded_recheck_window
     )
     .unwrap();
     assert_eq!(saved["nodes"][1], snapshot["nodes"][1]);
-    assert_eq!(saved["nodes"][2]["before_gap"], "evidence");
-    assert_eq!(saved["nodes"][2]["research_status"], "unresolved");
-    assert_eq!(saved["nodes"][2]["source_session_id"], "research-session");
+
     fields["snapshot_json"] = expanded["callback_params"]["snapshot_json"].clone();
     fields["program_json"] = expanded["callback_params"]["program_json"].clone();
-    let recheck = invoke(&engine, "semantic_step", fields).await;
+    let recheck = invoke(&engine, "semantic_step", fields.clone()).await;
     assert_eq!(
         recheck["callback_action"], "Evaluate",
-        "research wait must not consume the fresh follow-up window: {recheck}"
+        "new hypotheses require evaluation: {recheck}"
     );
     let request: Value =
         serde_json::from_str(recheck["callback_params"]["request_json"].as_str().unwrap()).unwrap();
-    assert_eq!(request["state"]["node"]["Id"], "r1");
+    assert_eq!(request["state"]["node"]["Id"], "r1-r1");
     assert_eq!(
         request["state"]["prerequisites"][0]["assessment"]["classify_gap"],
         "uncertain"
     );
+    fields["started_at_ms"] = json!((now - 3_600_001).to_string());
+    let exhausted = invoke(&engine, "semantic_step", fields).await;
+    assert_eq!(exhausted["callback_params"]["phase"], "synthesize");
+    let program: Value = serde_json::from_str(
+        exhausted["callback_params"]["program_json"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(program["stop_reason"], "time_budget");
+    assert_eq!(program["remaining_calls"], 5000);
 }
 
 #[tokio::test]
-async fn synthesis_rejects_invalid_probability_mass_at_the_wasm_boundary() {
+async fn synthesis_uses_jev_event_estimates_instead_of_invented_weights() {
     let engine = WasmEngine::new().unwrap();
-    let snapshot = json!({"world":{"target_date":"2027-09-19"},"nodes":[{"Id":"s1","kind":"scenario"},{"Id":"s2","kind":"scenario"}]});
-    let bucket = |id: &str, scenario: &str, p: f64| json!({"id":id,"title":"A future","definition":"A mutually exclusive measurable bucket","probability":p,"scenario_ids":if scenario.is_empty(){vec![]}else{vec![scenario]},"narrative":"An explicitly hypothetical future","signals":["A dated observable signal"],"falsifiers":["An observable disconfirmation"]});
-    let answer = json!({"schema":"foresight-outlook-v1","headline":"A clear outlook","summary":"Subjective judgments under uncertainty","horizon":"2027-09-19","probability_basis":"subjective_model_estimate","calibrated":false,"evidence_limits":["Not calibrated; incomplete evidence"],"research_questions":[],"outcomes":[bucket("a","s1",0.5),bucket("b","s2",0.35),bucket("other","",0.15)]});
-    let mut fields = json!({"phase":"synthesize","snapshot_json":snapshot.to_string(),"reasoning_result":answer.to_string()});
+    let snapshot = json!({"world":{"target_date":"2027"},"nodes":[{"Id":"h1","kind":"scenario"},{"Id":"h2","kind":"revision"}]});
+    let outcome = |id: &str| json!({"id":id,"hypothesis_id":id,"title":"Future","definition":"Event by horizon","narrative":"Mechanism","probability":0.99,"scenario_ids":["h1"],"signals":["Signal"],"falsifiers":["Falsifier"]});
+    let answer = json!({"schema":"foresight-outlook-v2","probability_model":"overlapping_events","probability_basis":"model_implied_event_estimate","calibrated":false,"headline":"Independent events","summary":"They can coexist","horizon":"2027","evidence_limits":["Uncalibrated"],"research_questions":[],"outcomes":[outcome("h1"),outcome("h2")]});
+    let mut fields = json!({"phase":"synthesize","snapshot_json":snapshot.to_string(),"program_json":json!({"results":{"h1":{"estimate_likelihood":"0.8"},"h2":{"estimate_likelihood":"0.7"}}}).to_string(),"reasoning_result":answer.to_string()});
     let good = invoke(&engine, "semantic_expand", fields.clone()).await;
     assert_eq!(good["callback_action"], "Complete", "{good}");
-    let mut malformed = answer;
-    malformed["outcomes"][0]["probability"] = json!(0.99);
-    fields["reasoning_result"] = json!(malformed.to_string());
-    let bad = invoke(&engine, "semantic_expand", fields).await;
+    let saved: Value =
+        serde_json::from_str(good["callback_params"]["answer"].as_str().unwrap()).unwrap();
+    assert_eq!(saved["outcomes"][0]["probability"], 0.8);
+    assert_eq!(saved["outcomes"][1]["probability"], 0.7);
+    let mut bad = answer;
+    bad["outcomes"][0]["hypothesis_id"] = json!("invented");
+    fields["reasoning_result"] = json!(bad.to_string());
     assert_eq!(
-        bad["callback_action"], "Fail",
-        "must not publish unnormalized probabilities: {bad}"
+        invoke(&engine, "semantic_expand", fields).await["callback_action"],
+        "Fail"
     );
 }

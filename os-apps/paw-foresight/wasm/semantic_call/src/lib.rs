@@ -6,47 +6,96 @@ mod core {
 fn call(ctx: &Context) -> Result<(), String> {
     let mut p = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let mut trace = core::parse(core::field(&ctx.entity_state, "trace_json"))?;
-    let request = core::parse(core::field(&ctx.entity_state, "request_json"))?;
-    let cursor = p["cursor"].as_u64().ok_or("Missing cursor")? as usize;
-    if trace.as_array().ok_or("Missing trace")?.len() >= core::MAX_CALLS {
-        return Err("Provider call budget exhausted".into());
-    }
-    let task = p["tasks"][cursor].clone();
-    let node = task["nodeId"].as_str().ok_or("Missing node identity")?;
-    let function = task["function"].as_str().ok_or("Missing function")?;
+    let snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
     let key = ctx
         .config
         .get("typesafe_api_key")
         .filter(|s| !s.is_empty() && !s.contains("{secret:"))
         .ok_or("Configure foresight_typesafe_api_key in Temper settings")?;
-    let encoded = request.to_string();
-    let started = Context::get_time_millis();
-    let r = ctx
-        .http_call(
-            "POST",
-            "https://api.typesafe.ai/v1/systemone",
-            &[
-                ("content-type".into(), "application/json".into()),
-                ("authorization".into(), format!("Bearer {key}")),
-            ],
-            &encoded,
-        )
-        .map_err(|_| "Semantic provider transport failed")?;
-    if !(200..300).contains(&r.status) {
-        return Err(format!("Semantic provider HTTP {}", r.status));
+    // One actor callback records up to eight actual HTTP calls. Requests are rebuilt
+    // after every answer so dependent decisions never use stale assessments.
+    let mut trace_bytes = trace.to_string().len();
+    for _ in 0..8 {
+        let cursor = p["cursor"].as_u64().ok_or("Missing cursor")? as usize;
+        if cursor >= p["tasks"].as_array().ok_or("Missing tasks")?.len() {
+            break;
+        }
+        if trace.as_array().ok_or("Missing trace")?.len() >= core::MAX_CALLS {
+            p["stop_reason"] = json!("call_budget");
+            break;
+        }
+        // Reserve enough for the bounded response and metadata before spending a call.
+        if trace_bytes + 192 * 1024 > core::MAX_TRACE_BYTES {
+            p["stop_reason"] = json!("trace_budget");
+            break;
+        }
+        if let Ok(started) = core::field(&ctx.entity_state, "started_at_ms").parse::<u64>() {
+            if (Context::get_time_millis() as u64).saturating_sub(started) >= core::MAX_MS {
+                p["stop_reason"] = json!("time_budget");
+                break;
+            }
+        }
+        let request = core::request(&snapshot, &p)?;
+        let task = p["tasks"][cursor].clone();
+        let node = task["nodeId"].as_str().ok_or("Missing node identity")?;
+        let function = task["function"].as_str().ok_or("Missing function")?;
+        let encoded = request.to_string();
+        let started = Context::get_time_millis();
+        let response_result = (|| -> Result<serde_json::Value, String> {
+            let r = ctx
+                .http_call(
+                    "POST",
+                    "https://api.typesafe.ai/v1/systemone",
+                    &[
+                        ("content-type".into(), "application/json".into()),
+                        ("authorization".into(), format!("Bearer {key}")),
+                    ],
+                    &encoded,
+                )
+                .map_err(|_| "Semantic provider transport failed")?;
+            if !(200..300).contains(&r.status) {
+                return Err(format!("Semantic provider HTTP {}", r.status));
+            }
+            if r.body.len() > 32 * 1024 {
+                return Err("Provider response exceeds bound".into());
+            }
+            let response = core::parse(&r.body)?;
+            core::validate(&request, &response)?;
+            Ok(response)
+        })();
+        let response = match response_result {
+            Ok(response) => response,
+            Err(error) => {
+                let index = trace.as_array().unwrap().len();
+                trace.as_array_mut().unwrap().push(json!({"index":index,"nodeId":node,"function":function,"requestHash":format!("{:x}",Sha256::digest(encoded.as_bytes())),"startedAtMs":started,"elapsedMs":Context::get_time_millis()-started,"error":error,"requestFormat":"failed-attempt-hash-only"}));
+                p["stop_reason"] = json!("provider_error");
+                p["last_error"] = json!(error);
+                break;
+            }
+        };
+        let decision = core::validate(&request, &response)?;
+        let evaluation = core::evaluation_value(&request, &response)?;
+        if !p["results"].is_object() {
+            p["results"] = json!({});
+        }
+        if !p["evaluations"].is_object() {
+            p["evaluations"] = json!({});
+        }
+        if p["results"].get(node).is_none() {
+            p["results"][node] = json!({});
+        }
+        if p["evaluations"].get(node).is_none() {
+            p["evaluations"][node] = json!({});
+        }
+        p["results"][node][function] = json!(decision);
+        p["evaluations"][node][function] = evaluation.clone();
+        p["cursor"] = json!(cursor + 1);
+        let index = trace.as_array().unwrap().len();
+        let state = &request["state"];
+        let entry = json!({"index":index,"nodeId":node,"function":function,"depth":task["depth"],"decision":decision,"startedAtMs":started,"elapsedMs":Context::get_time_millis()-started,"requestHash":format!("{:x}",Sha256::digest(encoded.as_bytes())),"requestFormat":"snapshot-reference-v1","request":{"model":request["model"],"questions":request["questions"],"state_ref":{"nodeId":node,"worldId":snapshot["world"]["Id"],"prerequisiteIds":state["prerequisites"].as_array().unwrap().iter().map(|v|v["id"].clone()).collect::<Vec<_>>(),"prerequisiteAssessments":state["prerequisites"].as_array().unwrap().iter().map(|v|json!({"id":v["id"],"assessment":v["assessment"],"evaluations":v["evaluations"]})).collect::<Vec<_>>(),"comparisonIds":state["comparisons"].as_array().unwrap().iter().map(|v|v["Id"].clone()).collect::<Vec<_>>(),"assessment":state["assessment"],"evaluations":state["evaluations"]}},"response":response,"forecastProbability":evaluation["probability"]});
+        trace_bytes += entry.to_string().len() + 1;
+        trace.as_array_mut().ok_or("Missing trace")?.push(entry);
     }
-    if r.body.len() > 32 * 1024 {
-        return Err("Provider response exceeds bound".into());
-    }
-    let response = core::parse(&r.body)?;
-    let decision = core::validate(&request, &response)?;
-    if p["results"].get(node).is_none() {
-        p["results"][node] = json!({});
-    }
-    p["results"][node][function] = json!(decision);
-    p["cursor"] = json!(cursor + 1);
-    let index = trace.as_array().unwrap().len();
-    trace.as_array_mut().ok_or("Missing trace")?.push(json!({"index":index,"nodeId":node,"function":function,"depth":task["depth"],"decision":decision,"startedAtMs":started,"elapsedMs":Context::get_time_millis()-started,"requestHash":format!("{:x}",Sha256::digest(encoded.as_bytes())),"request":request,"response":response,"forecastProbability":null}));
     set_success_result(
         "Recorded",
         &json!({"program_json":p.to_string(),"trace_json":trace.to_string()}),

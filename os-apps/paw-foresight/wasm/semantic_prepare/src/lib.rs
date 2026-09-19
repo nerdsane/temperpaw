@@ -47,11 +47,11 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
     }
     let rows = read(
         ctx,
-        &format!("EventNodes?$filter=world_id%20eq%20'{id}'&$top=129"),
+        &format!("EventNodes?$filter=world_id%20eq%20'{id}'&$top=513"),
     )?;
-    if rows["value"].as_array().ok_or("Missing event list")?.len() > 128 {
+    if rows["value"].as_array().ok_or("Missing event list")?.len() > 512 {
         return Err(
-            "World exceeds the 128-event snapshot limit; refusing silent truncation".into(),
+            "World exceeds the 512-event snapshot limit; refusing silent truncation".into(),
         );
     }
     let mut nodes = vec![];
@@ -67,6 +67,7 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
             "source_refs",
             "resolve_by",
             "provenance",
+            "probability",
             "resolution",
             "Status",
         ] {
@@ -106,8 +107,8 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
         safe_world[k] = json!(core::field(&world, k));
     }
     let snapshot = json!({"world":safe_world,"nodes":nodes});
-    if snapshot.to_string().len() > 256 * 1024 {
-        return Err("World snapshot exceeds 256 KB".into());
+    if snapshot.to_string().len() > 2 * 1024 * 1024 {
+        return Err("World snapshot exceeds 2 MB".into());
     }
     set_success_result(
         "Prepared",
