@@ -28,6 +28,7 @@ fn digest(node: &Value) -> Value {
         "probability",
         "evidence",
         "research_question",
+        "component_ids", "counter_ids", "scene", "narrative", "signals", "falsifiers", "what_you_can_do",
     ] {
         if let Some(value) = node.get("fields").unwrap_or(node).get(key) {
             out.insert(key.into(), value.clone());
@@ -79,7 +80,7 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
         .take(16)
         .map(|n| digest(n))
         .collect();
-    let question = match task["function"].as_str().ok_or("Missing function")? {
+    let mut question = match task["function"].as_str().ok_or("Missing function")? {
         "classify_gap" => {
             json!({"type":"choice","instructions":"Identify the most consequential causal gap in this hypothesis using actual supplied evidence. Future events are hypotheses, not false observations. Source URLs alone do not prove contents. A coherent mechanism does not imply a likely outcome.","criteria":super::gap_criteria()})
         }
@@ -97,7 +98,23 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
         }
         _ => return Err("Unsupported semantic function".into()),
     };
-    let request = json!({"model":MODEL,"state":{"world":snapshot["world"],"node":digest(node),"prerequisites":prerequisites,"comparisons":comparisons,"assessment":program["results"][id],"evaluations":program["evaluations"][id]},"questions":{"result":question}});
+    let is_world = field(node,"kind") == "world";
+    let mut counter_hypotheses = vec![];
+    let mut evidence = vec![];
+    if is_world {
+        for id in node["counter_ids"].as_array().ok_or("Missing world counters")? {
+            let target=id.as_str().ok_or("Invalid counter identity")?;
+            let counter=nodes.iter().find(|n|field(n,"Id")==target).ok_or("Missing counter hypothesis")?;
+            counter_hypotheses.push(json!({"node":digest(counter),"assessment":program["results"][target]}));
+        }
+        // Supply actual source claims, including provenance and quoted excerpts,
+        // rather than treating component likelihoods as evidence for a joint event.
+        evidence=nodes.iter().filter(|n|field(n,"kind")=="evidence").map(digest).collect();
+        if task["function"] == "estimate_likelihood" {
+            question["instructions"]=json!("Estimate the probability of the WHOLE JOINT WORLD defined by state.node.statement AND ALL its defining component events in state.prerequisites, within the world horizon. Every defining component must occur for this joint world to occur. Evaluate causal interactions, correlations, shared assumptions, supplied source evidence, baseline unknowns, and counter hypotheses. Component estimates are context only: never average, multiply, inherit, or substitute them for a fresh assessment of the joint world. Counter hypotheses are contrary context, not required events. This is event likelihood, not narrative coherence or confidence. Worlds may overlap and need not sum to one.");
+        }
+    }
+    let request = json!({"model":MODEL,"state":{"world":snapshot["world"],"node":digest(node),"prerequisites":prerequisites,"counter_hypotheses":counter_hypotheses,"source_evidence":evidence,"baseline":program["baseline"],"comparisons":comparisons,"assessment":program["results"][id],"evaluations":program["evaluations"][id]},"questions":{"result":question}});
     if request.to_string().len() > 128 * 1024 {
         return Err("Semantic request exceeds 128 KB".into());
     }

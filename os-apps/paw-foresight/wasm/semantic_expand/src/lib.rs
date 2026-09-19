@@ -84,7 +84,7 @@ fn expand(
         return Err("Frozen world cannot add fresh research".into());
     }
     let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
-    if nodes.len() + hypotheses.len() + reports.len() > core::MAX_NODES {
+    if nodes.len() + hypotheses.len() + reports.len() > core::MAX_NODES - 6 {
         return Err("Node budget exceeded".into());
     }
     let mut known: std::collections::BTreeSet<String> = nodes
@@ -212,6 +212,200 @@ fn expand(
     Ok(())
 }
 
+fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value, String> {
+    let mut generated = generated.clone();
+    references::References::new(snapshot)?.resolve_generated(&mut generated);
+    let baseline = &generated["baseline"];
+    outlook::validate_baseline(baseline, snapshot)?;
+    let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
+    let by_id: std::collections::BTreeMap<_, _> =
+        nodes.iter().map(|n| (core::field(n, "Id"), n)).collect();
+    let worlds = generated["worlds"]
+        .as_array()
+        .filter(|w| (2..=6).contains(&w.len()))
+        .ok_or("Compose two to six worlds")?;
+    if nodes.len() + worlds.len() > core::MAX_NODES {
+        return Err("World composition exceeds node budget".into());
+    }
+    let mut added = vec![];
+    let mut identities = std::collections::BTreeSet::new();
+    for world in worlds {
+        let local = identifier(&world["id"])?;
+        if local.starts_with(references::PREFIX) {
+            return Err("Reserved world identity".into());
+        }
+        let id = format!("world-{local}");
+        if by_id.contains_key(id.as_str()) || !identities.insert(id.clone()) {
+            return Err("Duplicate world identity".into());
+        }
+        for (key, max) in [
+            ("title", 100),
+            ("statement", 1000),
+            ("mechanism", 1200),
+            ("scene", 600),
+            ("narrative", 1200),
+        ] {
+            bounded_text(&world[key], max)?;
+        }
+        for key in ["signals", "falsifiers"] {
+            bounded_texts(&world[key], 1, 8, 240)?;
+        }
+        bounded_texts(&world["what_you_can_do"], 0, 4, 240)?;
+        let mut components = std::collections::BTreeSet::new();
+        for reference in world["component_ids"]
+            .as_array()
+            .ok_or("Missing world components")?
+        {
+            let reference = reference.as_str().ok_or("Invalid world component")?;
+            if by_id
+                .get(reference)
+                .is_none_or(|n| !matches!(core::field(n, "kind"), "scenario" | "revision"))
+                || !components.insert(reference)
+            {
+                return Err("World components must be distinct existing hypotheses".into());
+            }
+        }
+        if components.len() < 2 || components.len() > 12 {
+            return Err("World needs two to twelve defining components".into());
+        }
+        let counters = world["counter_ids"]
+            .as_array()
+            .ok_or("Missing world counter hypotheses")?;
+        if counters.len() > 12
+            || counters.iter().any(|id| {
+                by_id
+                    .get(id.as_str().unwrap_or(""))
+                    .is_none_or(|n| !matches!(core::field(n, "kind"), "scenario" | "revision"))
+            })
+        {
+            return Err("Unknown counter hypothesis".into());
+        }
+        let mut node = world.clone();
+        node.as_object_mut().ok_or("Invalid world")?.remove("id");
+        node["Id"] = json!(id);
+        node["kind"] = json!("world");
+        node["Status"] = json!("Hypothesis");
+        node["provenance"] = json!("composed_world_hypothesis");
+        node["edges"] = json!(
+            components
+                .iter()
+                .map(|id| json!({"kind":"requires","to_id":id}))
+                .collect::<Vec<_>>()
+                .pipe_json()
+        );
+        added.push(node);
+    }
+    let mut updated = snapshot.clone();
+    updated["nodes"].as_array_mut().unwrap().extend(added);
+    let mut program = core::plan(updated["nodes"].as_array().unwrap())?;
+    for key in ["results", "evaluations", "round", "rounds", "last_error"] {
+        if !old[key].is_null() {
+            program[key] = old[key].clone();
+        }
+    }
+    program["tasks"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|t| identities.contains(core::field(t, "nodeId")));
+    program["stage"] = json!("worlds");
+    program["baseline"] = baseline.clone();
+    program["continue_exploring"] = json!(false);
+    program["exploration_stop_reason"] = old["stop_reason"].clone();
+    // A provider/trace failure cannot be repaired by asking again within this run.
+    if matches!(
+        old["stop_reason"].as_str(),
+        Some("provider_error" | "trace_budget")
+    ) {
+        program["stop_reason"] = old["stop_reason"].clone();
+    }
+    *snapshot = updated;
+    Ok(program)
+}
+trait JsonEncode {
+    fn pipe_json(self) -> String;
+}
+impl JsonEncode for Vec<Value> {
+    fn pipe_json(self) -> String {
+        serde_json::to_string(&self).unwrap()
+    }
+}
+fn bounded_text(value: &Value, max: usize) -> Result<(), String> {
+    value
+        .as_str()
+        .filter(|s| !s.trim().is_empty() && s.chars().count() <= max)
+        .map(|_| ())
+        .ok_or("Missing or oversized world text".into())
+}
+fn bounded_texts(value: &Value, min: usize, max: usize, chars: usize) -> Result<(), String> {
+    let values = value
+        .as_array()
+        .filter(|v| (min..=max).contains(&v.len()))
+        .ok_or("Invalid world text list")?;
+    for value in values {
+        bounded_text(value, chars)?;
+    }
+    Ok(())
+}
+fn attach_world_probabilities(
+    answer: &mut Value,
+    program: &Value,
+    snapshot: &Value,
+) -> Result<(), String> {
+    if answer["schema"] != "foresight-worlds-v3" {
+        return Err("World runs require world outlook v3".into());
+    }
+    let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
+    let mut evaluated = 0;
+    let outcomes = answer["outcomes"].as_array_mut().ok_or("Missing worlds")?;
+    let count = outcomes.len();
+    for outcome in outcomes {
+        let id = outcome["world_id"]
+            .as_str()
+            .ok_or("Missing world identity")?;
+        let node = nodes
+            .iter()
+            .find(|n| core::field(n, "Id") == id && n["kind"] == "world")
+            .ok_or("Outcome must reference a composed world")?;
+        let raw = &program["results"][id]["estimate_likelihood"];
+        let probability = if raw.is_null() {
+            None
+        } else {
+            Some(
+                raw.as_str()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .filter(|p| p.is_finite() && (0.0..=1.0).contains(p))
+                    .ok_or("Invalid world likelihood")?,
+            )
+        };
+        if probability.is_some() {
+            evaluated += 1;
+        }
+        outcome["probability"] = json!(probability);
+        for key in ["component_ids", "counter_ids"] {
+            outcome[key] = node[key].clone();
+        }
+        outcome["definition"] = node["statement"].clone();
+    }
+    answer["baseline"] = program["baseline"].clone();
+    answer["evaluation_status"] = json!(if evaluated == count && count > 0 {
+        "evaluated"
+    } else if evaluated > 0 {
+        "partial"
+    } else {
+        "unavailable"
+    });
+    answer["probability_basis"] = json!("model_implied_world_estimate");
+    answer["probability_model"] = json!("overlapping_worlds");
+    answer["calibrated"] = json!(false);
+    answer["evaluation_note"] = json!(format!(
+        "{evaluated}/{count} whole worlds received fresh Jev likelihood estimates. Exploration stop: {}. Evaluation stop: {}. {}",
+        core::field(program, "exploration_stop_reason"),
+        core::field(program, "stop_reason"),
+        core::field(program, "last_error")
+    ));
+    Ok(())
+}
+
 fn attach_probabilities(answer: &mut Value, program: &Value) -> Result<(), String> {
     if answer["schema"] != "foresight-outlook-v2" {
         return Err("New runs require open outlook v2".into());
@@ -276,10 +470,15 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
     if phase == "synthesize" {
         let mut answer = core::parse(raw)?;
         references::References::new(&snapshot)?.resolve_generated(&mut answer);
-        attach_probabilities(
-            &mut answer,
-            &core::parse(core::field(&ctx.entity_state, "program_json"))?,
-        )?;
+        let program = core::parse(core::field(&ctx.entity_state, "program_json"))?;
+        if program["stage"] == "worlds" || answer["schema"] == "foresight-worlds-v3" {
+            attach_world_probabilities(&mut answer, &program, &snapshot)?;
+        } else {
+            if program["stage"] == "exploration" {
+                return Err("Compose whole worlds before synthesis".into());
+            }
+            attach_probabilities(&mut answer, &program)?;
+        }
         outlook::validate(&answer, &snapshot)?;
         set_success_result(
             "Complete",
@@ -290,13 +489,22 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
     let old = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let generated = core::parse(raw)?;
     let before = snapshot["nodes"].as_array().ok_or("Missing nodes")?.len();
-    expand(&mut snapshot, &generated, phase, &old)?;
+    let composed = if phase == "compose" {
+        Some(compose(&mut snapshot, &generated, &old)?)
+    } else {
+        expand(&mut snapshot, &generated, phase, &old)?;
+        None
+    };
     let nodes = snapshot["nodes"].as_array_mut().ok_or("Missing nodes")?;
     for node in nodes.iter_mut().skip(before) {
         node["source_session_id"] = json!(core::field(&ctx.entity_state, "reasoning_session_id"));
     }
     let added = nodes.len() - before;
-    let program = replan(&snapshot, &old, &generated, added)?;
+    let program = if let Some(program) = composed {
+        program
+    } else {
+        replan(&snapshot, &old, &generated, added)?
+    };
     set_success_result(
         "Expanded",
         &json!({"snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"started_at_ms":core::field(&ctx.entity_state,"started_at_ms")}),
@@ -314,6 +522,80 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn world_fixture() -> (Value, Value, Value) {
+        let snapshot = json!({"world":{"last_ingest_date":"2026-09-19","target_date":"2027-09-19"},"nodes":[{"Id":"e","kind":"evidence","statement":"Observed baseline","edges":"[]"},{"Id":"a","kind":"scenario","statement":"Component A","edges":"[]"},{"Id":"b","kind":"revision","statement":"Component B","edges":"[]"},{"Id":"c","kind":"scenario","statement":"Counter C","edges":"[]"}]});
+        let world = json!({"id":"one","title":"A whole world","statement":"A and B occur jointly","mechanism":"A enables B","component_ids":["ref_0002","ref_0003"],"counter_ids":["ref_0004"],"scene":"An imagined day","narrative":"A causes B but C may prevent it","what_you_can_do":[],"signals":["Observe A"],"falsifiers":["Observe C"]});
+        let mut second = world.clone();
+        second["id"] = json!("two");
+        let generated = json!({"baseline":{"as_of":"2026-09-19","observed":[{"claim":"Observed baseline","evidence_ids":["ref_0001"]}],"assumptions":[],"unknowns":[]},"worlds":[world,second]});
+        let program = json!({"results":{"a":{"estimate_likelihood":"0.9"},"b":{"estimate_likelihood":"0.8"}},"evaluations":{},"rounds":[],"round":6,"stop_reason":"exploration_converged"});
+        (snapshot, generated, program)
+    }
+    #[test]
+    fn worlds_are_evaluated_fresh_and_never_inherit_component_probabilities() {
+        let (mut snapshot, generated, old) = world_fixture();
+        let mut program = compose(&mut snapshot, &generated, &old).unwrap();
+        assert_eq!(program["tasks"].as_array().unwrap().len(), 4);
+        assert!(
+            program["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|t| core::field(t, "nodeId").starts_with("world-"))
+        );
+        assert!(program["results"]["world-one"].is_null());
+        let request = core::request(&snapshot, &program).unwrap();
+        assert_eq!(request["state"]["counter_hypotheses"][0]["node"]["Id"], "c");
+        assert_eq!(request["state"]["source_evidence"][0]["Id"], "e");
+        program["cursor"] = json!(1);
+        let request = core::request(&snapshot, &program).unwrap();
+        assert!(
+            request["questions"]["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("never average, multiply, inherit")
+        );
+        let mut answer = json!({"schema":"foresight-worlds-v3","outcomes":[{"world_id":"world-one","probability":0.99},{"world_id":"world-two","probability":0.88}]});
+        attach_world_probabilities(&mut answer, &program, &snapshot).unwrap();
+        assert!(answer["outcomes"][0]["probability"].is_null());
+        assert_eq!(answer["evaluation_status"], "unavailable");
+        program["results"]["world-one"] = json!({"estimate_likelihood":"0.23"});
+        attach_world_probabilities(&mut answer, &program, &snapshot).unwrap();
+        assert_eq!(answer["outcomes"][0]["probability"], 0.23);
+        assert_eq!(answer["evaluation_status"], "partial");
+        assert_eq!(answer["outcomes"][0]["definition"], "A and B occur jointly");
+        assert_eq!(answer["outcomes"][0]["component_ids"], json!(["a", "b"]));
+        assert_eq!(
+            answer["baseline"]["observed"][0]["evidence_ids"],
+            json!(["e"])
+        );
+        answer["outcomes"][0]["world_id"] = json!("a");
+        assert!(attach_world_probabilities(&mut answer, &program, &snapshot).is_err());
+    }
+    #[test]
+    fn composition_rejects_hypothetical_observations_and_unknown_components_atomically() {
+        let (snapshot, generated, old) = world_fixture();
+        for (key, value) in [
+            ("component_ids", json!(["ref_0002", "invented"])),
+            ("component_ids", json!(["ref_0002", "ref_0002"])),
+            ("counter_ids", json!(["ref_0001"])),
+        ] {
+            let mut bad = generated.clone();
+            bad["worlds"][0][key] = value;
+            let mut candidate = snapshot.clone();
+            assert!(compose(&mut candidate, &bad, &old).is_err());
+            assert_eq!(candidate, snapshot);
+        }
+        let mut bad = generated.clone();
+        bad["baseline"]["observed"][0]["evidence_ids"] = json!(["ref_0002"]);
+        assert!(compose(&mut snapshot.clone(), &bad, &old).is_err());
+        let mut stopped = old.clone();
+        stopped["stop_reason"] = json!("provider_error");
+        assert_eq!(
+            compose(&mut snapshot.clone(), &generated, &stopped).unwrap()["stop_reason"],
+            "provider_error"
+        );
+    }
     fn batch(id: &str) -> Value {
         json!({"hypotheses":[{"id":id,"statement":"A distinct hypothetical event","requires":["e"]}],"research_evidence":[],"continue_exploring":true,"exploration_note":"Explore another mechanism"})
     }

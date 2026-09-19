@@ -68,7 +68,7 @@ impl References {
                         | "parent"
                         | "hypothesis_id"
                         | "scenario_ids"
-                        | "requires"
+                        | "requires" | "world_id" | "component_ids" | "counter_ids" | "evidence_ids"
                 ) =>
             {
                 json!(self.forward.get(text).unwrap_or(text))
@@ -76,7 +76,16 @@ impl References {
             _ => value.clone(),
         }
     }
+    fn resolve_world_fields(&self, value: &mut Value, field: &str) {
+        match value {
+            Value::Object(map) => for (key, value) in map { self.resolve_world_fields(value, key); },
+            Value::Array(values) => for value in values { self.resolve_world_fields(value, field); },
+            Value::String(text) if matches!(field, "world_id" | "component_ids" | "counter_ids" | "evidence_ids") => *text = self.resolve(text),
+            _ => (),
+        }
+    }
     pub fn resolve_generated(&self, generated: &mut Value) {
+        self.resolve_world_fields(generated, "");
         if let Some(hypotheses) = generated["hypotheses"].as_array_mut() {
             for hypothesis in hypotheses {
                 if let Some(parent) = hypothesis["parent"].as_str() {

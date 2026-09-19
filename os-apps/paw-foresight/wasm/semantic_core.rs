@@ -7,6 +7,14 @@ pub const MAX_NODES: usize = 2048;
 pub const MAX_MS: u64 = 3_600_000;
 pub const MAX_TRACE_BYTES: usize = 24 * 1024 * 1024;
 pub const MAX_ROUNDS: u64 = 64;
+pub const WORLD_CALL_RESERVE: usize = 32;
+pub const WORLD_TIME_RESERVE_MS: u64 = 600_000;
+pub fn call_limit(program: &Value) -> usize {
+    if program["stage"] == "worlds" { MAX_CALLS } else { MAX_CALLS - WORLD_CALL_RESERVE }
+}
+pub fn time_limit(program: &Value) -> u64 {
+    if program["stage"] == "worlds" { MAX_MS } else { MAX_MS - WORLD_TIME_RESERVE_MS }
+}
 pub mod evaluation {
     include!("semantic_evaluation.rs");
 }
@@ -83,7 +91,9 @@ pub fn plan(nodes: &[Value]) -> Result<Value, String> {
             .unwrap_or(0);
         depths.insert(id.clone(), depth);
         let hypothesis = matches!(field(by_id[&id], "kind"), "scenario" | "revision");
-        let functions: &[&str] = if hypothesis {
+        let functions: &[&str] = if field(by_id[&id], "kind") == "world" {
+            &["classify_gap", "estimate_likelihood"]
+        } else if hypothesis {
             &[
                 "classify_gap",
                 "estimate_likelihood",
@@ -111,7 +121,7 @@ pub fn plan(nodes: &[Value]) -> Result<Value, String> {
         issues.push(json!({"nodeId":id,"result":"cycle_or_cyclic_prerequisite"}));
     }
     Ok(
-        json!({"schema":"foresight-open-semantic-v2","cursor":0,"tasks":tasks,"issues":issues,"results":{},"evaluations":{},"round":0,"rounds":[],"continue_exploring":true,"max_calls":MAX_CALLS,"max_nodes":MAX_NODES,"time_budget_ms":MAX_MS}),
+        json!({"schema":"foresight-open-semantic-v2","stage":"exploration","cursor":0,"tasks":tasks,"issues":issues,"results":{},"evaluations":{},"round":0,"rounds":[],"continue_exploring":true,"max_calls":MAX_CALLS,"max_nodes":MAX_NODES,"time_budget_ms":MAX_MS}),
     )
 }
 pub fn gap_criteria() -> Value {

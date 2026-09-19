@@ -20,7 +20,7 @@ fn call(ctx: &Context) -> Result<(), String> {
         if cursor >= p["tasks"].as_array().ok_or("Missing tasks")?.len() {
             break;
         }
-        if trace.as_array().ok_or("Missing trace")?.len() >= core::MAX_CALLS {
+        if trace.as_array().ok_or("Missing trace")?.len() >= core::call_limit(&p) {
             p["stop_reason"] = json!("call_budget");
             break;
         }
@@ -30,7 +30,7 @@ fn call(ctx: &Context) -> Result<(), String> {
             break;
         }
         if let Ok(started) = core::field(&ctx.entity_state, "started_at_ms").parse::<u64>() {
-            if (Context::get_time_millis() as u64).saturating_sub(started) >= core::MAX_MS {
+            if (Context::get_time_millis() as u64).saturating_sub(started) >= core::time_limit(&p) {
                 p["stop_reason"] = json!("time_budget");
                 break;
             }

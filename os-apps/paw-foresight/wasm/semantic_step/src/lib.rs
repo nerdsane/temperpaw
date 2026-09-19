@@ -2,29 +2,6 @@ use temper_wasm_sdk::prelude::*;
 mod core {
     include!("../../semantic_core.rs");
 }
-fn provider_failure_without_estimates(program: &Value) -> Option<String> {
-    if program["stop_reason"] != "provider_error" {
-        return None;
-    }
-    let has_estimate = program["results"].as_object().is_some_and(|nodes| {
-        nodes.values().any(|result| {
-            result["estimate_likelihood"]
-                .as_str()
-                .and_then(|raw| raw.parse::<f64>().ok())
-                .is_some_and(|p| p.is_finite() && (0.0..=1.0).contains(&p))
-        })
-    });
-    if has_estimate {
-        return None;
-    }
-    Some(
-        program["last_error"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or("Semantic provider failed before producing an event estimate")
-            .to_owned(),
-    )
-}
 fn next_phase(
     snapshot: &Value,
     program: &mut Value,
@@ -36,23 +13,35 @@ fn next_phase(
         Some("trace_budget" | "provider_error" | "time_budget")
     ) {
         program["stop_reason"].as_str().unwrap().to_owned()
-    } else if trace_len >= core::MAX_CALLS {
+    } else if trace_len >= core::call_limit(program) {
         "call_budget".into()
-    } else if elapsed_ms >= core::MAX_MS {
+    } else if elapsed_ms >= core::time_limit(program) {
         "time_budget".into()
-    } else if program["round"].as_u64().unwrap_or(0) >= core::MAX_ROUNDS {
+    } else if program["stage"] != "worlds"
+        && program["round"].as_u64().unwrap_or(0) >= core::MAX_ROUNDS
+    {
         "round_budget".into()
-    } else if snapshot["nodes"].as_array().map_or(0, Vec::len) >= core::MAX_NODES {
+    } else if program["stage"] != "worlds"
+        && snapshot["nodes"].as_array().map_or(0, Vec::len) >= core::MAX_NODES - 6
+    {
         "node_budget".into()
     } else {
         String::new()
     };
+    if program["stage"] == "worlds" {
+        program["stop_reason"] = json!(if exhausted.is_empty() {
+            "worlds_evaluated"
+        } else {
+            &exhausted
+        });
+        return "synthesize";
+    }
     if !exhausted.is_empty() {
         program["stop_reason"] = json!(exhausted);
-        "synthesize"
+        "compose"
     } else if program["continue_exploring"] == false {
         program["stop_reason"] = json!("exploration_converged");
-        "synthesize"
+        "compose"
     } else {
         program["stop_reason"] = json!("round_evaluated");
         "explore"
@@ -61,9 +50,6 @@ fn next_phase(
 fn step(ctx: &Context) -> Result<(), String> {
     let mut program = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let trace = core::parse(core::field(&ctx.entity_state, "trace_json"))?;
-    if let Some(error) = provider_failure_without_estimates(&program) {
-        return Err(error);
-    }
 
     let cursor = program["cursor"].as_u64().ok_or("Missing cursor")? as usize;
     let started = core::field(&ctx.entity_state, "started_at_ms")
@@ -77,7 +63,11 @@ fn step(ctx: &Context) -> Result<(), String> {
         Some("trace_budget" | "provider_error" | "time_budget" | "call_budget")
     );
     let snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
-    if cursor >= count || calls >= core::MAX_CALLS || elapsed >= core::MAX_MS || stopped {
+    if cursor >= count
+        || calls >= core::call_limit(&program)
+        || elapsed >= core::time_limit(&program)
+        || stopped
+    {
         program["remaining_calls"] = json!(core::MAX_CALLS.saturating_sub(calls));
         program["remaining_round_tasks"] = json!(count.saturating_sub(cursor));
         let phase = next_phase(&snapshot, &mut program, calls, elapsed);
@@ -113,31 +103,32 @@ mod tests {
     fn operational_budget_stops_without_claiming_convergence() {
         let s = json!({"nodes":[]});
         let mut p = json!({"continue_exploring":true});
-        assert_eq!(next_phase(&s, &mut p, 5000, 1), "synthesize");
+        assert_eq!(next_phase(&s, &mut p, 5000, 1), "compose");
         assert_eq!(p["stop_reason"], "call_budget");
     }
     #[test]
     fn generator_can_conclude_without_filling_a_fixed_number() {
         let s = json!({"nodes":[]});
         let mut p = json!({"continue_exploring":false});
-        assert_eq!(next_phase(&s, &mut p, 213, 1000), "synthesize");
+        assert_eq!(next_phase(&s, &mut p, 213, 1000), "compose");
         assert_eq!(p["stop_reason"], "exploration_converged");
     }
     #[test]
-    fn provider_failure_without_event_estimates_preserves_original_error() {
-        let mut p = json!({"stop_reason":"provider_error","last_error":"Semantic provider HTTP 402","results":{"e":{"classify_gap":"none"}}});
-        assert_eq!(
-            provider_failure_without_estimates(&p).as_deref(),
-            Some("Semantic provider HTTP 402")
-        );
-        for invalid in ["NaN", "1.1", "not-a-probability"] {
-            p["results"]["h"] = json!({"estimate_likelihood":invalid});
-            assert!(provider_failure_without_estimates(&p).is_some());
+    fn reserves_calls_and_time_for_world_evaluation() {
+        let snapshot = json!({"nodes":[]});
+        for (calls, time) in [(core::MAX_CALLS - 32, 0), (0, core::MAX_MS - 600_000)] {
+            let mut program = json!({"stage":"exploration","continue_exploring":true});
+            assert_eq!(next_phase(&snapshot, &mut program, calls, time), "compose");
         }
-        for probability in ["0", "0.37", "1"] {
-            p["results"]["h"] = json!({"estimate_likelihood":probability});
-            assert!(provider_failure_without_estimates(&p).is_none());
-            assert_eq!(next_phase(&json!({"nodes":[]}), &mut p, 1, 0), "synthesize");
-        }
+        let program = json!({"stage":"worlds"});
+        assert_eq!(core::call_limit(&program), core::MAX_CALLS);
+        assert_eq!(core::time_limit(&program), core::MAX_MS);
+    }
+    #[test]
+    fn provider_failure_composes_qualitative_worlds_without_retrying_provider() {
+        let mut p = json!({"stop_reason":"provider_error","results":{}});
+        assert_eq!(next_phase(&json!({"nodes":[]}), &mut p, 1, 0), "compose");
+        p["stage"] = json!("worlds");
+        assert_eq!(next_phase(&json!({"nodes":[]}), &mut p, 1, 0), "synthesize");
     }
 }

@@ -131,30 +131,36 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         .filter(|n| *n > 0 && *n <= now_ms)
         .ok_or("Invalid resume start time")?;
     let phase = core::field(record, "phase");
-    if !matches!(phase, "seed" | "explore" | "synthesize") {
+    if !matches!(phase, "seed" | "explore" | "compose" | "synthesize") {
         return Err("Invalid resume phase".into());
     }
-    let evaluated = nodes.iter().any(|n| {
-        matches!(core::field(n, "kind"), "scenario" | "revision")
-            && program["results"][core::field(n, "Id")]["estimate_likelihood"]
-                .as_str()
-                .and_then(|v| v.parse::<f64>().ok())
-                .is_some_and(|v| v.is_finite() && (0.0..=1.0).contains(&v))
-    });
+    let has_worlds = nodes.iter().any(|n| core::field(n, "kind") == "world");
+    let has_hypotheses = nodes
+        .iter()
+        .filter(|n| matches!(core::field(n, "kind"), "scenario" | "revision"))
+        .count()
+        >= 2;
     let exhausted = now_ms - started >= core::MAX_MS
         || traces.len() >= core::MAX_CALLS
         || nodes.len() >= core::MAX_NODES
         || program["round"].as_u64().unwrap_or(0) >= core::MAX_ROUNDS;
-    let phase = if exhausted {
-        if !evaluated {
-            return Err("Exhausted checkpoint has no evaluated hypothesis to synthesize".into());
+    let phase = if phase == "synthesize" && !has_worlds && has_hypotheses {
+        "compose"
+    } else if exhausted {
+        if has_worlds {
+            "synthesize"
+        } else if has_hypotheses {
+            "compose"
+        } else {
+            return Err(
+                "Exhausted checkpoint has insufficient hypotheses to compose worlds".into(),
+            );
         }
-        "synthesize"
     } else {
         phase
     };
-    if phase == "synthesize" && !evaluated {
-        return Err("Resume synthesis needs an evaluated hypothesis".into());
+    if phase == "synthesize" && !has_worlds && !has_hypotheses {
+        return Err("Resume synthesis needs persisted hypotheses".into());
     }
     let agent_id = core::field(record, "agent_id");
     let model = core::field(record, "model");
@@ -198,7 +204,10 @@ fn resume_transition(prepared: &Value) -> Result<&'static str, String> {
         .ok_or("Missing resume tasks")?
         .len() as u64;
     Ok(
-        if core::field(prepared, "phase") != "synthesize" && cursor < count {
+        if core::field(prepared, "phase") != "synthesize"
+            && (core::field(prepared, "phase") != "compose" || program["stage"] == "worlds")
+            && cursor < count
+        {
             "ResumePrepared"
         } else {
             "Prepared"
@@ -361,16 +370,42 @@ mod tests {
     }
 
     #[test]
-    fn elapsed_budget_synthesizes_only_actual_evaluated_hypotheses() {
-        let record = checkpoint();
+    fn interrupted_world_evaluation_resumes_tasks_instead_of_recomposing() {
+        let prepared = json!({"phase":"compose","program_json":json!({"stage":"worlds","cursor":1,"tasks":[{},{}]}).to_string()});
+        assert_eq!(resume_transition(&prepared).unwrap(), "ResumePrepared");
+        let qualitative = json!({"phase":"compose","program_json":json!({"stage":"exploration","cursor":1,"tasks":[{},{}]}).to_string()});
+        assert_eq!(resume_transition(&qualitative).unwrap(), "Prepared");
+    }
+    #[test]
+    fn elapsed_budget_composes_drafts_without_component_estimates() {
+        let mut record = checkpoint();
+        let mut snapshot = core::parse(record["snapshot_json"].as_str().unwrap()).unwrap();
+        snapshot["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Id":"h2","kind":"scenario","statement":"Second future","edges":"[]"}));
+        record["snapshot_json"] = json!(snapshot.to_string());
+        let mut program = core::parse(record["program_json"].as_str().unwrap()).unwrap();
+        program["results"] = json!({});
+        record["program_json"] = json!(program.to_string());
+        record["phase"] = json!("synthesize");
+        assert_eq!(
+            resume_checkpoint(&record, "w", 2000).unwrap()["phase"],
+            "compose"
+        );
         let prepared = resume_checkpoint(&record, "w", 1000 + core::MAX_MS).unwrap();
-        assert_eq!(prepared["phase"], "synthesize");
+        assert_eq!(prepared["phase"], "compose");
         assert_eq!(prepared["started_at_ms"], "1000");
-        let mut bad = record.clone();
-        let mut p: Value = serde_json::from_str(record["program_json"].as_str().unwrap()).unwrap();
-        p["results"] = json!({});
-        bad["program_json"] = json!(p.to_string());
-        assert!(resume_checkpoint(&bad, "w", 1000 + core::MAX_MS).is_err());
+        assert_eq!(resume_transition(&prepared).unwrap(), "Prepared");
+        snapshot["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Id":"w1","kind":"world","edges":"[]"}));
+        record["snapshot_json"] = json!(snapshot.to_string());
+        assert_eq!(
+            resume_checkpoint(&record, "w", 1000 + core::MAX_MS).unwrap()["phase"],
+            "synthesize"
+        );
     }
     #[test]
     #[ignore = "Requires explicit local saved checkpoint fixture"]
