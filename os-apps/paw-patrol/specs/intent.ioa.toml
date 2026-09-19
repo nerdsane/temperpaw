@@ -76,17 +76,12 @@ name = "branch"
 type = "string"
 initial = ""
 
-# Git path to committed intent.md (docs/efforts/<issue>/intent.md). Copied to
-# the Effort at birth. Not a Temper File id.
+# Optional intent document link, copied to the Effort at birth.
 [[state]]
 name = "intent_ref"
 type = "string"
 initial = ""
 
-[[state]]
-name = "intent_file_ready"
-type = "bool"
-initial = "false"
 
 [[action]]
 name = "Submit"
@@ -109,36 +104,16 @@ kind = "input"
 from = ["Submitted"]
 to = "Triaged"
 params = ["triage_summary", "task_summary", "task_detail", "risk_lane", "repo", "branch", "intent_ref"]
-hint = "Record Patrol triage, the execution seed (task, risk, repo/branch), and the committed intent.md git path before accepting."
+hint = "Record Patrol triage, the execution seed (task, risk, repo/branch), and an optional intent document link."
 
 [[action]]
 name = "AttachIntentFile"
 kind = "input"
 from = ["Submitted", "Triaged"]
 params = ["intent_ref"]
-effect = "set intent_file_ready true"
-hint = "Name the git path docs/efforts/<issue>/intent.md. chain_github_ready retracts if that path is not on GitHub."
+hint = "Optionally link an intent document; existence is not a workflow gate."
 
-[[action.triggers]]
-name = "intent_checks_intent_github"
-kind = "wasm"
-module = "chain_github_ready"
-on_failure = "RetractIntentFile"
 
-[action.triggers.config]
-path_field = "intent_ref"
-repo_field = "repo"
-branch_field = "branch"
-github_token = "{secret:github_token}"
-github_app_id = "{secret:github_app_id}"
-github_app_private_key = "{secret:github_app_private_key}"
-
-[[action]]
-name = "RetractIntentFile"
-kind = "input"
-from = ["Submitted", "Triaged"]
-effect = "set intent_file_ready false"
-hint = "Callback: intent.md is not on GitHub at repo/branch/path."
 
 [[action]]
 name = "Accept"
@@ -146,8 +121,7 @@ kind = "input"
 from = ["Triaged"]
 to = "Accepted"
 params = ["factory_case_id"]
-guard = "is_true intent_file_ready"
-hint = "Accept only when intent.md is on GitHub, and create the Effort."
+hint = "Optional intake: create an Effort from this request. Direct Effort creation needs no intake sequence."
 
 [[action.triggers]]
 name = "intent_accepted_creates_effort"
@@ -191,8 +165,7 @@ name = "Reopen"
 kind = "input"
 from = ["Rejected"]
 to = "Triaged"
-effect = "set intent_file_ready false"
-hint = "Return a Rejected intent to Triaged so Attach + Accept can run again. Timeouts are not a human reject. Clears intent_file_ready so Accept cannot ride a stale file check."
+hint = "Return a Rejected request to optional triage."
 
 [[state_timeout]]
 state = "Submitted"

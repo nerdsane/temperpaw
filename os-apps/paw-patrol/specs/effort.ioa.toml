@@ -1,28 +1,12 @@
+# Effort is a task record. It never authorizes a merge or starts a deployment.
+# Legacy states remain readable; Update/Reopen/Complete/Cancel migrate old rows.
 [automaton]
-# Effort - the SDLC execution unit, born at intent and carried to a verified
-# deploy. WorkCycle EXTENDED (ARN-441, stage 3 phase 4): the design chain
-# (intent -> spec -> plan) becomes gated states, and merge/deploy become states
-# the later steps put Cedar and the Deployment entity behind. Additive: WorkCycle
-# stays until the phase-3 flip. The implementer is a harness Agent: work goes
-# through Computer/Exec; this row is the record.
 name = "Effort"
-states = [
-  "Intended", "Specified", "Planned", "Building", "InReview", "Proving",
-  "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"
-]
-initial = "Intended"
+states = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+initial = "Open"
 strict_action_params = true
+allow_indefinite_states = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
 
-# Pre-attachment states (Intended/Specified/Planned) have no owner, so no lease -
-# an intent legitimately sits until someone picks it up (the Intent entity's own
-# intake timeouts cover that). Stalled/Verified/Abandoned are resting states. The
-# owned states (Building/InReview/Proving/Merged/Deploying) stay here until
-# someone is on them; no WorkerRun lease.
-allow_indefinite_states = [
-  "Intended", "Specified", "Planned", "Stalled", "Verified", "Abandoned"
-]
-
-# --- Chain reference fields: everything about effort X starts at its row -------
 [[state]]
 name = "intent_id"
 type = "string"
@@ -33,32 +17,6 @@ name = "factory_case_id"
 type = "string"
 initial = ""
 
-# review_run_ids / proof_packet_ids / ask_ids are real list fields
-# (Collection(Edm.String) in CSDL), appended one element at a time via list_append
-# on the attach actions - no JSON-blob-in-a-string for outside code to parse.
-[[state]]
-name = "review_run_ids"
-type = "list"
-initial = "[]"
-
-[[state]]
-name = "proof_packet_ids"
-type = "list"
-initial = "[]"
-
-[[state]]
-name = "ask_ids"
-type = "list"
-initial = "[]"
-
-[[state]]
-name = "deployment_id"
-type = "string"
-initial = ""
-
-# --- Design chain files (TemperFS refs) ---------------------------------------
-# intent.md is referenced at birth (seeded from the accepted Intent) so the chain
-# starts complete; spec.md/plan.md attach as the Effort advances.
 [[state]]
 name = "intent_ref"
 type = "string"
@@ -85,12 +43,6 @@ type = "string"
 initial = ""
 
 [[state]]
-name = "plan_summary"
-type = "string"
-initial = ""
-
-# --- Task + repo binding ------------------------------------------------------
-[[state]]
 name = "task_summary"
 type = "string"
 initial = ""
@@ -103,7 +55,7 @@ initial = ""
 [[state]]
 name = "risk_lane"
 type = "string"
-initial = "L0"
+initial = ""
 
 [[state]]
 name = "repo"
@@ -125,48 +77,8 @@ name = "head_sha"
 type = "string"
 initial = ""
 
-# Ship target for Merge (ARN-466). ConfigureDeploy names the image and
-# the computer. Merge then goes to Deploying and creates a TemperDeploy.
-# A kernel Effort pins TemperPaw and sets image_tag to that new tag
-# before Merge. WorkCycle / ReleaseRun is not this path.
 [[state]]
-name = "computer_id"
-type = "string"
-initial = "arni-big"
-
-[[state]]
-name = "image_tag"
-type = "string"
-initial = ""
-
-[[state]]
-name = "deploy_max_checks"
-type = "string"
-initial = "60"
-
-[[state]]
-name = "probe_id"
-type = "string"
-initial = "mcp-455-lists"
-
-[[state]]
-name = "deploy_configured"
-type = "bool"
-initial = "false"
-
-# --- Execution attachments ----------------------------------------------------
-[[state]]
-name = "reviewer_run_id"
-type = "string"
-initial = ""
-
-[[state]]
-name = "evaluation_run_id"
-type = "string"
-initial = ""
-
-[[state]]
-name = "proof_packet_id"
+name = "deployment_id"
 type = "string"
 initial = ""
 
@@ -176,562 +88,39 @@ type = "string"
 initial = ""
 
 [[state]]
-name = "error_message"
-type = "string"
-initial = ""
-
-# --- Gate markers (back the state guards; kernel guards read entity state) -----
-[[state]]
-name = "spec_written"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "plan_written"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "worker_done"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "review_passed"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "review_fix_it_clear"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "merge_risk_clear"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "evaluation_passed"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "proof_attached"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "e2e_ok"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "deploy_verified"
-type = "bool"
-initial = "false"
-
-# GitHub doors: Attach* writes a git path. chain_github_ready retracts the
-# bool if that path is not a file on repo@branch. Specify/Plan require the bool.
-# Temper Files stay on ReviewRun / ProofPacket only.
-[[state]]
-name = "spec_file_ready"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "plan_file_ready"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "decisions_file_ready"
-type = "bool"
-initial = "false"
-
-# panel_count is the human-visible attach tally. The verifier's default
-# counter bound is 2, so PassReview cannot require >= 3 in L1. panel_started
-# is the kernel door (at least one attach). Three ReviewRuns stay the rule
-# the implementer follows.
-[[state]]
-name = "panel_count"
-type = "counter"
-initial = "0"
-
-[[state]]
-name = "panel_started"
-type = "bool"
-initial = "false"
-
-# ============================ Transitions =====================================
-
-# Seed - Accept creates the Effort and fills these fields.
-[[action]]
-name = "Seed"
-kind = "input"
-from = ["Intended"]
-to = "Intended"
-params = ["intent_id", "intent_ref", "factory_case_id", "task_summary", "task_detail", "risk_lane", "repo", "branch"]
-hint = "Copy linkage, intent.md ref, task, and repo from the accepted Intent."
-
-[[action]]
-name = "AttachSpec"
-kind = "input"
-from = ["Intended"]
-to = "Intended"
-params = ["spec_ref"]
-effect = "set spec_file_ready true"
-hint = "Name the git path docs/efforts/<issue>/spec.md. chain_github_ready retracts if it is not on GitHub."
-
-[[action.triggers]]
-name = "specify_checks_spec_github"
-kind = "wasm"
-module = "chain_github_ready"
-on_failure = "RetractSpecFile"
-
-[action.triggers.config]
-path_field = "spec_ref"
-repo_field = "repo"
-branch_field = "branch"
-github_token = "{secret:github_token}"
-github_app_id = "{secret:github_app_id}"
-github_app_private_key = "{secret:github_app_private_key}"
-
-[[action]]
-name = "RetractSpecFile"
-kind = "input"
-from = ["Intended"]
-to = "Intended"
-effect = "set spec_file_ready false"
-hint = "Callback: spec.md is not on GitHub at repo/branch/path."
-
-[[action]]
-name = "Specify"
-kind = "input"
-from = ["Intended"]
-to = "Specified"
-guard = "is_true spec_file_ready"
-effect = "set spec_written true"
-hint = "Enter Specified only when spec.md is on GitHub."
-
-[[action]]
-name = "AttachPlan"
-kind = "input"
-from = ["Specified"]
-to = "Specified"
-params = ["plan_ref"]
-effect = "set plan_file_ready true"
-hint = "Name the git path docs/efforts/<issue>/plan.md. chain_github_ready retracts if it is not on GitHub."
-
-[[action.triggers]]
-name = "plan_checks_plan_github"
-kind = "wasm"
-module = "chain_github_ready"
-on_failure = "RetractPlanFile"
-
-[action.triggers.config]
-path_field = "plan_ref"
-repo_field = "repo"
-branch_field = "branch"
-github_token = "{secret:github_token}"
-github_app_id = "{secret:github_app_id}"
-github_app_private_key = "{secret:github_app_private_key}"
-
-[[action]]
-name = "RetractPlanFile"
-kind = "input"
-from = ["Specified"]
-to = "Specified"
-effect = "set plan_file_ready false"
-hint = "Callback: plan.md is not on GitHub at repo/branch/path."
-
-[[action]]
-name = "Plan"
-kind = "input"
-from = ["Specified"]
-to = "Planned"
-params = ["plan_summary"]
-guard = [
-  { type = "is_true", var = "spec_written" },
-  { type = "is_true", var = "plan_file_ready" }
-]
-effect = "set plan_written true"
-hint = "Enter Planned only when plan.md is on GitHub."
-
-[[action]]
-name = "AttachDecisions"
-kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying"]
-params = ["decisions_ref"]
-effect = "set decisions_file_ready true"
-hint = "Name the git path docs/efforts/<issue>/decisions.md. chain_github_ready retracts if it is not on GitHub."
-
-[[action.triggers]]
-name = "effort_checks_decisions_github"
-kind = "wasm"
-module = "chain_github_ready"
-on_failure = "RetractDecisionsFile"
-
-[action.triggers.config]
-path_field = "decisions_ref"
-repo_field = "repo"
-branch_field = "branch"
-github_token = "{secret:github_token}"
-github_app_id = "{secret:github_app_id}"
-github_app_private_key = "{secret:github_app_private_key}"
-
-[[action]]
-name = "RetractDecisionsFile"
-kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying"]
-effect = "set decisions_file_ready false"
-hint = "Callback: decisions.md is not on GitHub at repo/branch/path."
-
-[[action]]
-name = "LinkPmIssue"
-kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled"]
-params = ["pm_issue_id"]
-hint = "Record the Linear (paw-pm) issue that mirrors this Effort."
-
-[[action]]
-name = "StartBuild"
-kind = "input"
-from = ["Planned"]
-to = "Building"
-guard = "is_true plan_written"
-hint = "Implementer records that implementation has started."
-
-[[action]]
-name = "WorkerDone"
-kind = "input"
-from = ["Building"]
-to = "Building"
-effect = "set worker_done true"
-hint = "Implementer records that this implementation slice is done."
-
-[[action]]
-name = "SubmitForReview"
-kind = "input"
-from = ["Building"]
-to = "InReview"
-guard = "is_true worker_done"
-hint = "Submit for independent review."
-
-[[action]]
-name = "AttachReviewRun"
-kind = "input"
-from = ["InReview"]
-to = "InReview"
-params = ["reviewer_run_id", "review_run_ids"]
-effect = [
-  { type = "list_append", var = "review_run_ids" },
-  { type = "increment", var = "panel_count" },
-  { type = "set_bool", var = "panel_started", value = true },
-  { type = "set_bool", var = "review_fix_it_clear", value = false },
-  { type = "set_bool", var = "merge_risk_clear", value = false },
-  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false }
-]
-hint = "Attach one agent's ReviewRun. Clears prior review_fix_it_clear, merge_risk_clear, and review_passed so a later failing panel cannot ride an old clearance. review_run_ids appends that id."
-
-[[action]]
-name = "ReportE2e"
-kind = "input"
-from = ["InReview"]
-to = "InReview"
-params = ["e2e_summary"]
-effect = "set e2e_ok true"
-hint = "Record targeted live or end-to-end verification evidence."
-
-[[action]]
-name = "AttachAsk"
-kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Stalled"]
-params = ["ask_id", "ask_ids"]
-effect = [{ type = "list_append", var = "ask_ids" }]
-hint = "Hang an Ask on this Effort. Self-loop. Does not Stall."
-
-[[action]]
-name = "MarkFixItClear"
-kind = "input"
-from = ["InReview"]
-to = "InReview"
-effect = "set review_fix_it_clear true"
-hint = "Every attached ReviewRun has fix-it rubrics clear. If any failed, RequestChanges instead."
-
-[[action]]
-name = "MarkRiskClear"
-kind = "input"
-from = ["InReview"]
-to = "InReview"
-effect = "set merge_risk_clear true"
-hint = "No risk flags on the panel rubrics. If any flag is set, raise a do Ask with pr_url and wait for ConfirmMerge."
-
-[[action]]
-name = "PassReview"
-kind = "input"
-from = ["InReview"]
-to = "InReview"
-params = ["reviewer_run_id"]
-guard = [
-  { type = "is_true", var = "panel_started" },
-  { type = "is_true", var = "review_fix_it_clear" }
-]
-effect = "set review_passed true"
-hint = "Sets review_passed. chain_review_ready retracts unless attached ReviewRuns are Recorded and pass validate.py."
-
-[[action.triggers]]
-name = "pass_review_checks_runs"
-kind = "wasm"
-module = "chain_review_ready"
-on_failure = "RetractReviewPassed"
-
-[action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
-
-[[action]]
-name = "RetractReviewPassed"
-kind = "input"
-from = ["InReview"]
-to = "InReview"
-effect = "set review_passed false"
-hint = "Callback: attached ReviewRuns are missing, not Recorded, or fail validate.py."
-
-[[action]]
-name = "RequestChanges"
-kind = "input"
-from = ["InReview"]
-to = "Building"
-params = ["error_message"]
-effect = [
-  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false },
-  { type = "set_bool", var = "review_fix_it_clear", value = false },
-  { type = "set_bool", var = "merge_risk_clear", value = false },
-  { type = "set_bool", var = "worker_done", value = false },
-  { type = "set_bool", var = "evaluation_passed", value = false },
-  { type = "set_bool", var = "proof_attached", value = false },
-  { type = "set_bool", var = "e2e_ok", value = false },
-  { type = "set_bool", var = "panel_started", value = false }
-]
-hint = "Reviewer requests changes; implementation resumes. Clears panel_started so PassReview cannot ride the rejected panel."
-
-[[action]]
-name = "PassEvaluation"
-kind = "input"
-from = ["InReview"]
-to = "Proving"
-params = ["evaluation_run_id"]
-effect = "set evaluation_passed true"
-guard = [
-  { type = "is_true", var = "review_passed" },
-  { type = "is_true", var = "e2e_ok" }
-]
-hint = "Automated gates passed after reviewer approval and recorded E2E evidence."
-
-[[action]]
-name = "AttachProofPacket"
-kind = "input"
-from = ["Proving"]
-to = "Proving"
-params = ["proof_packet_id", "proof_packet_ids"]
-effect = [
-  { type = "set_bool", var = "proof_attached", value = true },
-  { type = "list_append", var = "proof_packet_ids" }
-]
-hint = "Attach the proof packet. chain_proof_ready retracts unless that packet is Recorded and passes validate.py."
-
-[[action.triggers]]
-name = "attach_proof_checks_packet"
-kind = "wasm"
-module = "chain_proof_ready"
-on_failure = "RetractProofAttached"
-
-[action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
-
-[[action]]
-name = "RetractProofAttached"
-kind = "input"
-from = ["Proving"]
-to = "Proving"
-effect = "set proof_attached false"
-hint = "Callback: the attached ProofPacket is missing, not Recorded, or fails validate.py."
-
-# Merge authorizes (Cedar + chain_merge_ready), then ships. deploy_configured
-# is required so Merge cannot land in Merged with MarkDeployVerified stuck
-# (that action is only from Deploying). The child is TemperDeploy — wait
-# GHCR, swap IMAGE_TAG, poll /paw/version, rollback. WorkCycle is not this
-# path. A kernel Effort (nerdsane/temper) pins TemperPaw and sets image_tag
-# to the new TemperPaw tag before Merge.
-[[action]]
-name = "ConfigureDeploy"
-kind = "input"
-from = ["Building", "InReview", "Proving", "Merged"]
-params = ["computer_id", "image_tag", "deploy_max_checks", "probe_id"]
-effect = [{ type = "set_bool", var = "deploy_configured", value = true }, { type = "set_bool", var = "resource_delivery_configured", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }, { type = "set_bool", var = "deploy_verified", value = false }, { type = "increment", var = "delivery_sequence" }]
-hint = "Name the GHCR tag, expected computer, and probe that Merge will ship through TemperDeploy. For a kernel pin, set image_tag to the TemperPaw image that carries the new kernel."
-
-[[action]]
-name = "Merge"
-kind = "input"
-from = ["Proving"]
-to = "Deploying"
-params = ["pr_number", "head_sha"]
-guard = [
-  { type = "is_true", var = "review_passed" },
-  { type = "is_true", var = "evaluation_passed" },
-  { type = "is_true", var = "proof_attached" },
-  { type = "is_true", var = "e2e_ok" },
-  { type = "is_true", var = "decisions_file_ready" },
-  { type = "is_true", var = "merge_risk_clear" },
-  { type = "is_true", var = "deploy_configured" }
-]
-hint = "Authorize merge, enter Deploying, and create a TemperDeploy. chain_merge_ready retracts to Proving unless Recorded rows pass validate.py and match head_sha."
-
-[[action.triggers]]
-name = "merge_checks_records"
-kind = "wasm"
-module = "chain_merge_ready"
-on_failure = "RetractMerge"
-
-[action.triggers.config]
-temper_api_url = "{secret:temper_api_url}"
-
-# Same shape as WorkCycle.Complete → ReleaseRun.Request. to_state Deploying
-# so a retract does not spawn a ship.
-[[action.triggers]]
-name = "effort_merged_requests_temper_deploy"
-kind = "entity"
-principal = "patrol-release-service"
-to_state = "Deploying"
-target_entity = "TemperDeploy"
-target_action = "Request"
-
-[action.triggers.guard]
-type = "bool_true"
-field = "deploy_configured"
-
-[action.triggers.params_from]
-effort_id = "Id"
-image_tag = "image_tag"
-expected_sha = "head_sha"
-max_checks = "deploy_max_checks"
-probe_id = "probe_id"
-
-[action.triggers.resolve_target]
-type = "create"
-
-[[action]]
-name = "RetractMerge"
-kind = "input"
-guard = "is_true deploy_configured"
-from = ["Deploying", "Merged"]
-to = "Proving"
-effect = [
-  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false },
-  { type = "set_bool", var = "proof_attached", value = false }
-]
-hint = "Callback: Merge head_sha does not match Recorded ReviewRuns and ProofPacket."
-
-# Retry after MarkDeployRolledBack (back to Merged). Same child as Merge.
-[[action]]
-name = "Deploy"
-kind = "input"
-from = ["Merged"]
-to = "Deploying"
-guard = "is_true deploy_configured"
-hint = "Retry ship after rollback. Creates another TemperDeploy from the configured tag."
-
-[[action.triggers]]
-name = "effort_deploy_requests_temper_deploy"
-kind = "entity"
-principal = "patrol-release-service"
-to_state = "Deploying"
-target_entity = "TemperDeploy"
-target_action = "Request"
-
-[action.triggers.guard]
-type = "bool_true"
-field = "deploy_configured"
-
-[action.triggers.params_from]
-effort_id = "Id"
-image_tag = "image_tag"
-expected_sha = "head_sha"
-max_checks = "deploy_max_checks"
-probe_id = "probe_id"
-
-[action.triggers.resolve_target]
-type = "create"
-
-[[action]]
-name = "MarkDeployVerified"
-kind = "input"
-guard = "is_true deploy_configured"
-from = ["Deploying"]
-to = "Verified"
-effect = "set deploy_verified true"
-hint = "Callback from the project deploy tool when it is Healthy."
-
-[[action]]
-name = "MarkDeployRolledBack"
-kind = "input"
-guard = "is_true deploy_configured"
-from = ["Deploying"]
-to = "Merged"
-hint = "Callback: the project deploy tool rolled production back. Retry Deploy with a new child."
-
-[[action]]
-name = "ConfirmMerge"
-kind = "input"
-from = ["Proving"]
-to = "Proving"
-effect = "set merge_risk_clear true"
-hint = "Rita answered the merge do Ask. Sets merge_risk_clear so Merge can proceed."
-
-[[action]]
-name = "Stall"
-kind = "input"
-from = ["Building", "InReview", "Proving", "Deploying", "ResourceMergeChecking", "ResourceVerifying"]
-to = "Stalled"
-params = ["error_message"]
-hint = "The agent has nothing left it can do. Attach the stall Ask first or right after. Not 'want to continue'."
-
-[[action]]
-name = "Resume"
-kind = "input"
-from = ["Stalled"]
-to = "Building"
-params = ["ask_id"]
-effect = [
-  { type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false },
-  { type = "set_bool", var = "review_fix_it_clear", value = false },
-  { type = "set_bool", var = "merge_risk_clear", value = false },
-  { type = "set_bool", var = "worker_done", value = false },
-  { type = "set_bool", var = "evaluation_passed", value = false },
-  { type = "set_bool", var = "proof_attached", value = false },
-  { type = "set_bool", var = "e2e_ok", value = false },
-  { type = "set_bool", var = "panel_started", value = false }
-]
-hint = "Rita answered the stall Ask. ask_id is that Ask. Clears the same review and proof gates as RequestChanges, plus panel_started, so Stall cannot skip a new review."
-
-[[action]]
-name = "Abandon"
-kind = "input"
-from = ["Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Stalled"]
-to = "Abandoned"
-params = ["error_message"]
-hint = "Abandon the effort - the explicit give-up terminal (distinct from recoverable Stalled)."
-
-# Resource delivery records the expected operations; resource actions perform writes.
-
-[[state]]
-name = "resource_delivery_plan"
+name = "result_summary"
 type = "string"
 initial = ""
 
 [[state]]
-name = "resource_delivery_head"
+name = "pull_request_urls"
+type = "list"
+initial = "[]"
+
+[[state]]
+name = "evidence"
+type = "list"
+initial = "[]"
+
+[[state]]
+name = "ask_ids"
+type = "list"
+initial = "[]"
+
+[[state]]
+name = "review_run_ids"
+type = "list"
+initial = "[]"
+
+[[state]]
+name = "proof_packet_ids"
+type = "list"
+initial = "[]"
+
+# Historical context remains readable; none of these fields gates new work.
+
+[[state]]
+name = "plan_summary"
 type = "string"
 initial = ""
 
@@ -741,384 +130,76 @@ type = "string"
 initial = ""
 
 [[state]]
-name = "delivery_sequence"
-type = "counter"
-initial = "0"
-
-[[state]]
-name = "resource_delivery_configured"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "resource_delivery_merged"
-type = "bool"
-initial = "false"
-
-[[action]]
-name = "ConfigureResourceDelivery"
-kind = "input"
-from = ["Building", "InReview", "Proving", "Merged"]
-params = [{ name = "resource_delivery_plan", type = "string" }, { name = "resource_delivery_head", type = "string" }]
-effect = [{ type = "increment", var = "delivery_sequence" }, { type = "set_bool", var = "deploy_configured", value = false }, { type = "set_bool", var = "resource_delivery_configured", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }, { type = "set_bool", var = "deploy_verified", value = false }]
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "resource_delivery_plan"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "resource_delivery_head"
-
-[[action.triggers]]
-name = "effort_resource_delivery_validate"
-kind = "wasm"
-module = "effort_resource_delivery_validate"
-
-[action.triggers.config]
-timeout_secs = "120"
-temper_api_url = "{secret:temper_api_url}"
-
-[[action]]
-name = "ResourceDeliveryConfigured"
-kind = "input"
-from = ["Building", "InReview", "Proving", "Merged"]
-params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }]
-effect = [{ type = "set_bool", var = "resource_delivery_configured", value = true }]
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_plan"
-field = "resource_delivery_plan"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_head"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_sequence"
-field = "delivery_sequence"
-
-[[action]]
-name = "ResourceDeliveryRejected"
-kind = "input"
-from = ["Building", "InReview", "Proving", "Merged"]
-params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "error_message", type = "string" }]
-effect = [{ type = "set_bool", var = "resource_delivery_configured", value = false }]
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_plan"
-field = "resource_delivery_plan"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_head"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_sequence"
-field = "delivery_sequence"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "error_message"
-
-[[action]]
-name = "MergeResourceDelivery"
-kind = "input"
-from = ["Proving"]
-params = [{ name = "pr_number", type = "string" }, { name = "head_sha", type = "string" }]
-to = "ResourceMergeChecking"
-effect = [{ type = "increment", var = "delivery_sequence" }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
-guard = [{ type = "is_true", var = "review_passed" }, { type = "is_true", var = "evaluation_passed" }, { type = "is_true", var = "proof_attached" }, { type = "is_true", var = "e2e_ok" }, { type = "is_true", var = "decisions_file_ready" }, { type = "is_true", var = "merge_risk_clear" }, { type = "is_true", var = "resource_delivery_configured" }]
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "head_sha"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "pr_number"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "head_sha"
-
-[[action.triggers]]
-name = "effort_resource_delivery_merge"
-kind = "wasm"
-module = "effort_resource_delivery_merge"
-
-[action.triggers.config]
-timeout_secs = "120"
-temper_api_url = "{secret:temper_api_url}"
-
-[[action]]
-name = "ResourceDeliveryMerged"
-kind = "input"
-from = ["ResourceMergeChecking"]
-params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }]
-to = "Deploying"
-effect = [{ type = "set_bool", var = "resource_delivery_merged", value = true }]
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_plan"
-field = "resource_delivery_plan"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_head"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_sequence"
-field = "delivery_sequence"
-
-[[action]]
-name = "ResourceDeliveryMergeRejected"
-kind = "input"
-from = ["ResourceMergeChecking"]
-params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "error_message", type = "string" }]
-to = "Proving"
-effect = [{ type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_plan"
-field = "resource_delivery_plan"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_head"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_sequence"
-field = "delivery_sequence"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "error_message"
-
-[[action]]
-name = "VerifyResourceDelivery"
-kind = "input"
-from = ["Deploying"]
-params = []
-to = "ResourceVerifying"
-effect = [{ type = "increment", var = "delivery_sequence" }]
-guard = [{ type = "is_true", var = "resource_delivery_merged" }]
-
-[[action.triggers]]
-name = "effort_resource_delivery_verify"
-kind = "wasm"
-module = "effort_resource_delivery_verify"
-
-[action.triggers.config]
-timeout_secs = "120"
-temper_api_url = "{secret:temper_api_url}"
-
-[[action]]
-name = "ResourceDeliveryVerified"
-kind = "input"
-from = ["ResourceVerifying"]
-params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "resource_delivery_evidence", type = "string" }]
-to = "Verified"
-effect = [{ type = "set_bool", var = "deploy_verified", value = true }]
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_plan"
-field = "resource_delivery_plan"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_head"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_sequence"
-field = "delivery_sequence"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "resource_delivery_evidence"
-
-[[action]]
-name = "ResourceDeliveryPending"
-kind = "input"
-from = ["ResourceVerifying"]
-params = [{ name = "expected_delivery_plan", type = "string" }, { name = "expected_delivery_head", type = "string" }, { name = "expected_delivery_sequence", type = "counter" }, { name = "error_message", type = "string" }]
-to = "Deploying"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_plan"
-field = "resource_delivery_plan"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_head"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "expected_delivery_sequence"
-field = "delivery_sequence"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "error_message"
-
-[[action]]
-name = "ResourceMergeTimedOut"
-kind = "input"
-from = ["ResourceMergeChecking"]
-params = []
-to = "Proving"
-effect = [{ type = "set_bool", var = "review_waived", value = false }, { type = "set_bool", var = "review_passed", value = false }, { type = "set_bool", var = "proof_attached", value = false }, { type = "set_bool", var = "resource_delivery_merged", value = false }]
-
-[[action]]
-name = "ResourceVerificationTimedOut"
-kind = "input"
-from = ["ResourceVerifying"]
-params = []
-to = "Deploying"
-
-[[state_timeout]]
-state = "ResourceMergeChecking"
-after_seconds = 300
-on_timeout = "ResourceMergeTimedOut"
-
-[[state_timeout]]
-state = "ResourceVerifying"
-after_seconds = 300
-on_timeout = "ResourceVerificationTimedOut"
-
-[[state]]
-name = "review_waived"
-type = "bool"
-initial = "false"
-
-[[state]]
-name = "review_waiver_head"
+name = "error_message"
 type = "string"
 initial = ""
 
-[[state]]
-name = "review_waiver_reason"
-type = "string"
-initial = ""
-
-
-# Owner disposition is separate from review_passed. Cedar requires approval.
 [[action]]
-name = "WaiveReview"
+name = "Seed"
 kind = "input"
-from = ["InReview", "Proving"]
-to = "InReview"
-params = ["review_waiver_head", "review_waiver_reason"]
-effect = [{ type = "set_bool", var = "review_waived", value = true }]
-hint = "Record the owner's explicit waiver for one full commit. This does not mark model review as passed."
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "review_waiver_head"
-
-[[action.constraints]]
-kind = "param_nonempty"
-param = "review_waiver_reason"
+from = ["Open"]
+params = ["intent_id", "intent_ref", "factory_case_id", "task_summary", "task_detail", "risk_lane", "repo", "branch"]
+hint = "Optional intake linkage. Direct Effort creation is also supported."
 
 [[action]]
-name = "PassWaivedEvaluation"
+name = "Update"
 kind = "input"
-from = ["InReview"]
-to = "Proving"
-params = ["evaluation_run_id"]
-guard = [{ type = "is_true", var = "review_waived" }, { type = "is_true", var = "e2e_ok" }]
-effect = "set evaluation_passed true"
-hint = "Record successful checks under an explicit owner waiver; review_passed remains unchanged."
+from = ["Open", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+to = "Open"
+params = ["task_summary", "task_detail", "repo", "branch", "intent_ref"]
+hint = "Record the objective and context. Documents are optional links."
 
 [[action]]
-name = "AuthorizeWaivedResourceDeployment"
+name = "AttachPullRequest"
 kind = "input"
-from = ["Proving"]
-to = "Merged"
-params = ["head_sha"]
-guard = [
-  { type = "is_true", var = "review_waived" },
-  { type = "is_true", var = "evaluation_passed" },
-  { type = "is_true", var = "proof_attached" },
-  { type = "is_true", var = "e2e_ok" },
-  { type = "is_true", var = "decisions_file_ready" },
-  { type = "is_true", var = "merge_risk_clear" }
-]
-hint = "Authorize a resource-owned deployment under the owner's exact-revision waiver. Does not merge Git or deploy the Temper image. Resource-specific proof remains mandatory."
+from = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+params = ["pull_request_urls"]
+effect = [{ type = "list_append", var = "pull_request_urls" }]
+hint = "Append one PR URL. Multiple PRs from the same repository are supported."
 
-[[action.constraints]]
-kind = "param_equals_field"
-param = "head_sha"
-field = "review_waiver_head"
-
-[[action.triggers]]
-name = "waived_resource_checks_records"
-kind = "wasm"
-module = "chain_merge_ready"
-on_failure = "RetractMerge"
-
-[action.triggers.config]
-owner_waiver = "true"
-temper_api_url = "{secret:temper_api_url}"
-
-# Legacy rows have no persisted counter. Saturating decrement bootstraps only zero.
 [[action]]
-name = "BootstrapDeliverySequence"
+name = "RecordEvidence"
 kind = "input"
-from = ["Building", "InReview", "Proving", "Merged"]
+from = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+params = ["evidence"]
+effect = [{ type = "list_append", var = "evidence" }]
+hint = "Append a concise result, command output, screenshot or other evidence link."
+
+[[action]]
+name = "AttachAsk"
+kind = "input"
+from = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+params = ["ask_ids"]
+effect = [{ type = "list_append", var = "ask_ids" }]
+hint = "Append one related Ask ID without blocking the effort."
+
+[[action]]
+name = "LinkPmIssue"
+kind = "input"
+from = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+params = ["pm_issue_id"]
+hint = "Optionally link an existing project issue."
+
+[[action]]
+name = "Complete"
+kind = "input"
+from = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+to = "Done"
+params = ["result_summary"]
+hint = "Record the delivered result. This does not merge, deploy or claim independent verification."
+
+[[action]]
+name = "Cancel"
+kind = "input"
+from = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+to = "Cancelled"
+params = ["result_summary"]
+hint = "Record why the task was cancelled."
+
+[[action]]
+name = "Reopen"
+kind = "input"
+from = ["Open", "Done", "Cancelled", "Intended", "Specified", "Planned", "Building", "InReview", "Proving", "Merged", "Deploying", "ResourceMergeChecking", "ResourceVerifying", "Verified", "Stalled", "Abandoned"]
+to = "Open"
 params = []
-effect = [{ type = "decrement", var = "delivery_sequence" }]
-guard = [{ type = "max_count", var = "delivery_sequence", max = 1 }]
-
-# The authorization already happened through AuthorizeWaivedResourceDeployment.
-# This action checks results; it never marks a Git merge or model review passed.
-[[action]]
-name = "VerifyWaivedResourceDelivery"
-kind = "input"
-from = ["Merged", "Deploying"]
-to = "ResourceVerifying"
-params = [{ name = "head_sha", type = "string" }]
-effect = [{ type = "increment", var = "delivery_sequence" }]
-guard = [{ type = "is_true", var = "review_waived" }, { type = "is_true", var = "resource_delivery_configured" }, { type = "is_true", var = "evaluation_passed" }, { type = "is_true", var = "proof_attached" }, { type = "is_true", var = "e2e_ok" }, { type = "is_true", var = "decisions_file_ready" }, { type = "is_true", var = "merge_risk_clear" }]
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "head_sha"
-field = "review_waiver_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "head_sha"
-field = "resource_delivery_head"
-
-[[action.constraints]]
-kind = "param_equals_field"
-param = "head_sha"
-field = "head_sha"
-
-[[action.triggers]]
-name = "effort_resource_delivery_verify"
-kind = "wasm"
-module = "effort_resource_delivery_verify"
-
-[action.triggers.config]
-timeout_secs = "120"
-temper_api_url = "{secret:temper_api_url}"
+hint = "Resume this same effort rather than creating a duplicate."

@@ -67,7 +67,7 @@ permit(
   action == Action::"http_call",
   resource is HttpEndpoint
 ) when {
-  ["patrol_request_router", "signal_router", "worker_run_lifecycle", "work_cycle_lifecycle", "finding_lifecycle", "review_gate_lifecycle", "repo_sweep_lifecycle", "daily_brief_lifecycle", "patrol_schedule_lifecycle", "patrol_run_lifecycle", "chain_file_ready", "chain_github_ready", "chain_review_ready", "chain_proof_ready", "chain_merge_ready", "temper_deploy_lifecycle", "contract_probe"].contains(context.module)
+  ["patrol_request_router", "signal_router", "worker_run_lifecycle", "work_cycle_lifecycle", "finding_lifecycle", "review_gate_lifecycle", "repo_sweep_lifecycle", "daily_brief_lifecycle", "patrol_schedule_lifecycle", "patrol_run_lifecycle", "chain_file_ready", "temper_deploy_lifecycle", "contract_probe"].contains(context.module)
 };
 
 // Manager surfaces such as OpenClaw may submit requests and route approvals, but
@@ -194,10 +194,6 @@ permit(
     resource is DailyBrief ||
     resource is PatrolSchedule
   )
-  // NB: Effort is intentionally NOT in this generic system-agent list. Effort
-  // lifecycle has its own permit below, and Effort creation is the intake
-  // service's ALONE - granting the generic `create` here was a second birth door
-  // (#491 panel round 2). The forbid below is the belt-and-suspenders guarantee.
 };
 
 permit(
@@ -567,10 +563,6 @@ permit(
   context.module == "release_run_lifecycle" ||
   context.module == "temper_deploy_lifecycle" ||
   context.module == "chain_file_ready" ||
-  context.module == "chain_github_ready" ||
-  context.module == "chain_review_ready" ||
-  context.module == "chain_proof_ready" ||
-  context.module == "chain_merge_ready" ||
   context.module == "contract_probe"
 };
 
@@ -582,10 +574,6 @@ permit(
   context.module == "release_run_lifecycle" ||
   context.module == "temper_deploy_lifecycle" ||
   context.module == "chain_file_ready" ||
-  context.module == "chain_github_ready" ||
-  context.module == "chain_review_ready" ||
-  context.module == "chain_proof_ready" ||
-  context.module == "chain_merge_ready" ||
   context.module == "contract_probe"
 };
 
@@ -748,7 +736,6 @@ permit(
     Action::"AttachSignal",
     Action::"Triage",
     Action::"AttachIntentFile",
-    Action::"RetractIntentFile",
     Action::"Accept",
     Action::"LinkPmIssue",
     Action::"Reject",
@@ -757,134 +744,11 @@ permit(
   resource is Intent
 );
 
-// Effort record - any tenant Agent (the implementer harness) may write it.
-// create/Seed stay intake-only (the Accept trigger). Merge/Deploy tighten later.
+// Agents can maintain task records directly. Records do not authorize operations.
 permit(
   principal,
-  action in [
-    Action::"AttachSpec",
-    Action::"RetractSpecFile",
-    Action::"Specify",
-    Action::"AttachPlan",
-    Action::"RetractPlanFile",
-    Action::"Plan",
-    Action::"StartBuild",
-    Action::"WorkerDone",
-    Action::"SubmitForReview",
-    Action::"AttachReviewRun",
-    Action::"AttachAsk",
-    Action::"MarkFixItClear",
-    Action::"MarkRiskClear",
-    Action::"ConfirmMerge",
-    Action::"ReportE2e",
-    Action::"PassReview",
-    Action::"RetractReviewPassed",
-    Action::"RequestChanges",
-    Action::"PassEvaluation",
-    Action::"AttachProofPacket",
-    Action::"RetractProofAttached",
-    Action::"RetractMerge",
-    Action::"AttachDecisions",
-    Action::"RetractDecisionsFile",
-    Action::"LinkPmIssue",
-    Action::"ConfigureDeploy",
-    Action::"ConfigureResourceDelivery",
-    Action::"VerifyResourceDelivery",
-    Action::"VerifyWaivedResourceDelivery",
-    Action::"BootstrapDeliverySequence",
-    Action::"Deploy",
-    Action::"Stall",
-    Action::"Resume",
-    Action::"Abandon"
-  ],
+  action in [Action::"create", Action::"Seed", Action::"Update",
+    Action::"AttachPullRequest", Action::"RecordEvidence", Action::"AttachAsk",
+    Action::"LinkPmIssue", Action::"Complete", Action::"Cancel", Action::"Reopen"],
   resource is Effort
-) when {
-  principal is Admin || principal is Agent
-};
-
-// Project deploy tools report back as patrol-release-service. Agents do not
-// mark verified or rolled back by hand. Fail (rollback did not finish) Stalls.
-permit(
-  principal,
-  action in [
-    Action::"MarkDeployVerified",
-    Action::"MarkDeployRolledBack",
-    Action::"Stall"
-  ],
-  resource is Effort
-) when {
-  principal has agent_type && principal.agent_type == "patrol-release-service"
-};
-
-// Effort.Merge: L0/L1 permit; L2+ denies and surfaces as MCP elicitation.
-permit(
-  principal is Agent,
-  action in [Action::"Merge", Action::"Effort.Merge", Action::"MergeResourceDelivery", Action::"Effort.MergeResourceDelivery"],
-  resource is Effort
-) when {
-  (resource has risk_lane && (resource.risk_lane == "L0" || resource.risk_lane == "L1")) ||
-  (resource has RiskLane && (resource.RiskLane == "L0" || resource.RiskLane == "L1"))
-};
-
-// Effort BIRTH - create + Seed ONLY via the intake service (the elevation the
-// declarative Intent.Accept -> Effort.Seed trigger runs under). No ordinary-Agent
-// create grant, mirroring the ReleaseRun / patrol-release-service pattern: an
-// Effort is born by accepting an Intent, never conjured directly.
-permit(
-  principal,
-  // Only `Seed` (the bare action name the dispatch uses - confirmed in the live
-  // drive log: temper.action "Seed", agent_type "patrol-intake-service"; the
-  // namespaced Effort.Seed hedge is dropped) plus `create`.
-  action in [
-    Action::"create",
-    Action::"Seed"
-  ],
-  resource is Effort
-) when {
-  principal has agent_type && principal.agent_type == "patrol-intake-service"
-};
-
-// Birth rule, enforced (#491 panel round 2): forbid beats permit, so this closes
-// EVERY door to Effort creation except the intake service - the Admin blanket, the
-// generic system-agent permit, a future stray permit, all of them. An Effort is
-// born ONLY by accepting an Intent (the Accept trigger runs as patrol-intake-service).
-forbid(
-  principal,
-  action in [Action::"create", Action::"Seed"],
-  resource is Effort
-) unless {
-  principal has agent_type && principal.agent_type == "patrol-intake-service"
-};
-
-// Only the WASM runtime and timers report resource-delivery gate results.
-permit(
-  principal,
-  action in [Action::"ResourceDeliveryConfigured", Action::"ResourceDeliveryRejected",
-    Action::"ResourceDeliveryMerged", Action::"ResourceDeliveryMergeRejected",
-    Action::"ResourceDeliveryVerified", Action::"ResourceDeliveryPending",
-    Action::"ResourceMergeTimedOut", Action::"ResourceVerificationTimedOut"],
-  resource is Effort
-) when {
-  principal is System || (principal has role && principal.role == "service" && principal has agent_type && ["wasm-runtime", "timeout-scheduler"].contains(principal.agent_type))
-};
-
-forbid(
-  principal,
-  action in [Action::"ResourceDeliveryConfigured", Action::"ResourceDeliveryRejected",
-    Action::"ResourceDeliveryMerged", Action::"ResourceDeliveryMergeRejected",
-    Action::"ResourceDeliveryVerified", Action::"ResourceDeliveryPending",
-    Action::"ResourceMergeTimedOut", Action::"ResourceVerificationTimedOut"],
-  resource is Effort
-) unless {
-  principal is System || (principal has role && principal.role == "service" && principal has agent_type && ["wasm-runtime", "timeout-scheduler"].contains(principal.agent_type))
-};
-
-// These gates only read linked Temper records; they never call providers.
-permit(
-  principal,
-  action == Action::"http_call",
-  resource is HttpEndpoint
-) when {
-  ["effort_resource_delivery_validate", "effort_resource_delivery_merge", "effort_resource_delivery_verify"].contains(context.module)
-  && context has method && context.method == "GET"
-};
+) when { principal is Admin || principal is Agent };

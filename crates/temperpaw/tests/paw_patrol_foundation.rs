@@ -259,170 +259,12 @@ fn paw_patrol_renames_human_intake_to_work_request_and_adds_risk_patrol_entities
 }
 
 #[test]
-fn paw_patrol_intent_accept_births_an_effort_via_a_declarative_trigger() {
-    // ARN-441: the Accept -> Effort birth is the spine of the entity loop. Assert
-    // the wiring structurally so a refactor cannot silently break the cascade
-    // (the live Accept -> Effort -> Verified drive is the effort's runtime proof).
-    let root = repo_root();
-    let patrol = root.join("os-apps/paw-patrol");
-    let intent = read(patrol.join("specs/intent.ioa.toml"));
-    let effort = read(patrol.join("specs/effort.ioa.toml"));
-
-    // Accept creates the Effort. No handshake, no repair action.
-    for needle in [
-        "name = \"intent_accepted_creates_effort\"",
-        "kind = \"entity\"",
-        "principal = \"patrol-intake-service\"",
-        "target_entity = \"Effort\"",
-        "target_action = \"Seed\"",
-        "type = \"create\"",
-        "to = \"Accepted\"",
-        "intent_ref = \"intent_ref\"",
-    ] {
-        assert!(
-            intent.contains(needle),
-            "intent.ioa.toml Accept->Effort trigger should carry `{needle}`"
-        );
-    }
-    for gone in [
-        "RebirthEffort",
-        "ConfirmBirth",
-        "BirthTimedOut",
-        "Accepting",
-    ] {
-        assert!(
-            !intent.contains(&format!("name = \"{gone}\"")),
-            "{gone} must not exist on Intent"
-        );
-    }
-    for needle in [
-        "name = \"Seed\"",
-        "name = \"intent_ref\"",
-        "name = \"AttachSpec\"",
-        "name = \"AttachPlan\"",
-        "name = \"AttachDecisions\"",
-        "name = \"LinkPmIssue\"",
-        "name = \"MarkDeployRolledBack\"",
-        "module = \"chain_github_ready\"",
-        "on_failure = \"RetractSpecFile\"",
-        "docs/efforts/",
-        "name = \"panel_started\"",
-        "name = \"panel_count\"",
-        "name = \"AttachAsk\"",
-        "name = \"ask_ids\"",
-        "name = \"MarkFixItClear\"",
-        "name = \"MarkRiskClear\"",
-        "name = \"ConfirmMerge\"",
-        "name = \"review_fix_it_clear\"",
-        "name = \"merge_risk_clear\"",
-        "module = \"chain_review_ready\"",
-        "module = \"chain_proof_ready\"",
-        "module = \"chain_merge_ready\"",
-        "on_failure = \"RetractReviewPassed\"",
-        "on_failure = \"RetractProofAttached\"",
-        "on_failure = \"RetractMerge\"",
-        "from = [\"Building\", \"InReview\", \"Proving\", \"Deploying\", \"ResourceMergeChecking\", \"ResourceVerifying\"]",
-    ] {
-        assert!(
-            effort.contains(needle),
-            "effort.ioa.toml should carry `{needle}`"
-        );
-    }
-    for gone in [
-        "ConfigureRelease",
-        "effort_deployed_requests_release",
-        "target_entity = \"ReleaseRun\"",
-        "release_configured",
-    ] {
-        assert!(
-            !effort.contains(gone),
-            "Effort must not hardcode ReleaseRun or ConfigureRelease ({gone})"
-        );
-    }
-    assert!(
-        intent.contains("name = \"AttachIntentFile\""),
-        "intent.ioa.toml must AttachIntentFile before Accept"
-    );
-    assert!(
-        intent.contains("module = \"chain_github_ready\""),
-        "Intent.Accept must require intent.md on GitHub"
-    );
-    assert!(
-        !intent.contains("entity_type = \"File\""),
-        "Intent must not gate on a Temper File"
-    );
-    let reopen = intent
-        .split("name = \"Reopen\"")
-        .nth(1)
-        .expect("Intent.Reopen must exist");
-    let reopen = reopen.split("[[action]]").next().unwrap();
-    assert!(
-        reopen.contains("from = [\"Rejected\"]") && reopen.contains("to = \"Triaged\""),
-        "Intent.Reopen must take Rejected back to Triaged"
-    );
-    let attach_review = effort
-        .split("name = \"AttachReviewRun\"")
-        .nth(1)
-        .expect("Effort.AttachReviewRun must exist");
-    let attach_review = attach_review.split("[[action]]").next().unwrap();
-    for needle in [
-        "var = \"review_fix_it_clear\"",
-        "var = \"merge_risk_clear\"",
-        "var = \"review_passed\"",
-    ] {
-        assert!(
-            attach_review.contains(needle),
-            "AttachReviewRun must reset {needle} so a later panel cannot ride an old clearance"
-        );
-    }
-    let resume = effort
-        .split("name = \"Resume\"")
-        .nth(1)
-        .expect("Effort.Resume must exist");
-    let resume = resume.split("[[action]]").next().unwrap();
-    for needle in [
-        "var = \"review_passed\"",
-        "var = \"review_fix_it_clear\"",
-        "var = \"merge_risk_clear\"",
-        "var = \"worker_done\"",
-        "var = \"evaluation_passed\"",
-        "var = \"proof_attached\"",
-        "var = \"e2e_ok\"",
-        "var = \"panel_started\"",
-    ] {
-        assert!(
-            resume.contains(needle),
-            "Resume must reset {needle} so Stall cannot skip a new review"
-        );
-    }
-    let request_changes = effort
-        .split("name = \"RequestChanges\"")
-        .nth(1)
-        .expect("Effort.RequestChanges must exist");
-    let request_changes = request_changes.split("[[action]]").next().unwrap();
-    assert!(
-        request_changes.contains("var = \"panel_started\""),
-        "RequestChanges must reset panel_started so PassReview cannot ride the rejected panel"
-    );
-    assert!(
-        reopen.contains("intent_file_ready"),
-        "Intent.Reopen must clear intent_file_ready"
-    );
-    // Chain-id collections are real lists, not JSON-blob strings.
-    assert!(
-        effort.contains("name = \"review_run_ids\"\ntype = \"list\""),
-        "effort.ioa.toml review_run_ids must be a real list field, not a JSON string"
-    );
-}
-
-#[test]
-fn paw_patrol_stage3_project_deploy_tools_report_back_to_effort() {
+fn paw_patrol_project_deploy_tools_remain_available_independently() {
     let root = repo_root();
     let patrol = root.join("os-apps/paw-patrol");
     let dsf = read(patrol.join("specs/dsf_deploy.ioa.toml"));
     let release_run = read(patrol.join("specs/release_run.ioa.toml"));
     let temper = read(patrol.join("specs/temper_deploy.ioa.toml"));
-    let effort = read(patrol.join("specs/effort.ioa.toml"));
     let cedar = read(patrol.join("policies/patrol.cedar"));
     let csdl = read(patrol.join("specs/model.csdl.xml"));
     let manifest = read(patrol.join("app.toml"));
@@ -434,10 +276,6 @@ fn paw_patrol_stage3_project_deploy_tools_report_back_to_effort() {
         "github_app_id = \"{secret:github_app_id}\"",
         "github_app_private_key = \"{secret:github_app_private_key}\"",
         "concurrent_entity_set = \"DsfDeploys\"",
-        "target_action = \"MarkDeployVerified\"",
-        "target_action = \"MarkDeployRolledBack\"",
-        "target_action = \"Stall\"",
-        "field = \"effort_id\"",
     ] {
         assert!(
             dsf.contains(needle),
@@ -456,10 +294,6 @@ fn paw_patrol_stage3_project_deploy_tools_report_back_to_effort() {
     for needle in [
         "name = \"TemperDeploy\"",
         "module = \"temper_deploy_lifecycle\"",
-        "target_action = \"MarkDeployVerified\"",
-        "target_action = \"MarkDeployRolledBack\"",
-        "target_action = \"Stall\"",
-        "field = \"effort_id\"",
         "WaitingForImage",
         "name = \"CheckImage\"",
         "name = \"ImageReady\"",
@@ -471,50 +305,10 @@ fn paw_patrol_stage3_project_deploy_tools_report_back_to_effort() {
             "temper_deploy.ioa.toml should carry `{needle}`"
         );
     }
-    assert!(
-        effort.contains("name = \"MarkDeployVerified\"")
-            && effort.contains("to = \"Verified\"")
-            && effort.contains("name = \"MarkDeployRolledBack\"")
-            && effort.contains("to = \"Merged\""),
-        "Effort callbacks: Healthy→Verified, RolledBack→Merged"
-    );
-    // ARN-466: Merge ships. It must not stop at Merged (MarkDeployVerified
-    // is only from Deploying). WorkCycle/ReleaseRun is not this path.
-    for needle in [
-        "name = \"ConfigureDeploy\"",
-        "name = \"deploy_configured\"",
-        "target_entity = \"TemperDeploy\"",
-        "target_action = \"Request\"",
-        "name = \"effort_merged_requests_temper_deploy\"",
-        "to = \"Deploying\"",
-    ] {
-        assert!(
-            effort.contains(needle),
-            "Effort.Merge must ship via TemperDeploy (`{needle}`)"
-        );
-    }
-    let merge = effort
-        .split("name = \"Merge\"")
-        .nth(1)
-        .expect("Effort.Merge must exist")
-        .split("[[action]]")
-        .next()
-        .unwrap();
-    assert!(
-        merge.contains("to = \"Deploying\""),
-        "Effort.Merge must enter Deploying, not Merged"
-    );
-    assert!(
-        merge.contains("var = \"deploy_configured\""),
-        "Effort.Merge must require ConfigureDeploy"
-    );
     for needle in [
         "resource is DsfDeploy",
         "resource is TemperDeploy",
         "principal.agent_type == \"wasm-runtime\"",
-        "Action::\"MarkDeployRolledBack\"",
-        "resource.risk_lane == \"L0\"",
-        "resource.risk_lane == \"L1\"",
     ] {
         assert!(
             cedar.contains(needle),
@@ -528,7 +322,6 @@ fn paw_patrol_stage3_project_deploy_tools_report_back_to_effort() {
         "<EntitySet Name=\"DsfDeploys\"",
         "<EntitySet Name=\"TemperDeploys\"",
         "<EntitySet Name=\"ContractProbes\"",
-        "<Property Name=\"DecisionsFileReady\"",
         "<Property Name=\"ArtifactFileReady\"",
     ] {
         assert!(csdl.contains(needle), "CSDL should carry `{needle}`");
@@ -3772,102 +3565,6 @@ fn paw_patrol_carries_the_stage3_s0_record_entities_and_ingest_module() {
     }
 
     assert!(
-        manifest.contains("name = \"chain_github_ready\""),
-        "app.toml should register chain_github_ready"
-    );
-    assert!(
-        read(patrol.join("wasm/build.sh")).contains("chain_github_ready"),
-        "build.sh should build chain_github_ready"
-    );
-    let github_ready = read(patrol.join("wasm/chain_github_ready/src/lib.rs"));
-    for needle in [
-        "cannot see {repo}",
-        "api.github.com/repos/{repo}",
-        "is not on GitHub",
-        "get_time_millis",
-        "per_page=100",
-        "GitHub App installation cannot see",
-    ] {
-        assert!(
-            github_ready.contains(needle),
-            "chain_github_ready should distinguish token visibility from a missing path ({needle})"
-        );
-    }
-    assert!(
-        !github_ready.contains("SystemTime"),
-        "chain_github_ready must use Context::get_time_millis, not std SystemTime"
-    );
-    for module in [
-        "chain_review_ready",
-        "chain_proof_ready",
-        "chain_merge_ready",
-    ] {
-        assert!(
-            manifest.contains(&format!("name = \"{module}\"")),
-            "app.toml should register {module}"
-        );
-        assert!(
-            read(patrol.join("wasm/build.sh")).contains(module),
-            "build.sh should build {module}"
-        );
-        assert!(
-            patrol.join(format!("wasm/{module}/src/lib.rs")).is_file(),
-            "{module} should have source"
-        );
-        assert!(
-            patrol
-                .join(format!("wasm/{module}/{module}.wasm"))
-                .is_file(),
-            "{module} should have a committed .wasm binary"
-        );
-    }
-    let review_ready = read(patrol.join("wasm/chain_review_ready/src/lib.rs"));
-    for needle in [
-        "fn review_panel_holds",
-        "open act-on",
-        "\"ReviewRuns\"",
-        "/tdata/{set}('{id}')",
-        "set_error_result",
-    ] {
-        assert!(
-            review_ready.contains(needle),
-            "chain_review_ready should contain {needle}"
-        );
-    }
-    assert!(
-        !review_ready.contains("set_success_result(\"PassReview\""),
-        "chain_review_ready must not dispatch"
-    );
-    let cedar = read(patrol.join("policies/patrol.cedar"));
-    for module in [
-        "chain_review_ready",
-        "chain_proof_ready",
-        "chain_merge_ready",
-    ] {
-        assert!(
-            cedar.contains(&format!("context.module == \"{module}\"")),
-            "patrol.cedar must allow http_call for {module}"
-        );
-    }
-    let review_yml = read(repo_root().join(".github/workflows/sdlc-review.yml"));
-    assert!(
-        review_yml.contains("/tdata/ReviewRuns"),
-        "sdlc-review.yml must ask Temper ReviewRuns"
-    );
-    assert!(
-        !review_yml.contains("sdlc-review-record-b64"),
-        "sdlc-review.yml must not scrape a hidden review comment"
-    );
-    let proof_yml = read(repo_root().join(".github/workflows/sdlc-verification.yml"));
-    assert!(
-        proof_yml.contains("/tdata/ProofPackets"),
-        "sdlc-verification.yml must ask Temper ProofPackets"
-    );
-    assert!(
-        !proof_yml.contains("sdlc-proof-record-b64"),
-        "sdlc-verification.yml must not scrape a hidden proof comment"
-    );
-    assert!(
         manifest.contains("name = \"chain_file_ready\""),
         "app.toml should register chain_file_ready"
     );
@@ -3882,13 +3579,7 @@ fn paw_patrol_carries_the_stage3_s0_record_entities_and_ingest_module() {
             "chain_file_ready lib.rs should contain {needle}"
         );
     }
-    for prop in [
-        "SpecFileReady",
-        "PlanFileReady",
-        "IntentFileReady",
-        "DecisionsFileReady",
-        "ArtifactFileReady",
-    ] {
+    for prop in ["ArtifactFileReady"] {
         assert!(
             csdl.contains(&format!("<Property Name=\"{prop}\"")),
             "CSDL should carry {prop}"
@@ -3991,23 +3682,34 @@ fn verified_operator_may_write_shadow_records_narrowly() {
 }
 
 #[test]
-fn effort_merge_permits_l0_l1_and_denies_l2() {
+fn effort_records_are_writable_without_authorizing_deployment() {
     let root = repo_root();
     let policy = read(root.join("os-apps/paw-patrol/policies/patrol.cedar"));
     let engine = AuthzEngine::new(&policy).expect("patrol.cedar should parse");
     let agent = agent_context("cursor", "agent");
 
-    for lane in ["L0", "L1"] {
-        let attrs = resource_attrs(&[("risk_lane", serde_json::json!(lane))]);
-        let d = engine.authorize(&agent, "Merge", "Effort", &attrs);
-        assert!(d.is_allowed(), "agent should Merge Effort at {lane}: {d:?}");
+    for action in [
+        "create",
+        "Seed",
+        "Update",
+        "AttachPullRequest",
+        "RecordEvidence",
+        "Complete",
+        "Cancel",
+        "Reopen",
+    ] {
+        assert!(
+            engine
+                .authorize(&agent, action, "Effort", &HashMap::new())
+                .is_allowed(),
+            "{action}"
+        );
     }
     let l2 = resource_attrs(&[("risk_lane", serde_json::json!("L2"))]);
     assert!(
         !engine
             .authorize(&agent, "Merge", "Effort", &l2)
-            .is_allowed(),
-        "L2 Merge must deny so it surfaces as MCP elicitation"
+            .is_allowed()
     );
 
     let deploy_attrs = resource_attrs(&[("id", serde_json::json!("d1"))]);

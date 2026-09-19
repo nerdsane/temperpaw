@@ -8,7 +8,7 @@
 #   Request → WaitingForImage (GHCR manifest for image_tag)
 #   ImageReady → swap IMAGE_TAG + redeploy
 #   Polling → kernel Check every 30s until live sha == expected_sha
-#   Healthy → Effort MarkDeployVerified + ContractProbe.RunScan
+#   Healthy → ContractProbe.RunScan; result stays on this deployment
 #   Unhealthy → restore previous_tag
 
 [automaton]
@@ -249,17 +249,6 @@ params = ["observed_sha"]
 hint = "Live sha matches expected_sha. Reports the Effort verified. Runs the contract probe."
 
 [[action.triggers]]
-name = "temper_healthy_marks_effort"
-kind = "entity"
-principal = "patrol-release-service"
-target_entity = "Effort"
-target_action = "MarkDeployVerified"
-
-[action.triggers.resolve_target]
-type = "field"
-field = "effort_id"
-
-[[action.triggers]]
 name = "temper_healthy_runs_probe"
 kind = "entity"
 principal = "patrol-release-service"
@@ -311,17 +300,6 @@ to = "RolledBack"
 params = ["previous_tag"]
 hint = "Previous IMAGE_TAG restored. Effort returns to Merged."
 
-[[action.triggers]]
-name = "temper_rolled_back_returns_effort"
-kind = "entity"
-principal = "patrol-release-service"
-target_entity = "Effort"
-target_action = "MarkDeployRolledBack"
-
-[action.triggers.resolve_target]
-type = "field"
-field = "effort_id"
-
 [[action]]
 name = "Fail"
 kind = "input"
@@ -329,32 +307,3 @@ from = ["Requested", "WaitingForImage", "Swapping", "Polling", "Unhealthy"]
 to = "Failed"
 params = ["error_message"]
 hint = "Step could not run. Effort Stalls."
-
-[[action.triggers]]
-name = "temper_failed_stalls_effort"
-kind = "entity"
-principal = "patrol-release-service"
-target_entity = "Effort"
-target_action = "Stall"
-
-[action.triggers.params_from]
-error_message = "error_message"
-
-[action.triggers.resolve_target]
-type = "field"
-field = "effort_id"
-
-[[invariant]]
-name = "HealthyIsFinal"
-when = ["Healthy"]
-assert = "no_further_transitions"
-
-[[invariant]]
-name = "RolledBackIsFinal"
-when = ["RolledBack"]
-assert = "no_further_transitions"
-
-[[invariant]]
-name = "FailedIsFinal"
-when = ["Failed"]
-assert = "no_further_transitions"
