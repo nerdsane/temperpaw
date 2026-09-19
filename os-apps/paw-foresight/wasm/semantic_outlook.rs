@@ -184,6 +184,12 @@ fn validate_v2(answer: &Value, snapshot: &Value) -> Result<(), String> {
         .filter(|n| matches!(n["kind"].as_str(), Some("scenario" | "revision")))
         .filter_map(|n| n["Id"].as_str())
         .collect();
+    let known_nodes: BTreeSet<_> = snapshot["nodes"]
+        .as_array()
+        .ok_or("Missing snapshot nodes")?
+        .iter()
+        .filter_map(|n| n["Id"].as_str())
+        .collect();
     let outcomes = answer["outcomes"]
         .as_array()
         .filter(|v| (1..=64).contains(&v.len()))
@@ -218,8 +224,11 @@ fn validate_v2(answer: &Value, snapshot: &Value) -> Result<(), String> {
             .as_array()
             .ok_or("Missing hypothesis references")?
         {
-            if !reference.as_str().is_some_and(|id| hypotheses.contains(id)) {
-                return Err("Invented hypothesis reference".into());
+            if !reference
+                .as_str()
+                .is_some_and(|id| known_nodes.contains(id))
+            {
+                return Err("Invented related context reference".into());
             }
         }
     }
@@ -254,7 +263,7 @@ mod v2_tests {
             assert!(validate(&b, &s).is_err());
             let mut b = a.clone();
             b["outcomes"][0]["scenario_ids"] = json!([id]);
-            assert!(validate(&b, &s).is_err());
+            assert_eq!(validate(&b, &s).is_ok(), id == "e1");
         }
     }
     #[test]
