@@ -2,6 +2,42 @@ use temper_wasm_sdk::prelude::*;
 mod core {
     include!("../../semantic_core.rs");
 }
+fn transient_provider_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    if [
+        "permission",
+        "forbidden",
+        "unauthorized",
+        "denied",
+        "validation",
+    ]
+    .iter()
+    .any(|word| error.contains(word))
+    {
+        return false;
+    }
+    [429, 502, 503, 504].iter().any(|status| {
+        [
+            format!("api returned {status}"),
+            format!("provider http {status}"),
+            format!("http {status}"),
+        ]
+        .iter()
+        .any(|marker| error.contains(marker))
+    })
+}
+fn retry_count(state: &Value) -> u64 {
+    state
+        .get("counters")
+        .and_then(|v| v.get("reasoning_retry_count"))
+        .or_else(|| {
+            state
+                .get("fields")
+                .and_then(|v| v.get("reasoning_retry_count"))
+        })
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
 fn check(ctx: &Context) -> Result<(), String> {
     let id = core::field(&ctx.entity_state, "reasoning_session_id");
     if id.is_empty()
@@ -49,6 +85,16 @@ fn check(ctx: &Context) -> Result<(), String> {
             } else {
                 message
             };
+            if core::field(&s, "Status") == "Failed"
+                && transient_provider_error(error)
+                && retry_count(&ctx.entity_state) < 3
+            {
+                set_success_result(
+                    "ReasoningRetry",
+                    &json!({"last_retry_error":error,"last_retry_session_id":id}),
+                );
+                return Ok(());
+            }
             return Err(format!("Reasoning session {id} did not complete: {error}"));
         }
         _ => {
@@ -65,4 +111,28 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
         Err(e) => set_success_result("Fail", &json!({"error_message":e})),
     };
     0
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    #[test]
+    fn only_explicit_transient_provider_statuses_retry() {
+        for status in [429, 502, 503, 504] {
+            assert!(transient_provider_error(&format!(
+                "OpenAI Codex API returned {status}: upstream connect error"
+            )));
+        }
+        for error in [
+            "API returned 401",
+            "API returned 403",
+            "validation error: HTTP 503",
+            "permission denied",
+            "missing WASM module",
+            "connection timed out",
+            "invalid JSON",
+        ] {
+            assert!(!transient_provider_error(error), "{error}");
+        }
+    }
 }

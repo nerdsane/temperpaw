@@ -60,7 +60,7 @@ name = "Start"
 kind = "input"
 from = ["Created"]
 to = "Preparing"
-params = ["world_id", "parent_id", "parent_type"]
+params = ["world_id", "parent_id", "parent_type", "resume_run_id"]
 [[action.triggers]]
 name = "semantic_prepare"
 kind = "wasm"
@@ -76,7 +76,7 @@ name = "Prepared"
 kind = "input"
 from = ["Preparing"]
 to = "ReasoningSetup"
-params = ["world_id", "snapshot_json", "program_json", "trace_json", "started_at_ms", "agent_id", "model", "provider"]
+params = ["world_id", "snapshot_json", "program_json", "trace_json", "started_at_ms", "agent_id", "model", "provider", "phase"]
 [[action.triggers]]
 name = "semantic_reasoning"
 kind = "wasm"
@@ -580,3 +580,48 @@ initial = ''
 name = 'gen_ai_parent_span_id'
 type = 'string'
 initial = ''
+
+# App-owned bounded retries preserve the exploration checkpoint and prompt.
+[[state]]
+name = "reasoning_retry_count"
+type = "counter"
+initial = "0"
+
+[[state]]
+name = "last_retry_error"
+type = "string"
+initial = ""
+
+[[state]]
+name = "last_retry_session_id"
+type = "string"
+initial = ""
+
+[[state]]
+name = "resume_run_id"
+type = "string"
+initial = ""
+
+[[action]]
+name = "ReasoningRetry"
+kind = "input"
+from = ["Reasoning"]
+to = "ReasoningSetup"
+params = ["last_retry_error", "last_retry_session_id"]
+guard = [{type="max_count",var="reasoning_retry_count",max=3}]
+effect = [{type="increment",var="reasoning_retry_count"},{type="schedule",action="SpawnReasoning",delay_seconds=15}]
+
+[[action]]
+name = "ResumePrepared"
+kind = "input"
+from = ["Preparing"]
+to = "Choosing"
+params = ["world_id", "snapshot_json", "program_json", "trace_json", "started_at_ms", "agent_id", "model", "provider", "phase"]
+[[action.triggers]]
+name = "semantic_step"
+kind = "wasm"
+module = "semantic_step"
+on_failure = "Fail"
+[action.triggers.config]
+max_memory = "268435456"
+max_fuel = "10000000000"

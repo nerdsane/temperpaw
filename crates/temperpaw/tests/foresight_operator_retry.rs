@@ -36,6 +36,8 @@ fn operator_retry_is_verified_and_machine_callbacks_stay_closed() {
         "CheckReasoning",
         "SpawnReasoning",
         "ReasoningComplete",
+        "ReasoningRetry",
+        "ResumePrepared",
         "Expanded",
     ] {
         assert!(

@@ -138,4 +138,58 @@ async fn polling_projects_result_without_echoing_three_megabyte_prompt() {
         pending["callback_action"], "ReasoningPending",
         "cumulative polling from earlier children must not prematurely fail a new child: {pending}"
     );
+    for (status, error, count, expected) in [
+        (
+            "Failed",
+            "OpenAI Codex API returned 503: upstream connect error or disconnect/reset before headers. connection timeout",
+            0,
+            "ReasoningRetry",
+        ),
+        (
+            "Failed",
+            "OpenAI Codex API returned 429: rate limited",
+            2,
+            "ReasoningRetry",
+        ),
+        (
+            "Failed",
+            "OpenAI Codex API returned 503: upstream connection timeout",
+            3,
+            "Fail",
+        ),
+        ("Cancelled", "OpenAI Codex API returned 503", 0, "Fail"),
+        (
+            "Failed",
+            "OpenAI Codex API returned 403: permission denied",
+            0,
+            "Fail",
+        ),
+        ("Failed", "Invalid generated reference", 0, "Fail"),
+    ] {
+        let host = SimWasmHost::new().with_response(
+            "http://fixture/tdata/Sessions('child')?$select=Status,result,error_message,error",
+            200,
+            &json!({"Status":status,"result":"","error_message":error,"error":""}).to_string(),
+        );
+        let mut context = ctx.clone();
+        context.entity_state["counters"] = json!({"reasoning_retry_count":count});
+        let result: Value = serde_json::to_value(
+            engine
+                .invoke(
+                    &hash,
+                    &context,
+                    Arc::new(host),
+                    &WasmResourceLimits::default(),
+                    Arc::new(RwLock::new(StreamRegistry::default())),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result["callback_action"], expected, "{result}");
+        if expected == "ReasoningRetry" {
+            assert_eq!(result["callback_params"]["last_retry_error"], error);
+            assert_eq!(result["callback_params"]["last_retry_session_id"], "child");
+        }
+    }
 }
