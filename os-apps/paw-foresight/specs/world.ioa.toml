@@ -1073,5 +1073,5 @@ name = "StartSemanticExploration"
 kind = "input"
 from = ["Active"]
 params = []
-guard = {type="bool_true",field="semantic_exploration_requested"}
+guard = "is_true semantic_exploration_requested"
 effect = [{type="spawn",entity_type="SemanticRun",entity_id_source="{uuid}",initial_action="Start",copy_fields=""},{type="set_bool",var="semantic_exploration_requested",value=false}]

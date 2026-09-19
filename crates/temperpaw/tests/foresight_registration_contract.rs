@@ -789,3 +789,17 @@ fn failed_registration_drains_only_work_queued_after_its_start() {
         }
     }
 }
+
+#[test]
+fn every_foresight_spec_loads_with_the_runtime_parser() {
+    let specs = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../os-apps/paw-foresight/specs");
+    for entry in std::fs::read_dir(specs).unwrap() {
+        let path = entry.unwrap().path();
+        if path.to_string_lossy().ends_with(".ioa.toml") {
+            let source = std::fs::read_to_string(&path).unwrap();
+            temper_spec::automaton::parse_automaton(&source)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
+    }
+}
