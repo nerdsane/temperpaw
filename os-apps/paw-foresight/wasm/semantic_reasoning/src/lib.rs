@@ -12,17 +12,19 @@ mod references {
 }
 
 const MAX_REASONING_INPUT_BYTES: usize = 3 * 1024 * 1024;
-const FRONTIER_LIMIT: usize = 64;
+mod definitions {
+    include!("../../semantic_definitions.rs");
+}
 
 const EXPLORATION_PROMPT: &str = r#"Investigate the user's question in state.world.description through open causal exploration. Existing nodes use short ref_ identifiers consistently across the catalog, dependencies and evaluations. Copy those references exactly; never invent or reconstruct a UUID. New hypothesis and evidence IDs must not start with ref_. The supplied catalog records what has already been considered; it is not the boundary of what can be considered. Discover new mechanisms and surprising hypotheses, pursue counterevidence, and revise the framing when it obscures something consequential. Follow interactions, second-order effects and alternatives emerging from evidence. Do not fill a predetermined taxonomy, Cartesian grid, fixed set of axes, or adoption/delay/failure template. A novel hypothesis must say what would happen and why, not merely rename a familiar outcome.
 
-Use available read-only temper.web_search and temper.web_fetch tools to investigate useful missing premises and evidence beyond the current frontier. Prefer direct temper.web_fetch(url). If direct fetch fails, temper.web_search(query) returns bounded source-extracted text in each result's text field. A focused title or site query may retrieve a useful excerpt. Use only a claim and quotation actually contained in that returned text; never infer source contents from the title, URL or a search summary. Explicitly label indexed-excerpt evidence, direct-fetch failure and date or context limitations in the statement/evidence_note; use weak_signal when context remains unverified. A truncated excerpt does not establish that the whole source was inspected. Smaller article or text-version URLs may be fetched only when actually discovered, never invented. web_fetch accepts only a URL; do not invent size, range or encoding parameters. Tool absence, failure, or conflicting evidence must remain explicit. For frozen hindcasts, return research_evidence=[] and reference only existing catalog evidence within the stated vantage: later remembered knowledge is inadmissible. Neither a citation nor a Jev label proves a future true. Hypotheses and observations remain distinct.
+Use available read-only temper.web_search and temper.web_fetch tools to investigate useful missing premises and evidence beyond the hypotheses already explored. Prefer direct temper.web_fetch(url). If direct fetch fails, temper.web_search(query) returns bounded source-extracted text in each result's text field. A focused title or site query may retrieve a useful excerpt. Use only a claim and quotation actually contained in that returned text; never infer source contents from the title, URL or a search summary. Explicitly label indexed-excerpt evidence, direct-fetch failure and date or context limitations in the statement/evidence_note; use weak_signal when context remains unverified. A truncated excerpt does not establish that the whole source was inspected. Smaller article or text-version URLs may be fetched only when actually discovered, never invented. web_fetch accepts only a URL; do not invent size, range or encoding parameters. Tool absence, failure, or conflicting evidence must remain explicit. For frozen hindcasts, return research_evidence=[] and reference only existing catalog evidence within the stated vantage: later remembered knowledge is inadmissible. Neither a citation nor a Jev label proves a future true. Hypotheses and observations remain distinct.
 
 Return JSON only after the research: {"hypotheses":[{"id":"unique-ascii-id","title":"concise distinct hypothesis","statement":"self-contained observable future event with actors and horizon","mechanism":"how and why it could happen, including the causal assumptions","requires":["existing node ID or new hypothesis/evidence ID whose truth this mechanism actually requires"],"parent":"optional existing hypothesis ID when meaningfully extending or revising it","scene":"optional vivid hypothetical future, explicitly not an observation","signal":"optional observable early signal","falsifier":"optional disconfirming observation","evidence_note":"what supports or challenges the mechanism and what is still conjecture","research_question":"optional consequential unanswered question"}],"research_evidence":[{"id":"unique-ascii-id","statement":"finding with date, scope, uncertainty and conflicting interpretation where relevant","url":"exact retrieved HTTPS URL","quote":"short supporting excerpt, maximum 25 words and 200 characters per source","observed_at":"YYYY-MM-DD","provenance":"observed|contested|weak_signal"}],"continue_exploring":true,"exploration_note":"what this exploration learned, which framing changed, and why another round would or would not be useful"}.
 
 Choose the number and shape of hypotheses from the question and findings. At most128 TOTAL entries across hypotheses and research_evidence fit one batch; those are storage limits, never targets. IDs must be unique across the supplied catalog and new batch. Dependencies must reference actual supplied or newly returned nodes; use an empty requires array rather than invent supporting evidence. An optional parent records lineage, not proof. Do not assign probabilities: the engine evaluates every accepted hypothesis through Jev. Keep distinct futures even if they overlap or share a mechanism; avoid duplicates that only change wording. Research evidence must contain only content actually retrieved or supplied, with its epistemic status intact.
 
-The engine can use up to5000 Jev calls,2048 nodes,64 exploration rounds and one hour; these are operational ceilings, not demands to pad the graph. Use the current assessments to challenge assumptions, explore neglected possibilities and direct research. A gap is a reason to investigate or reconsider a mechanism, not a command to make every hypothesis conform to the same future. Set continue_exploring=false only when further exploration has low expected value relative to what is already covered, and explain the remaining blind spots and the concrete reason to stop. A budget stop is incomplete exploration, not convergence. Preserve unresolved questions honestly."#;
+The engine can use up to5000 Jev calls,2048 nodes,64 exploration rounds and one hour; these are operational ceilings, not demands to pad the graph. Use the current assessments to challenge assumptions, explore neglected possibilities and direct research. Operation labels are advisory possibilities, not instructions or a required sequence; choose freely what investigation would add value. A gap is a reason to investigate or reconsider a mechanism, not a command to make every hypothesis conform to the same future. Set continue_exploring=false only when further exploration has low expected value relative to what is already covered, and explain the remaining blind spots and the concrete reason to stop. A budget stop is incomplete exploration, not convergence. Preserve unresolved questions honestly."#;
 
 const SYNTHESIS_PROMPT: &str = r#"Use the exact short ref_ identifiers in this input for hypothesis_id and scenario_ids; the engine resolves them to persisted identities. Answer the user's question with rich, contrasting futures supported by this actual exploration. Preserve different causal mechanisms and discoveries; do not collapse them onto one convenient axis or a compliance/not-compliance partition. Explain what could happen, why, what would make it happen, and what observations would change the assessment. A few futures may be most useful, but there is no prescribed number; select what materially improves the answer from evaluated hypotheses.
 
@@ -46,6 +48,11 @@ fn node_catalog(snapshot: &Value) -> Vec<Value> {
                 "edges",
                 "parent",
                 "provenance",
+                "signal",
+                "falsifier",
+                "evidence_note",
+                "research_question",
+                "scene",
             ] {
                 if let Some(value) = node.get(key) {
                     compact[key] = value.clone();
@@ -54,16 +61,6 @@ fn node_catalog(snapshot: &Value) -> Vec<Value> {
             compact
         })
         .collect()
-}
-
-fn frontier_priority(node: &Value, program: &Value) -> u8 {
-    let id = core::field(node, "Id");
-    let result = &program["results"][id];
-    if result.is_null() {
-        return 0;
-    }
-    let gap = result["classify_gap"].as_str().unwrap_or("");
-    if gap != "none" { 1 } else { 2 }
 }
 
 fn compact_evaluations(program: &Value) -> Value {
@@ -86,33 +83,6 @@ fn compact_evaluations(program: &Value) -> Value {
 
 fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
     let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
-    let mut frontier: Vec<_> = nodes
-        .iter()
-        .rev()
-        .filter(|node| {
-            matches!(
-                core::field(node, "kind"),
-                "hypothesis" | "scenario" | "revision"
-            )
-        })
-        .collect();
-    // Prefer unresolved, consequential hypotheses, with recent discoveries first
-    // on ties. Every statement remains available in the complete catalog.
-    frontier.sort_by(|a, b| {
-        let value = |node: &&Value| {
-            program["evaluations"][core::field(node, "Id")]["decision_value"]["score"]
-                .as_f64()
-                .unwrap_or(0.0)
-        };
-        frontier_priority(a, program)
-            .cmp(&frontier_priority(b, program))
-            .then_with(|| value(b).total_cmp(&value(a)))
-    });
-    let frontier: Vec<_> = frontier
-        .into_iter()
-        .take(FRONTIER_LIMIT)
-        .map(|node| json!({"node":node,"assessment":program["results"][core::field(node,"Id")],"evaluations":program["evaluations"][core::field(node,"Id")]}))
-        .collect();
     let evidence: Vec<_> = nodes
         .iter()
         .filter(|node| {
@@ -124,8 +94,15 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
         .collect();
     let input = json!({
         "world":snapshot["world"], "catalog":node_catalog(snapshot),
-        "frontier":frontier, "source_evidence":evidence,
+        "source_evidence":evidence,
         "assessments":program["results"], "evaluations": compact_evaluations(program), "assessment_semantics":core::gap_criteria(),
+        "evaluation_semantics":{
+            "score_scale":"Expected category index on a 0–4 scale, not a probability or a percentage.",
+            "evaluate_novelty":definitions::evaluate_novelty(),
+            "decision_value":definitions::decision_value(),
+            "choose_next_operation":definitions::choose_next_operation(),
+            "operation_role":"Advisory possibilities, not instructions, completion claims or a prescribed sequence."
+        },
         "issues":program["issues"], "stop_reason":program["stop_reason"],
         "remaining_calls":program["remaining_calls"], "round":program["round"],
         "exploration_note":program["exploration_note"]
@@ -177,6 +154,46 @@ mod reasoning_tests {
 
     mod outlook_contract {
         include!("../../semantic_outlook.rs");
+    }
+
+    #[test]
+    fn reasoning_score_legends_are_the_same_definitions_sent_to_jev() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"h","kind":"scenario","statement":"Future","edges":"[]","signal":"Signal","falsifier":"Falsifier","evidence_note":"Limited evidence","research_question":"Unanswered","scene":"Hypothetical scene"}]});
+        let mut program = core::plan(snapshot["nodes"].as_array().unwrap()).unwrap();
+        let input = reasoning_input(&snapshot, &program).unwrap();
+        for function in [
+            "evaluate_novelty",
+            "decision_value",
+            "choose_next_operation",
+        ] {
+            let index = program["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|task| task["function"] == function)
+                .unwrap();
+            program["cursor"] = json!(index);
+            let request = core::request(&snapshot, &program).unwrap();
+            assert_eq!(
+                input["evaluation_semantics"][function],
+                request["questions"]["result"]["criteria"]
+            );
+        }
+        for field in [
+            "signal",
+            "falsifier",
+            "evidence_note",
+            "research_question",
+            "scene",
+        ] {
+            assert_eq!(input["catalog"][0][field], snapshot["nodes"][0][field]);
+        }
+        assert!(
+            input["evaluation_semantics"]["operation_role"]
+                .as_str()
+                .unwrap()
+                .contains("Advisory")
+        );
     }
 
     #[test]
@@ -267,10 +284,10 @@ mod reasoning_tests {
     }
 
     #[test]
-    fn bounded_frontier_does_not_hide_unselected_hypotheses() {
+    fn complete_catalog_retains_every_hypothesis_without_ranked_duplication() {
         let nodes: Vec<_> = (0..150).map(|i| json!({"Id":format!("h-{i}"),"kind":"hypothesis","statement":format!("Unique future {i}")})).collect();
         let input = reasoning_input(&json!({"nodes":nodes}), &json!({})).unwrap();
-        assert_eq!(input["frontier"].as_array().unwrap().len(), 64);
+        assert!(input.get("frontier").is_none());
         assert_eq!(input["catalog"].as_array().unwrap().len(), 150);
         assert_eq!(input["catalog"][149]["statement"], "Unique future 149");
         assert_eq!(input["assessment_semantics"], core::gap_criteria());

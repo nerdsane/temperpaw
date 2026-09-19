@@ -1,6 +1,9 @@
 // Jev primitives evaluate explicit hypotheses; their distributions are not empirical calibration.
 use super::{MODEL, field, parse};
 use serde_json::{Value, json};
+mod definitions {
+    include!("semantic_definitions.rs");
+}
 fn digest(node: &Value) -> Value {
     let mut out = serde_json::Map::new();
     for key in [
@@ -84,13 +87,13 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
             json!({"type":"noul","instructions":"Estimate whether the explicit event described by state.node will occur within its stated date or horizon, conditioned on the supplied world question, evidence and prerequisite assessments. This is an event proposition, not a question about coherence, novelty, confidence, or whether the text asserts the event. Account for unsupported premises and contrary evidence. Preserve uncertainty; overlapping hypotheses need not sum to one.","criteria":{"true":"The described event occurs within its stated horizon.","false":"The described event does not occur within its stated horizon."}})
         }
         "evaluate_novelty" => {
-            json!({"type":"score","instructions":"Assess how much distinct explanatory or decision-relevant information this hypothesis adds compared with the supplied comparison sample. Novelty is relative to this sample, not a claim of global originality. Reward a new causal mechanism, not surprising wording.","criteria":["Duplicates an existing hypothesis or adds no distinct mechanism.","Minor variation in an existing mechanism.","Distinct plausible mechanism or interaction worth exploring.","Substantially new mechanism revealing an overlooked path.","Strongly differentiated mechanism that changes how the question should be investigated."]})
+            json!({"type":"score","instructions":"Assess how much distinct explanatory or decision-relevant information this hypothesis adds compared with the supplied comparison sample. Novelty is relative to this sample, not a claim of global originality. Reward a new causal mechanism, not surprising wording.","criteria":definitions::evaluate_novelty()})
         }
         "decision_value" => {
-            json!({"type":"score","instructions":"Assess the value of investigating or monitoring this hypothesis for decisions implied by the world question. Consider consequences, tractable uncertainty and actionable discriminating signals; likelihood alone is not decision value.","criteria":["No identifiable decision or information value.","Limited consequences or weak discriminating information.","Useful information for a concrete decision.","High consequence and a useful way to discriminate outcomes.","Critical decision relevance with strong value from resolving uncertainty."]})
+            json!({"type":"score","instructions":"Assess the value of investigating or monitoring this hypothesis for decisions implied by the world question. Consider consequences, tractable uncertainty and actionable discriminating signals; likelihood alone is not decision value.","criteria":definitions::decision_value()})
         }
         "choose_next_operation" => {
-            json!({"type":"choice","instructions":"Recommend the next useful operation using the accumulated assessments and evaluations. This does not claim that an operation executed. Exploration should follow information value, unanswered causal questions and evidence, without a prescribed phase sequence.","criteria":{"brainstorm":"Generate materially different hypotheses or mechanisms.","research":"Seek new evidence to resolve an unsupported premise.","challenge":"Look for contrary evidence or a falsifying mechanism.","connect":"Investigate an interaction between existing mechanisms.","deepen":"Develop a causal mechanism or its implications in greater detail.","repair":"Correct a specific inadequate mechanism or timing.","monitor":"Retain the hypothesis and monitor dated discriminating signals.","uncertain":"Available information cannot identify a useful next operation."}})
+            json!({"type":"choice","instructions":"Recommend the next useful operation using the accumulated assessments and evaluations. This does not claim that an operation executed. Exploration should follow information value, unanswered causal questions and evidence, without a prescribed phase sequence.","criteria":definitions::choose_next_operation()})
         }
         _ => return Err("Unsupported semantic function".into()),
     };
