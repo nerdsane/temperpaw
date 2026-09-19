@@ -10,6 +10,11 @@ use temper_wasm::{
 };
 
 fn bytes(module: &str) -> Vec<u8> {
+    if module == "semantic_step" {
+        if let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE") {
+            return std::fs::read(path).unwrap();
+        }
+    }
     if module == "semantic_expand" {
         if let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE") {
             return std::fs::read(path).unwrap();
@@ -156,4 +161,27 @@ async fn synthesis_uses_jev_event_estimates_instead_of_invented_weights() {
         invoke(&engine, "semantic_expand", fields).await["callback_action"],
         "Fail"
     );
+}
+
+#[tokio::test]
+async fn provider_402_without_estimates_fails_before_synthesis() {
+    let engine = WasmEngine::new().unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let p = json!({"cursor":0,"tasks":[{"nodeId":"h","function":"classify_gap"}],"stop_reason":"provider_error","last_error":"Semantic provider HTTP 402","results":{}});
+    let mut fields = json!({"program_json":p.to_string(),"snapshot_json":json!({"nodes":[{"Id":"h","kind":"scenario"}]}).to_string(),"trace_json":"[{\"error\":\"Semantic provider HTTP 402\"}]","started_at_ms":now.to_string()});
+    let failed = invoke(&engine, "semantic_step", fields.clone()).await;
+    assert_eq!(failed["callback_action"], "Fail", "{failed}");
+    assert_eq!(
+        failed["callback_params"]["error_message"],
+        "Semantic provider HTTP 402"
+    );
+    let mut partial = p;
+    partial["results"]["h"] = json!({"estimate_likelihood":"0.37"});
+    fields["program_json"] = json!(partial.to_string());
+    let preserved = invoke(&engine, "semantic_step", fields).await;
+    assert_eq!(preserved["callback_action"], "Reason");
+    assert_eq!(preserved["callback_params"]["phase"], "synthesize");
 }
