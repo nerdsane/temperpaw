@@ -103,6 +103,19 @@ fn compact_evaluations(program: &Value) -> Value {
     compact
 }
 
+// Evaluation history remains intact; the generator receives assessments rather
+// than a second planner's repeated per-node operation recommendations.
+fn without_operation_recommendations(mut assessments: Value) -> Value {
+    if let Some(nodes) = assessments.as_object_mut() {
+        for node in nodes.values_mut() {
+            if let Some(functions) = node.as_object_mut() {
+                functions.remove("choose_next_operation");
+            }
+        }
+    }
+    assessments
+}
+
 fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
     let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
     let evidence: Vec<_> = nodes
@@ -117,7 +130,7 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
     let input = json!({
         "world":snapshot["world"], "catalog":node_catalog(snapshot),
         "source_evidence":evidence, "baseline":program["baseline"],
-        "assessments":program["results"], "evaluations": compact_evaluations(program), "assessment_semantics":core::gap_criteria(),
+        "assessments":without_operation_recommendations(program["results"].clone()), "evaluations": without_operation_recommendations(compact_evaluations(program)), "assessment_semantics":core::gap_criteria(),
         "evaluation_semantics":{
             "score_scale":"Expected category index on a 0–4 scale, not a probability or a percentage.",
             "evaluate_novelty":definitions::evaluate_novelty(),
@@ -126,8 +139,7 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
             "operation_role":"Advisory possibilities, not instructions, completion claims or a prescribed sequence."
         },
         "issues":program["issues"], "stop_reason":program["stop_reason"],
-        "remaining_calls":program["remaining_calls"], "round":program["round"],
-        "exploration_note":program["exploration_note"]
+        "remaining_calls":program["remaining_calls"], "round":program["round"]
     });
     let input = references::References::new(snapshot)?.project(&input);
     if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
@@ -205,6 +217,47 @@ mod reasoning_tests {
 
     mod outlook_contract {
         include!("../../semantic_outlook.rs");
+    }
+
+    #[test]
+    fn exploration_preserves_evidence_and_novelty_without_inheriting_operation_agendas() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"h","kind":"scenario","statement":"A distinct possible future","research_question":"What could overturn the mechanism?"}]});
+        let program = json!({"results":{"h":{"classify_gap":"evidence","evaluate_novelty":"1.2","estimate_likelihood":"0.4","choose_next_operation":"research"}},"evaluations":{"h":{"evaluate_novelty":{"score":1.2},"estimate_likelihood":{"probability":0.4},"choose_next_operation":{"selected":"research"}}},"exploration_note":"Research more invoices and security incidents."});
+        let original = program.clone();
+        let input = reasoning_input(&snapshot, &program).unwrap();
+        assert!(
+            input["assessments"]["ref_0001"]
+                .get("choose_next_operation")
+                .is_none()
+        );
+        assert!(
+            input["evaluations"]["ref_0001"]
+                .get("choose_next_operation")
+                .is_none()
+        );
+        assert!(input.get("exploration_note").is_none());
+        assert_eq!(input["assessments"]["ref_0001"]["classify_gap"], "evidence");
+        assert_eq!(
+            input["evaluations"]["ref_0001"]["evaluate_novelty"]["score"],
+            1.2
+        );
+        assert_eq!(
+            input["evaluations"]["ref_0001"]["estimate_likelihood"]["probability"],
+            0.4
+        );
+        assert_eq!(
+            input["catalog"][0]["statement"],
+            snapshot["nodes"][0]["statement"]
+        );
+        assert_eq!(
+            input["catalog"][0]["research_question"],
+            snapshot["nodes"][0]["research_question"]
+        );
+        assert_eq!(program, original);
+        assert_eq!(
+            compact_evaluations(&program)["h"]["choose_next_operation"]["selected"],
+            "research"
+        );
     }
 
     #[test]
