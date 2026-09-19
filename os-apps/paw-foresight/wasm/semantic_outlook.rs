@@ -202,6 +202,12 @@ fn validate_v2(answer: &Value, snapshot: &Value) -> Result<(), String> {
         text(&outcome["title"], 100)?;
         text(&outcome["definition"], 1000)?;
         text(&outcome["narrative"], 1200)?;
+        if let Some(scene) = outcome.get("scene") {
+            text(scene, 600)?;
+        }
+        if let Some(actions) = outcome.get("what_you_can_do") {
+            list(actions, 0, 4, 240)?;
+        }
         list(&outcome["signals"], 1, 8, 240)?;
         list(&outcome["falsifiers"], 1, 8, 240)?;
         outcome["probability"]
@@ -270,5 +276,44 @@ mod v2_tests {
         let mut b = a;
         b["calibrated"] = json!(true);
         assert!(validate(&b, &s).is_err());
+    }
+    #[test]
+    fn optional_scenes_and_actions_preserve_old_answers_and_round_trip() {
+        let (mut answer, snapshot) = fixture();
+        assert!(
+            validate(&answer, &snapshot).is_ok(),
+            "old v2 omits new fields"
+        );
+        answer["outcomes"][0]["scene"] = json!(
+            "September 2027: a clinic owner watches her assistant clear the afternoon booking queue."
+        );
+        answer["outcomes"][0]["what_you_can_do"] =
+            json!(["Ask one clinic to show you its last ten failed bookings."]);
+        let decoded: Value = serde_json::from_str(&answer.to_string()).unwrap();
+        validate(&decoded, &snapshot).unwrap();
+        assert_eq!(decoded, answer);
+        answer["outcomes"][1]["what_you_can_do"] = json!([]);
+        validate(&answer, &snapshot).unwrap();
+    }
+    #[test]
+    fn malformed_scene_and_action_fields_fail_closed() {
+        let (answer, snapshot) = fixture();
+        for value in [json!(null), json!(42), json!(""), json!("x".repeat(601))] {
+            let mut bad = answer.clone();
+            bad["outcomes"][0]["scene"] = value;
+            assert!(validate(&bad, &snapshot).is_err());
+        }
+        for value in [
+            json!(null),
+            json!("a string"),
+            json!([42]),
+            json!([""]),
+            json!(["x".repeat(241)]),
+            json!(["a", "b", "c", "d", "e"]),
+        ] {
+            let mut bad = answer.clone();
+            bad["outcomes"][0]["what_you_can_do"] = value;
+            assert!(validate(&bad, &snapshot).is_err());
+        }
     }
 }

@@ -124,7 +124,7 @@ async fn research_recommendation_explores_without_resetting_global_budget() {
 async fn synthesis_uses_jev_event_estimates_instead_of_invented_weights() {
     let engine = WasmEngine::new().unwrap();
     let snapshot = json!({"world":{"target_date":"2027"},"nodes":[{"Id":"h1","kind":"scenario"},{"Id":"h2","kind":"revision"}]});
-    let outcome = |id: &str| json!({"id":id,"hypothesis_id":id,"title":"Future","definition":"Event by horizon","narrative":"Mechanism","probability":0.99,"scenario_ids":["h1"],"signals":["Signal"],"falsifiers":["Falsifier"]});
+    let outcome = |id: &str| json!({"id":id,"hypothesis_id":id,"title":"Future","definition":"Event by horizon","narrative":"Mechanism","scene":"September 2027: a builder ships a clinic booking fix before lunch.","what_you_can_do":["Watch one clinic handle a missed booking."],"probability":0.99,"scenario_ids":["h1"],"signals":["Signal"],"falsifiers":["Falsifier"]});
     let answer = json!({"schema":"foresight-outlook-v2","probability_model":"overlapping_events","probability_basis":"model_implied_event_estimate","calibrated":false,"headline":"Independent events","summary":"They can coexist","horizon":"2027","evidence_limits":["Uncalibrated"],"research_questions":[],"outcomes":[outcome("h1"),outcome("h2")]});
     let mut fields = json!({"phase":"synthesize","snapshot_json":snapshot.to_string(),"program_json":json!({"results":{"h1":{"estimate_likelihood":"0.8"},"h2":{"estimate_likelihood":"0.7"}}}).to_string(),"reasoning_result":answer.to_string()});
     let good = invoke(&engine, "semantic_expand", fields.clone()).await;
@@ -133,6 +133,22 @@ async fn synthesis_uses_jev_event_estimates_instead_of_invented_weights() {
         serde_json::from_str(good["callback_params"]["answer"].as_str().unwrap()).unwrap();
     assert_eq!(saved["outcomes"][0]["probability"], 0.8);
     assert_eq!(saved["outcomes"][1]["probability"], 0.7);
+    assert_eq!(
+        saved["outcomes"][0]["scene"],
+        answer["outcomes"][0]["scene"]
+    );
+    assert_eq!(
+        saved["outcomes"][0]["what_you_can_do"],
+        answer["outcomes"][0]["what_you_can_do"]
+    );
+    let mut invalid_scene = answer.clone();
+    invalid_scene["outcomes"][0]["scene"] = json!("x".repeat(601));
+    fields["reasoning_result"] = json!(invalid_scene.to_string());
+    assert_eq!(
+        invoke(&engine, "semantic_expand", fields.clone()).await["callback_action"],
+        "Fail"
+    );
+
     let mut bad = answer;
     bad["outcomes"][0]["hypothesis_id"] = json!("invented");
     fields["reasoning_result"] = json!(bad.to_string());
