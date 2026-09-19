@@ -52,20 +52,7 @@ fn check(ctx: &Context) -> Result<(), String> {
             return Err(format!("Reasoning session {id} did not complete: {error}"));
         }
         _ => {
-            let count = ctx
-                .entity_state
-                .get("counters")
-                .and_then(|v| v.get("check_count"))
-                .or_else(|| {
-                    ctx.entity_state
-                        .get("fields")
-                        .and_then(|v| v.get("check_count"))
-                })
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            if count >= 360 {
-                return Err("Reasoning check budget exhausted".into());
-            }
+            // Poll counts span children; elapsed-time limits own run/stage budgets.
             set_success_result("ReasoningPending", &json!({}));
         }
     };

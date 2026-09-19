@@ -114,4 +114,28 @@ async fn polling_projects_result_without_echoing_three_megabyte_prompt() {
             .contains("WASM module steering_checker not found"),
         "{failed}"
     );
+    let pending_host = SimWasmHost::new().with_response(
+        "http://fixture/tdata/Sessions('child')?$select=Status,result,error_message,error",
+        200,
+        &json!({"Status":"Running","result":"","error_message":"","error":""}).to_string(),
+    );
+    let mut later = ctx.clone();
+    later.entity_state["counters"] = json!({"check_count":360});
+    let pending: Value = serde_json::to_value(
+        engine
+            .invoke(
+                &hash,
+                &later,
+                Arc::new(pending_host),
+                &WasmResourceLimits::default(),
+                Arc::new(RwLock::new(StreamRegistry::default())),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        pending["callback_action"], "ReasoningPending",
+        "cumulative polling from earlier children must not prematurely fail a new child: {pending}"
+    );
 }

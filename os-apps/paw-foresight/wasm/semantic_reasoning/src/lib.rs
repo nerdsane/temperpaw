@@ -1,12 +1,20 @@
 use temper_wasm_sdk::prelude::*;
+// Each phase includes the shared evaluator contract but uses only its own subset.
+#[allow(dead_code, unused_imports)]
 mod core {
     include!("../../semantic_core.rs");
+}
+
+// The producer projects aliases; the consumer resolves them. Both share one mapping.
+#[allow(dead_code)]
+mod references {
+    include!("../../semantic_references.rs");
 }
 
 const MAX_REASONING_INPUT_BYTES: usize = 3 * 1024 * 1024;
 const FRONTIER_LIMIT: usize = 64;
 
-const EXPLORATION_PROMPT: &str = r#"Investigate the user's question in state.world.description through open causal exploration. The supplied catalog records what has already been considered; it is not the boundary of what can be considered. Discover new mechanisms and surprising hypotheses, pursue counterevidence, and revise the framing when it obscures something consequential. Follow interactions, second-order effects and alternatives emerging from evidence. Do not fill a predetermined taxonomy, Cartesian grid, fixed set of axes, or adoption/delay/failure template. A novel hypothesis must say what would happen and why, not merely rename a familiar outcome.
+const EXPLORATION_PROMPT: &str = r#"Investigate the user's question in state.world.description through open causal exploration. Existing nodes use short ref_ identifiers consistently across the catalog, dependencies and evaluations. Copy those references exactly; never invent or reconstruct a UUID. New hypothesis and evidence IDs must not start with ref_. The supplied catalog records what has already been considered; it is not the boundary of what can be considered. Discover new mechanisms and surprising hypotheses, pursue counterevidence, and revise the framing when it obscures something consequential. Follow interactions, second-order effects and alternatives emerging from evidence. Do not fill a predetermined taxonomy, Cartesian grid, fixed set of axes, or adoption/delay/failure template. A novel hypothesis must say what would happen and why, not merely rename a familiar outcome.
 
 Use available read-only temper.web_search and temper.web_fetch tools to investigate useful missing premises and evidence beyond the current frontier. Prefer direct temper.web_fetch(url). If direct fetch fails, temper.web_search(query) returns bounded source-extracted text in each result's text field. A focused title or site query may retrieve a useful excerpt. Use only a claim and quotation actually contained in that returned text; never infer source contents from the title, URL or a search summary. Explicitly label indexed-excerpt evidence, direct-fetch failure and date or context limitations in the statement/evidence_note; use weak_signal when context remains unverified. A truncated excerpt does not establish that the whole source was inspected. Smaller article or text-version URLs may be fetched only when actually discovered, never invented. web_fetch accepts only a URL; do not invent size, range or encoding parameters. Tool absence, failure, or conflicting evidence must remain explicit. For frozen hindcasts, return research_evidence=[] and reference only existing catalog evidence within the stated vantage: later remembered knowledge is inadmissible. Neither a citation nor a Jev label proves a future true. Hypotheses and observations remain distinct.
 
@@ -16,7 +24,7 @@ Choose the number and shape of hypotheses from the question and findings. At mos
 
 The engine can use up to5000 Jev calls,2048 nodes,64 exploration rounds and one hour; these are operational ceilings, not demands to pad the graph. Use the current assessments to challenge assumptions, explore neglected possibilities and direct research. A gap is a reason to investigate or reconsider a mechanism, not a command to make every hypothesis conform to the same future. Set continue_exploring=false only when further exploration has low expected value relative to what is already covered, and explain the remaining blind spots and the concrete reason to stop. A budget stop is incomplete exploration, not convergence. Preserve unresolved questions honestly."#;
 
-const SYNTHESIS_PROMPT: &str = r#"Answer the user's question with rich, contrasting futures supported by this actual exploration. Preserve different causal mechanisms and discoveries; do not collapse them onto one convenient axis or a compliance/not-compliance partition. Explain what could happen, why, what would make it happen, and what observations would change the assessment. A few futures may be most useful, but there is no prescribed number; select what materially improves the answer from evaluated hypotheses.
+const SYNTHESIS_PROMPT: &str = r#"Use the exact short ref_ identifiers in this input for hypothesis_id and scenario_ids; the engine resolves them to persisted identities. Answer the user's question with rich, contrasting futures supported by this actual exploration. Preserve different causal mechanisms and discoveries; do not collapse them onto one convenient axis or a compliance/not-compliance partition. Explain what could happen, why, what would make it happen, and what observations would change the assessment. A few futures may be most useful, but there is no prescribed number; select what materially improves the answer from evaluated hypotheses.
 
 Return JSON ONLY: {"schema":"foresight-outlook-v2","headline":"<=160 characters","horizon":"exact world.target_date","probability_basis":"model_implied_event_estimate","probability_model":"overlapping_events","calibrated":false,"summary":"<=400 characters","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"stable-short-id","hypothesis_id":"exact evaluated hypothesis node ID","title":"<=100 characters","definition":"<=1000 characters; faithful to the referenced hypothesis event and horizon","scenario_ids":["related actual hypothesis IDs, possibly shared across outcomes"],"narrative":"<=1200 characters, concrete actors, mechanism, interactions and alternative explanations","signals":["1–8 observable early signals, each <=240 characters"],"falsifiers":["1–8 observable disconfirmations, each <=240 characters"]}]}.
 
@@ -122,6 +130,7 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
         "remaining_calls":program["remaining_calls"], "round":program["round"],
         "exploration_note":program["exploration_note"]
     });
+    let input = references::References::new(snapshot)?.project(&input);
     if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
         return Err(
             "Reasoning context exceeds 3 MiB; refusing to silently omit explored hypotheses".into(),
@@ -240,11 +249,11 @@ mod reasoning_tests {
         let program = json!({"evaluations":{"h":{"estimate_likelihood":{"probability":0.37,"answer":{"noul":0.37}}}}});
         let input = reasoning_input(&snapshot, &program).unwrap();
         assert_eq!(
-            input["evaluations"]["h"]["estimate_likelihood"]["probability"],
+            input["evaluations"]["ref_0001"]["estimate_likelihood"]["probability"],
             0.37
         );
         assert!(
-            input["evaluations"]["h"]["estimate_likelihood"]
+            input["evaluations"]["ref_0001"]["estimate_likelihood"]
                 .get("answer")
                 .is_none()
         );

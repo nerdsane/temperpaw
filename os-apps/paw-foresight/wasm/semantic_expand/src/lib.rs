@@ -1,9 +1,16 @@
 use temper_wasm_sdk::prelude::*;
+// Each phase includes the shared evaluator contract but uses only its own subset.
+#[allow(dead_code, unused_imports)]
 mod core {
     include!("../../semantic_core.rs");
 }
 mod outlook {
     include!("../../semantic_outlook.rs");
+}
+// The producer projects aliases; the consumer resolves them. Both share one mapping.
+#[allow(dead_code)]
+mod references {
+    include!("../../semantic_references.rs");
 }
 fn identifier(v: &Value) -> Result<&str, String> {
     let id = v
@@ -55,6 +62,8 @@ fn expand(
     if !matches!(phase, "seed" | "explore") {
         return Err("Unknown exploration phase".into());
     }
+    let mut generated = generated.clone();
+    references::References::new(snapshot)?.resolve_generated(&mut generated);
     let hypotheses = generated["hypotheses"]
         .as_array()
         .ok_or("Missing hypotheses")?;
@@ -86,6 +95,9 @@ fn expand(
     let round = program["round"].as_u64().unwrap_or(0) + 1;
     for v in reports.iter().chain(hypotheses) {
         let local = identifier(&v["id"])?;
+        if local.starts_with(references::PREFIX) {
+            return Err("Generated identity uses reserved reference namespace".into());
+        }
         let id = format!("r{round}-{local}");
         if known.contains(local)
             || mapped.insert(local.to_owned(), id.clone()).is_some()
@@ -128,13 +140,13 @@ fn expand(
             .collect::<Result<Vec<_>, _>>()?;
         v["requires"] = json!(requires);
         let parent = hypothesis["parent"].as_str().filter(|s| !s.is_empty());
-        if let Some(parent) = parent {
-            if !nodes.iter().any(|n| {
+        if let Some(parent) = parent
+            && !nodes.iter().any(|n| {
                 core::field(n, "Id") == parent
                     && matches!(core::field(n, "kind"), "scenario" | "revision")
-            }) {
-                return Err("Unknown hypothesis parent".into());
-            }
+            })
+        {
+            return Err("Unknown hypothesis parent".into());
         }
         let mut node = generated_node(
             &v,
@@ -229,6 +241,7 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
     let mut snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
     if phase == "synthesize" {
         let mut answer = core::parse(raw)?;
+        references::References::new(&snapshot)?.resolve_generated(&mut answer);
         attach_probabilities(
             &mut answer,
             &core::parse(core::field(&ctx.entity_state, "program_json"))?,
@@ -270,6 +283,62 @@ mod tests {
     fn batch(id: &str) -> Value {
         json!({"hypotheses":[{"id":id,"statement":"A distinct hypothetical event","requires":["e"]}],"research_evidence":[],"continue_exploring":true,"exploration_note":"Explore another mechanism"})
     }
+    #[test]
+    fn short_references_resolve_exactly_and_mixed_uuid_still_fails() {
+        let a = "en-01a0ba3d-11c5-79f1-b578-741b76950dee";
+        let b = "en-01a0ba3d-13e3-7bf1-b2ad-8751edb87e9c";
+        let original = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":a,"edges":"[]"},{"Id":b,"edges":"[]"}]});
+        let mut s = original.clone();
+        let mut g = batch("h");
+        g["hypotheses"][0]["requires"] = json!(["ref_0001", "ref_0002"]);
+        expand(&mut s, &g, "seed", &json!({})).unwrap();
+        let edges: Value = serde_json::from_str(s["nodes"][2]["edges"].as_str().unwrap()).unwrap();
+        assert_eq!(edges[0]["to_id"], a);
+        assert_eq!(edges[1]["to_id"], b);
+        let mut invalid = original.clone();
+        g["hypotheses"][0]["requires"] = json!(["en-01a0ba3d-13e3-7bf1-b578-741b76950dee"]);
+        assert!(expand(&mut invalid, &g, "seed", &json!({})).is_err());
+        assert_eq!(invalid, original);
+        g["hypotheses"][0]["requires"] = json!(["ref_9999"]);
+        assert!(expand(&mut invalid, &g, "seed", &json!({})).is_err());
+        g["hypotheses"][0]["requires"] = json!(["ref_0001"]);
+        g["hypotheses"][0]["id"] = json!("ref_0002");
+        assert!(expand(&mut invalid, &g, "seed", &json!({})).is_err());
+    }
+    #[test]
+    fn parent_alias_preserves_exact_lineage_and_parent_assessment() {
+        let mut snapshot = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":"e","edges":"[]"},{"Id":"existing-hypothesis","kind":"scenario","edges":"[]"}]});
+        let mut generated = batch("new-path");
+        generated["hypotheses"][0]["requires"] = json!(["ref_0001"]);
+        generated["hypotheses"][0]["parent"] = json!("ref_0002");
+        expand(&mut snapshot,&generated,"explore",&json!({"round":1,"results":{"existing-hypothesis":{"classify_gap":"evidence","choose_next_operation":"challenge"}}})).unwrap();
+        let revised = &snapshot["nodes"][2];
+        assert_eq!(revised["parent"], "existing-hypothesis");
+        assert_eq!(revised["kind"], "revision");
+        assert_eq!(revised["before_gap"], "evidence");
+        assert_eq!(revised["operation"], "challenge");
+    }
+
+    #[test]
+    fn synthesis_alias_resolves_before_probability_attachment() {
+        let snapshot = json!({"nodes":[{"Id":"actual-hypothesis"}]});
+        let mut answer = json!({"schema":"foresight-outlook-v2","outcomes":[{"hypothesis_id":"ref_0001","scenario_ids":["ref_0001"]}]});
+        references::References::new(&snapshot)
+            .unwrap()
+            .resolve_generated(&mut answer);
+        attach_probabilities(
+            &mut answer,
+            &json!({"results":{"actual-hypothesis":{"estimate_likelihood":"0.37"}}}),
+        )
+        .unwrap();
+        assert_eq!(answer["outcomes"][0]["hypothesis_id"], "actual-hypothesis");
+        assert_eq!(
+            answer["outcomes"][0]["scenario_ids"][0],
+            "actual-hypothesis"
+        );
+        assert_eq!(answer["outcomes"][0]["probability"], 0.37);
+    }
+
     #[test]
     fn repeated_rounds_preserve_history_and_evaluate_new_hypotheses() {
         let mut s = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":"e","edges":"[]"}]});
