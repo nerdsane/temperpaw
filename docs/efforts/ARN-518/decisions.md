@@ -547,3 +547,15 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Chose the source manifest because:** Source and package must describe the same dependency closure. This pin records the intended release; it does not claim that Genesis publication or live installation has succeeded. Those remain required verification steps.
 
 **Where:** `os-apps/paw-foresight/app.toml`; prepared Foresight package `3aff81d797d20ee8de817c32fd2ebc861080693b`.
+
+## D46 — Deploy bundled Foresight apps while Genesis publication is deferred
+
+**Decision:** Use TemperPaw's existing image-bundled app reconciliation to release the prepared native Foresight packages, verifying acceptance before production; reconcile Genesis publication afterward.
+
+**Came up because:** On 2026-09-19 Rita explicitly requested bypassing the Genesis dependency because Foresight delivery is time-sensitive. Genesis PR #52 remains unpublished while its final review authorization is unresolved.
+
+**Options:** Keep Foresight waiting for Genesis; build a replacement orchestrator; or bundle the exact prepared app packages into the already-verified native runtime image.
+
+**Chose the bundled image because:** The runtime already loads and reconciles bundled specs, policies, and WASM by content digest. This removes the registry repair from the delivery path while retaining Temper-owned orchestration and the existing persistent acceptance service. It does not bypass the denied Genesis review operation or claim registry publication. Preserve the previous deployment for rollback and verify the installed modules, real forecast flow, and restart recovery before production promotion.
+
+**Where:** TemperPaw startup Phase 6b; native source `9836b4bc21b67b02a575fc241050e179ab2022c1`; app source `350ff8435102cc422eda45c2c8766abc5f05d554`; prepared agent `1fe41a7a5efd4b71bb72c349cab94b28b211f4ff` and Foresight `3aff81d797d20ee8de817c32fd2ebc861080693b`.
