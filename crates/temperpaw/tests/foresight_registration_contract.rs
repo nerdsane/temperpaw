@@ -833,7 +833,12 @@ fn verified_operator_can_start_worlds_but_cannot_write_machine_results() {
             "{action}"
         );
     }
-    for action in ["SeedComplete", "StartSemanticExploration", "AdoptModel"] {
+    for action in [
+        "SeedComplete",
+        "StartSeed",
+        "StartSemanticExploration",
+        "AdoptModel",
+    ] {
         assert!(
             !engine
                 .authorize(&operator, action, "World", &attrs)
@@ -846,4 +851,27 @@ fn verified_operator_can_start_worlds_but_cannot_write_machine_results() {
             .authorize(&operator, "Complete", "SemanticRun", &attrs)
             .is_allowed()
     );
+}
+
+#[test]
+fn operator_seed_enters_the_declared_system_research_action() {
+    let spec: toml::Value = toml::from_str(include_str!(
+        "../../../os-apps/paw-foresight/specs/world.ioa.toml"
+    ))
+    .unwrap();
+    let actions = spec["action"].as_array().unwrap();
+    let seed = actions
+        .iter()
+        .find(|a| a["name"].as_str() == Some("Seed"))
+        .unwrap();
+    let trigger = &seed["triggers"].as_array().unwrap()[0];
+    assert_eq!(trigger["kind"].as_str(), Some("entity"));
+    assert_eq!(trigger["principal"].as_str(), Some("system"));
+    assert_eq!(trigger["target_action"].as_str(), Some("StartSeed"));
+    assert_eq!(trigger["resolve_target"]["type"].as_str(), Some("same_id"));
+    let start = actions
+        .iter()
+        .find(|a| a["name"].as_str() == Some("StartSeed"))
+        .unwrap();
+    assert_eq!(start["triggers"][0]["module"].as_str(), Some("seed_world"));
 }

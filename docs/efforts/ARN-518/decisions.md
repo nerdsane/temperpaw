@@ -570,3 +570,14 @@ The protected pruned-route report preserves `Pruned`, so the old `PrunedIsFinal`
 **Options:** Correct the app's explicit input permission; change identity headers; grant broad operator mutation. **Chose the narrow app permission** because it uses the runtime's credential verification and preserves machine-only callbacks. Caller identity headers cannot confer authority. No provider/result actions are added.
 
 **Where:** `os-apps/paw-foresight/policies/foresight.cedar`; regression in `crates/temperpaw/tests/foresight_registration_contract.rs`; PR #526.
+
+
+## D48 — Hand requested research to the declared system flow
+
+**Decision:** World.Seed enters a same-World StartSeed entity trigger with the declared system principal; StartSeed alone invokes seed_world.
+
+**Came up because:** The first operator-started World passed configuration but its inherited operator could not create the researcher Session. The previous harness-driven run masked this difference.
+
+**Options:** Give the UI operator Session management; let Seed explicitly hand off to a system action. **Chose the system handoff** because the browser only requests a World, while Temper owns creating and running researchers. StartSeed rejects direct non-system calls. Existing ResumeSeed remains system-only.
+
+**Where:** World IOA/CSDL and Foresight Cedar; contract tests in `foresight_registration_contract.rs`; PR #526.

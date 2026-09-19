@@ -224,7 +224,23 @@ from = ["Created"]
 to = "Seeding"
 params = []
 hint = "Begin skeleton construction. Spawns surveyor and bookmaker sessions."
-effect = [{ type = "increment", var = "research_attempt" }, { type = "trigger", name = "seed_world" }]
+effect = [{ type = "increment", var = "research_attempt" }]
+
+[[action.triggers]]
+name = "start_seed_as_system"
+kind = "entity"
+principal = "system"
+target_entity = "World"
+target_action = "StartSeed"
+[action.triggers.resolve_target]
+type = "same_id"
+
+[[action]]
+name = "StartSeed"
+kind = "input"
+from = ["Seeding"]
+params = []
+hint = "The declared system flow creates the researcher after an operator requests Seed."
 
 [[action.triggers]]
 name = "seed_world"

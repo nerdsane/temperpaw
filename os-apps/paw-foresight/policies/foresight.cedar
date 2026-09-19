@@ -734,3 +734,8 @@ when {
   principal has agent_type && principal.agent_type == "operator" &&
   principal has agentTypeVerified && principal.agentTypeVerified == true
 };
+
+permit(principal, action == Action::"StartSeed", resource is World)
+when { principal has agent_type && principal.agent_type == "system" };
+forbid(principal, action == Action::"StartSeed", resource is World)
+unless { principal has agent_type && principal.agent_type == "system" };

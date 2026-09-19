@@ -631,6 +631,10 @@
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
         <ReturnType Type="TemperPaw.Foresight.World"/>
       </Action>
+      <Action Name="StartSeed" IsBound="true">
+        <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
+        <ReturnType Type="TemperPaw.Foresight.World"/>
+      </Action>
       <Action Name="ResearchSessionStarted" IsBound="true">
         <Parameter Name="bindingParameter" Type="TemperPaw.Foresight.World"/>
         <Parameter Name="research_session_id" Type="Edm.String" Nullable="false"/>
