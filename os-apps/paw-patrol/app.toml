@@ -110,16 +110,6 @@ startup_loading = "lazy"
 provenance = "bundled-artifact"
 import_class = "temper-host"
 
-# GitHub door: GET contents API for docs/efforts/<id>/*.md. One concern.
-[[wasm_modules]]
-name = "chain_github_ready"
-target = "wasm32-unknown-unknown"
-criticality = "app-required"
-startup_loading = "lazy"
-provenance = "bundled-artifact"
-import_class = "temper-host"
-
-# File door: GET a Temper File and require Ready/Locked. Review/proof only.
 [[wasm_modules]]
 name = "chain_file_ready"
 target = "wasm32-unknown-unknown"
@@ -128,57 +118,6 @@ startup_loading = "lazy"
 provenance = "bundled-artifact"
 import_class = "temper-host"
 
-# Review/proof/merge doors: GET sibling rows and retract the ready bool.
-[[wasm_modules]]
-name = "chain_review_ready"
-target = "wasm32-unknown-unknown"
-criticality = "app-required"
-startup_loading = "lazy"
-provenance = "bundled-artifact"
-import_class = "temper-host"
-
-[[wasm_modules]]
-name = "chain_proof_ready"
-target = "wasm32-unknown-unknown"
-criticality = "app-required"
-startup_loading = "lazy"
-provenance = "bundled-artifact"
-import_class = "temper-host"
-
-[[wasm_modules]]
-name = "chain_merge_ready"
-target = "wasm32-unknown-unknown"
-criticality = "app-required"
-startup_loading = "lazy"
-provenance = "bundled-artifact"
-import_class = "temper-host"
-
-[[wasm_modules]]
-name = "effort_resource_delivery_validate"
-target = "wasm32-unknown-unknown"
-criticality = "app-required"
-startup_loading = "lazy"
-provenance = "bundled-artifact"
-import_class = "temper-host"
-
-[[wasm_modules]]
-name = "effort_resource_delivery_merge"
-target = "wasm32-unknown-unknown"
-criticality = "app-required"
-startup_loading = "lazy"
-provenance = "bundled-artifact"
-import_class = "temper-host"
-
-[[wasm_modules]]
-name = "effort_resource_delivery_verify"
-target = "wasm32-unknown-unknown"
-criticality = "app-required"
-startup_loading = "lazy"
-provenance = "bundled-artifact"
-import_class = "temper-host"
-
-# Stage 3 S0 shadow bridge (ARN-430): parses b64 comment records into entity
-# fields. Temporary - retired at S3.
 [[wasm_modules]]
 name = "record_ingest"
 target = "wasm32-unknown-unknown"

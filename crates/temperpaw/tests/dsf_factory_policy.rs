@@ -316,63 +316,15 @@ fn actual_wasm_authorization_adapter_uses_method_context_and_secret_id() {
     );
     let engine = Arc::new(AuthzEngine::new("").unwrap());
     engine.reload_tenant_policies("default", &text).unwrap();
-    let member = SecurityContext::from_resolved_identity("member", "dsf-factory", None);
-    for action in [
-        "ResourceDeliveryConfigured",
-        "ResourceDeliveryMerged",
-        "ResourceDeliveryVerified",
-    ] {
-        assert!(matches!(
-            engine.authorize_for_tenant("default", &member, action, "Effort", &HashMap::new()),
-            AuthzDecision::Deny(_)
-        ));
-        assert!(matches!(
-            engine.authorize_for_tenant(
-                "default",
-                &service("wasm-runtime"),
-                action,
-                "Effort",
-                &HashMap::new()
-            ),
-            AuthzDecision::Allow { .. }
-        ));
-    }
     let gate = CedarWasmAuthzGate::new(engine);
-    let mut ctx = WasmAuthzContext {
+    let ctx = WasmAuthzContext {
         tenant: "default".into(),
-        module_name: "effort_resource_delivery_verify".into(),
+        module_name: "dsf_media_retry_selected_verify".into(),
         agent_id: Some("member".into()),
         session_id: None,
-        entity_type: "Effort".into(),
-        trigger_action: "VerifyResourceDelivery".into(),
+        entity_type: "DsfMediaPipeline".into(),
+        trigger_action: "VerifyRetry".into(),
     };
-    assert!(matches!(
-        gate.authorize_secret_access("temper_api_key", &ctx),
-        WasmAuthzDecision::Deny(_)
-    ));
-    assert!(matches!(
-        gate.authorize_secret_access("github_token", &ctx),
-        WasmAuthzDecision::Deny(_)
-    ));
-    assert!(matches!(
-        gate.authorize_http_call(
-            "temper.test",
-            "GET",
-            "https://temper.test/tdata/Efforts('e')",
-            &ctx
-        ),
-        WasmAuthzDecision::Allow
-    ));
-    assert!(matches!(
-        gate.authorize_http_call(
-            "temper.test",
-            "POST",
-            "https://temper.test/tdata/Efforts('e')",
-            &ctx
-        ),
-        WasmAuthzDecision::Deny(_)
-    ));
-    ctx.module_name = "dsf_media_retry_selected_verify".into();
     for name in [
         "dsf_admin_api_key",
         "dsf_railway_token",

@@ -61,7 +61,6 @@
         <Property Name="Repo" Type="Edm.String"/>
         <Property Name="Branch" Type="Edm.String"/>
         <Property Name="IntentRef" Type="Edm.String"/>
-        <Property Name="IntentFileReady" Type="Edm.Boolean"/>
         <Annotation Term="Paw.Vocab.AuthZ.CedarPolicy" String="policies/patrol.cedar"/>
         <Annotation Term="Paw.Vocab.Agent.Hint" String="Human or manager-agent intent submitted into Patrol as work; Accept creates its Effort."/>
       </EntityType>
@@ -142,26 +141,18 @@
         <Annotation Term="Paw.Vocab.Agent.Hint" String="Patrol-owned implementation loop with worker, reviewer, evaluator, and proof gates."/>
       </EntityType>
 
-      <!-- Effort - SDLC execution record (ARN-441). Implementer works via
-           Computer/Exec and writes this row. Additive until the phase-3 flip. -->
+      <!-- Ordinary task record, independent of release operations. -->
       <EntityType Name="Effort">
         <Key><PropertyRef Name="Id"/></Key>
         <Property Name="Id" Type="Edm.String" Nullable="false"/>
         <Property Name="Status" Type="Edm.String"/>
         <Property Name="IntentId" Type="Edm.String"/>
         <Property Name="FactoryCaseId" Type="Edm.String"/>
-        <Property Name="ReviewRunIds" Type="Collection(Edm.String)"/>
-        <Property Name="ProofPacketIds" Type="Collection(Edm.String)"/>
-        <Property Name="AskIds" Type="Collection(Edm.String)"/>
-        <Property Name="ReviewFixItClear" Type="Edm.Boolean"/>
-        <Property Name="MergeRiskClear" Type="Edm.Boolean"/>
-        <Property Name="DeploymentId" Type="Edm.String"/>
         <Property Name="IntentRef" Type="Edm.String"/>
         <Property Name="SpecRef" Type="Edm.String"/>
         <Property Name="PlanRef" Type="Edm.String"/>
         <Property Name="DecisionsRef" Type="Edm.String"/>
         <Property Name="PmIssueId" Type="Edm.String"/>
-        <Property Name="PlanSummary" Type="Edm.String"/>
         <Property Name="TaskSummary" Type="Edm.String"/>
         <Property Name="TaskDetail" Type="Edm.String"/>
         <Property Name="RiskLane" Type="Edm.String"/>
@@ -169,37 +160,19 @@
         <Property Name="Branch" Type="Edm.String"/>
         <Property Name="PrNumber" Type="Edm.String"/>
         <Property Name="HeadSha" Type="Edm.String"/>
-        <Property Name="ComputerId" Type="Edm.String"/>
-        <Property Name="ImageTag" Type="Edm.String"/>
-        <Property Name="DeployMaxChecks" Type="Edm.String"/>
-        <Property Name="ProbeId" Type="Edm.String"/>
-        <Property Name="DeployConfigured" Type="Edm.Boolean"/>
-        <Property Name="ReviewerRunId" Type="Edm.String"/>
-        <Property Name="EvaluationRunId" Type="Edm.String"/>
-        <Property Name="ProofPacketId" Type="Edm.String"/>
+        <Property Name="DeploymentId" Type="Edm.String"/>
         <Property Name="E2eSummary" Type="Edm.String"/>
-        <Property Name="ErrorMessage" Type="Edm.String"/>
-        <Property Name="SpecWritten" Type="Edm.Boolean"/>
-        <Property Name="PlanWritten" Type="Edm.Boolean"/>
-        <Property Name="SpecFileReady" Type="Edm.Boolean"/>
-        <Property Name="PlanFileReady" Type="Edm.Boolean"/>
-        <Property Name="DecisionsFileReady" Type="Edm.Boolean"/>
-        <Property Name="PanelCount" Type="Edm.Int32"/>
-        <Property Name="PanelStarted" Type="Edm.Boolean"/>
-        <Property Name="WorkerDone" Type="Edm.Boolean"/>
-        <Property Name="ReviewPassed" Type="Edm.Boolean"/>
-        <Property Name="EvaluationPassed" Type="Edm.Boolean"/>
-        <Property Name="ProofAttached" Type="Edm.Boolean"/>
-        <Property Name="E2eOk" Type="Edm.Boolean"/>
-        <Property Name="DeployVerified" Type="Edm.Boolean"/>
-        <Property Name="ResourceDeliveryPlan" Type="Edm.String"/>
-        <Property Name="ResourceDeliveryHead" Type="Edm.String"/>
+        <Property Name="ResultSummary" Type="Edm.String"/>
+        <Property Name="PullRequestUrls" Type="Collection(Edm.String)"/>
+        <Property Name="Evidence" Type="Collection(Edm.String)"/>
+        <Property Name="AskIds" Type="Collection(Edm.String)"/>
+        <Property Name="ReviewRunIds" Type="Collection(Edm.String)"/>
+        <Property Name="ProofPacketIds" Type="Collection(Edm.String)"/>
+        <Property Name="PlanSummary" Type="Edm.String"/>
         <Property Name="ResourceDeliveryEvidence" Type="Edm.String"/>
-        <Property Name="DeliverySequence" Type="Edm.Int64"/>
-        <Property Name="ResourceDeliveryConfigured" Type="Edm.Boolean"/>
-        <Property Name="ResourceDeliveryMerged" Type="Edm.Boolean"/>
+        <Property Name="ErrorMessage" Type="Edm.String"/>
         <Annotation Term="Paw.Vocab.AuthZ.CedarPolicy" String="policies/patrol.cedar"/>
-        <Annotation Term="Paw.Vocab.Agent.Hint" String="The SDLC execution unit. Ask is the inbox. intent/spec/plan/decisions are git paths. Review and proof are Temper Files. ConfigureDeploy then Merge creates a TemperDeploy. ConfigureResourceDelivery records exact resource operations; MergeResourceDelivery checks the same evidence gates; VerifyResourceDelivery checks their durable results."/>
+        <Annotation Term="Paw.Vocab.Agent.Hint" String="Create directly for a task. Open, Done or Cancelled. Attach multiple PR URLs and plain evidence. Complete records the outcome without merging or deploying."/>
       </EntityType>
 
       <EntityType Name="WorkerRun">
@@ -252,7 +225,7 @@
         <Property Name="ArtifactRef" Type="Edm.String"/>
         <Property Name="ArtifactFileReady" Type="Edm.Boolean"/>
         <Annotation Term="Paw.Vocab.AuthZ.CedarPolicy" String="policies/patrol.cedar"/>
-        <Annotation Term="Paw.Vocab.Agent.Hint" String="One panel agent's pass. artifact_ref is a Temper File (HTML/JSON); GitHub comments are not the record."/>
+        <Annotation Term="Paw.Vocab.Agent.Hint" String="Optional autonomous WorkCycle review record. Ordinary task reviews use plain findings and evidence on the Effort or PR."/>
       </EntityType>
 
       <EntityType Name="ReleaseRun">
