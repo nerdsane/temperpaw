@@ -354,7 +354,9 @@ fn resume_transition(prepared: &Value) -> Result<&'static str, String> {
     Ok(
         if core::field(prepared, "phase") != "synthesize"
             && (core::field(prepared, "phase") != "compose" || program["stage"] == "worlds")
-            && (cursor < count || program["resume_mode"] == "unfinished_exploration")
+            && (cursor < count
+                || program["resume_mode"] == "unfinished_exploration"
+                || (core::field(prepared, "phase") == "compose" && program["stage"] == "worlds"))
         {
             "ResumePrepared"
         } else {
@@ -463,6 +465,59 @@ mod tests {
         let program = json!({"schema":"foresight-open-semantic-v2","tasks":[],"cursor":0,"results":{"h":{"estimate_likelihood":"0.37"}},"evaluations":{},"rounds":[],"round":2});
         json!({"Status":"Failed","world_id":"w","snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"trace_json":"[]","started_at_ms":"1000","phase":"explore","agent_id":"agent-a","model":"model-a","provider":"provider-a"})
     }
+    #[test]
+    fn completed_world_composition_checkpoint_returns_to_native_decision() {
+        let program = json!({"stage":"worlds","cursor":0,"tasks":[]});
+        assert_eq!(
+            resume_transition(&json!({"phase":"compose","program_json":program.to_string()}))
+                .unwrap(),
+            "ResumePrepared"
+        );
+        assert_eq!(
+            resume_transition(&json!({"phase":"synthesize","program_json":program.to_string()}))
+                .unwrap(),
+            "Prepared"
+        );
+        let exploration = json!({"stage":"exploration","cursor":0,"tasks":[]});
+        assert_eq!(
+            resume_transition(&json!({"phase":"compose","program_json":exploration.to_string()}))
+                .unwrap(),
+            "Prepared"
+        );
+    }
+
+    #[test]
+    #[ignore = "Requires explicit local failed composed-world checkpoint"]
+    fn saved_completed_world_passes_resume_without_changing_history() {
+        let raw: Value = serde_json::from_str(
+            &std::fs::read_to_string(std::env::var("FORESIGHT_WORLD_COMPOSE_FIXTURE").unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        let record = &raw["fields"];
+        let started = core::field(record, "started_at_ms").parse::<u64>().unwrap();
+        let prepared =
+            resume_checkpoint(record, core::field(record, "world_id"), started + 1000).unwrap();
+        for key in [
+            "snapshot_json",
+            "program_json",
+            "trace_json",
+            "started_at_ms",
+        ] {
+            assert_eq!(prepared[key], record[key]);
+        }
+        assert_eq!(prepared["phase"], "compose");
+        assert_eq!(resume_transition(&prepared).unwrap(), "ResumePrepared");
+        let exhausted = resume_checkpoint(
+            record,
+            core::field(record, "world_id"),
+            started + core::MAX_MS,
+        )
+        .unwrap();
+        assert_eq!(exhausted["phase"], "synthesize");
+        assert_eq!(resume_transition(&exhausted).unwrap(), "Prepared");
+    }
+
     #[test]
     fn archived_world_classification_failure_resumes_even_when_real_tasks_are_complete() {
         let snapshot = json!({"nodes":[{"Id":"h","kind":"scenario","edges":"[]"},{"Id":"old-world","kind":"world","archived":true,"edges":"[]"}]});

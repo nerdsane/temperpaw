@@ -126,6 +126,22 @@ fn compact_evaluations(program: &Value) -> Value {
     compact
 }
 
+// Writers need every round's judgments, not repeated provider envelopes and
+// per-question provenance. Full receipts remain in the program and final answer.
+fn compact_world_refinement(program: &Value) -> Value {
+    let mut histories = program["world_refinement"].clone();
+    if let Some(worlds) = histories.as_object_mut() {
+        for history in worlds.values_mut() {
+            if let Some(rounds) = history["rounds"].as_array_mut() {
+                for round in rounds {
+                    round["evaluations"] = compact_evaluations(round);
+                }
+            }
+        }
+    }
+    histories
+}
+
 // Evaluation history remains intact; the generator receives assessments rather
 // than a second planner's repeated per-node operation recommendations.
 fn without_operation_recommendations(mut assessments: Value) -> Value {
@@ -163,7 +179,7 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
         "issues":program["issues"], "stop_reason":program["stop_reason"],
         "remaining_calls":program["remaining_calls"], "round":program["round"],
         "combination_search":program["combination_search"], "world_audits":program["world_audits"],
-        "active_world_ids":program["active_world_ids"], "world_revision":program["world_revision"], "world_refinement":program["world_refinement"]
+        "active_world_ids":program["active_world_ids"], "world_revision":program["world_revision"], "world_refinement":compact_world_refinement(program)
     });
     let input = references::References::new(snapshot)?.project(&input);
     if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
@@ -196,7 +212,7 @@ fn world_writing_input(snapshot: &Value, program: &Value) -> Result<Value, Strin
     references::References::new(snapshot).map(|refs| {
         refs.project(&json!({
             "world":snapshot["world"], "baseline":program["baseline"], "worlds":worlds,
-            "world_audits":program["world_audits"], "world_refinement":program["world_refinement"],
+            "world_audits":program["world_audits"], "world_refinement":compact_world_refinement(program),
             "evaluations":evaluations, "stop_reason":program["stop_reason"],
             "evaluation_error":program["last_error"], "exploration_note":program["exploration_note"]
         }))
@@ -418,6 +434,44 @@ mod reasoning_tests {
         );
         assert_eq!(input["baseline"]["as_of"], "2026-09-19");
         assert!(world_writing_input(&json!({"nodes":[]}), &program).is_err());
+    }
+
+    #[test]
+    fn writing_preserves_every_refinement_judgment_without_repeating_provider_receipts() {
+        let snapshot = json!({"nodes":[{"Id":"w1","kind":"world"},{"Id":"w2","kind":"world"}]});
+        let round = json!({"round":1,"complete":true,"probability":0.42,"audit_status":"uncertain","evidence_ids":["source"],"assessments":{"w1":{"estimate_likelihood":"0.42"}},"evaluations":{"w1":{"estimate_likelihood":{"probability":0.42,"answer":{"noul":0.42},"evidence_ids":["source"],"provider_payload":"x".repeat(100_000)}}}});
+        let program = json!({"world_refinement":{"w1":{"world_id":"w1","accuracy_verified":false,"stop_reason":"max_refinement_passes","rounds":[round.clone(),round.clone()]}}});
+        let before = program.clone();
+        for input in [
+            reasoning_input(&snapshot, &program).unwrap(),
+            world_writing_input(&snapshot, &program).unwrap(),
+        ] {
+            let history = &input["world_refinement"]["ref_0001"];
+            assert_eq!(history["accuracy_verified"], false);
+            assert_eq!(history["stop_reason"], "max_refinement_passes");
+            assert_eq!(history["rounds"].as_array().unwrap().len(), 2);
+            for receipt in history["rounds"].as_array().unwrap() {
+                for key in [
+                    "round",
+                    "complete",
+                    "probability",
+                    "audit_status",
+                    "evidence_ids",
+                ] {
+                    assert_eq!(receipt[key], round[key]);
+                }
+                assert_eq!(
+                    receipt["assessments"]["ref_0001"]["estimate_likelihood"],
+                    "0.42"
+                );
+                assert_eq!(
+                    receipt["evaluations"]["ref_0001"]["estimate_likelihood"],
+                    json!({"probability":0.42})
+                );
+            }
+            assert!(input.to_string().len() < 20_000);
+        }
+        assert_eq!(program, before);
     }
 
     #[test]

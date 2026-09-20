@@ -44,6 +44,7 @@ fn next_phase(
             .cloned()
             .unwrap_or_default();
         let mut unresolved = false;
+        let mut has_conflict = false;
         let mut next_questions = 0;
         if !program["world_audits"].is_object() {
             program["world_audits"] = json!({});
@@ -56,12 +57,13 @@ fn next_phase(
         {
             let audit = core::search::audit_world(world, program);
             unresolved |= audit["status"] != "no_conflict_found";
+            has_conflict |= audit["status"] == "conflicts_found";
             next_questions += core::search::world_tasks(world).len();
             program["world_audits"][core::field(world, "Id")] = audit;
         }
         // Bounded feedback loop, with fresh immutable worlds and fresh audit contexts.
         // Unknowns may remain; never rename a rewrite 'a gap cleared'.
-        if unresolved
+        if has_conflict
             && exhausted.is_empty()
             && program["world_revision"].as_u64().unwrap_or(1) < 3
             && core::MAX_CALLS.saturating_sub(trace_len) >= next_questions
@@ -179,6 +181,57 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn evaluated_world(label: &str) -> (Value, Value) {
+        let world = json!({"Id":"w","kind":"world","statement":"A, B and C occur together","component_ids":["a","b","c"],"chain":[]});
+        let snapshot = json!({"nodes":[world]});
+        let tasks = core::search::world_tasks(&world);
+        let mut program = json!({"stage":"worlds","world_pass":1,"world_revision":1,"active_world_ids":["w"],"evidence_ids":["source"],"tasks":tasks,"results":{},"evaluations":{}});
+        for task in tasks {
+            let function = core::field(&task, "function");
+            let result = match function {
+                "estimate_likelihood" => "0.42",
+                "check_world_consistency" => label,
+                _ => "compatible",
+            };
+            program["results"][core::field(&task, "nodeId")][function] = json!(result);
+        }
+        (snapshot, program)
+    }
+
+    #[test]
+    fn uncertain_completed_world_keeps_its_probability_and_history_after_refinement() {
+        let (snapshot, mut program) = evaluated_world("uncertain");
+        let results = program["results"].clone();
+        assert_eq!(next_phase(&snapshot, &mut program, 20, 1000), "refine");
+        let first = program["world_refinement"]["w"]["rounds"][0].clone();
+        program["results"] = results.clone();
+        assert_eq!(next_phase(&snapshot, &mut program, 40, 2000), "synthesize");
+        assert_eq!(program["world_audits"]["w"]["status"], "uncertain");
+        assert_eq!(program["stop_reason"], "world_audits_incomplete");
+        assert_eq!(program["results"], results);
+        assert_eq!(program["active_world_ids"], json!(["w"]));
+        assert_eq!(program["world_revision"], 1);
+        assert_eq!(program["world_refinement"]["w"]["rounds"][0], first);
+        assert_eq!(
+            program["world_refinement"]["w"]["rounds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn explicit_conflict_still_recomposes_after_completed_refinement() {
+        let (snapshot, mut program) = evaluated_world("conflict");
+        let results = program["results"].clone();
+        assert_eq!(next_phase(&snapshot, &mut program, 20, 1000), "refine");
+        program["results"] = results;
+        assert_eq!(next_phase(&snapshot, &mut program, 40, 2000), "compose");
+        assert_eq!(program["world_audits"]["w"]["status"], "conflicts_found");
+        assert_eq!(program["stop_reason"], "world_revision_needed");
+    }
+
     #[test]
     fn self_declared_saturation_gets_one_independent_challenge_before_pair_search() {
         let snapshot = json!({"nodes":[]});
