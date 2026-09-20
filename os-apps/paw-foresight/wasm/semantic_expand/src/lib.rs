@@ -286,18 +286,33 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
         let counters = world["counter_ids"]
             .as_array()
             .ok_or("Missing world counter hypotheses")?;
+        if counters.len() > 12 {
+            return Err(format!("World {local}: counter_ids exceeds twelve entries"));
+        }
         let mut counter_ids = std::collections::BTreeSet::new();
-        if counters.len() > 12
-            || counters.iter().any(|id| {
-                let reference = id.as_str().unwrap_or("");
-                components.contains(reference)
-                    || !counter_ids.insert(reference)
-                    || by_id
-                        .get(id.as_str().unwrap_or(""))
-                        .is_none_or(|n| !matches!(core::field(n, "kind"), "scenario" | "revision"))
-            })
-        {
-            return Err("Unknown counter hypothesis".into());
+        for value in counters {
+            let reference = value.as_str().ok_or("Counter reference must be a string")?;
+            let reason = if components.contains(reference) {
+                Some("is also a defining component")
+            } else if !counter_ids.insert(reference) {
+                Some("is repeated")
+            } else {
+                match by_id.get(reference) {
+                    None => Some("does not exist in the catalog"),
+                    Some(node) if !matches!(core::field(node, "kind"), "scenario" | "revision") => {
+                        Some(
+                            "is evidence, not a future hypothesis; evidence belongs in the baseline or source context",
+                        )
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(reason) = reason {
+                let alias = references::References::new(snapshot)?
+                    .project(&json!({"counter_ids":[reference]}));
+                let alias = alias["counter_ids"][0].as_str().unwrap_or(reference);
+                return Err(format!("World {local}: counter reference {alias} {reason}"));
+            }
         }
         let mut node = world.clone();
         node.as_object_mut().ok_or("Invalid world")?.remove("id");
@@ -580,6 +595,31 @@ fn replan(snapshot: &Value, old: &Value, generated: &Value, added: usize) -> Res
         .retain(|t| results[core::field(t, "nodeId")][core::field(t, "function")].is_null());
     Ok(program)
 }
+// Invalid model output is correctable without discarding evaluated work. The
+// rejected draft remains untrusted and never enters the snapshot or task queue.
+fn composition_correction(old: &Value, raw: &str, error: &str) -> Result<Value, String> {
+    let attempt = old["composition_correction"]["attempt"]
+        .as_u64()
+        .unwrap_or(0)
+        + 1;
+    if attempt > 2 {
+        return Err(format!(
+            "Composition rejected after two corrective attempts: {error}"
+        ));
+    }
+    if raw.len() > 256 * 1024 {
+        return Err(format!(
+            "Rejected composition exceeds correction context limit: {error}"
+        ));
+    }
+    let mut program = old.clone();
+    program["composition_correction"] = json!({
+        "attempt":attempt, "validation_error":error, "rejected_draft":raw,
+        "instruction":"Correct the rejected composition against the unchanged catalog. Return the complete composition JSON. Do not invent references, turn observations into future hypotheses, or claim any new evaluation ran."
+    });
+    Ok(program)
+}
+
 fn run_inner(ctx: &Context) -> Result<(), String> {
     let raw = core::field(&ctx.entity_state, "reasoning_result").trim();
     let phase = core::field(&ctx.entity_state, "phase");
@@ -614,11 +654,21 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
         return Ok(());
     }
     let old = core::parse(core::field(&ctx.entity_state, "program_json"))?;
-    let generated = core::parse(raw)?;
     let before = snapshot["nodes"].as_array().ok_or("Missing nodes")?.len();
     let composed = if phase == "compose" {
-        Some(compose(&mut snapshot, &generated, &old)?)
+        match core::parse(raw).and_then(|generated| compose(&mut snapshot, &generated, &old)) {
+            Ok(program) => Some(program),
+            Err(error) => {
+                let program = composition_correction(&old, raw, &error)?;
+                set_success_result(
+                    "CompositionRejected",
+                    &json!({"program_json":program.to_string()}),
+                );
+                return Ok(());
+            }
+        }
     } else {
+        let generated = core::parse(raw)?;
         expand(&mut snapshot, &generated, phase, &old)?;
         None
     };
@@ -630,7 +680,7 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
     let program = if let Some(program) = composed {
         program
     } else {
-        replan(&snapshot, &old, &generated, added)?
+        replan(&snapshot, &old, &core::parse(raw)?, added)?
     };
     set_success_result(
         "Expanded",
@@ -818,6 +868,34 @@ mod tests {
             edges,
             json!([{"kind":"supports","to_id":"e"},{"kind":"requires","to_id":"h"}])
         );
+    }
+
+    #[test]
+    fn evidence_counter_failure_is_correctable_without_losing_evaluated_work() {
+        let (snapshot, valid, mut old) = world_fixture();
+        old["http_calls"] = json!(408);
+        old["combination_search"] = json!({"tested_pairs":820});
+        let mut rejected = valid.clone();
+        // The live failure used a genuine evidence alias as a counter hypothesis.
+        rejected["worlds"][0]["counter_ids"] = json!(["ref_0001"]);
+        let mut candidate = snapshot.clone();
+        let error = compose(&mut candidate, &rejected, &old).unwrap_err();
+        assert!(error.contains("is evidence, not a future hypothesis"));
+        assert_eq!(candidate, snapshot);
+        let corrected = composition_correction(&old, &rejected.to_string(), &error).unwrap();
+        for (key, value) in old.as_object().unwrap() {
+            assert_eq!(&corrected[key], value);
+        }
+        assert_eq!(
+            corrected["composition_correction"]["validation_error"],
+            error
+        );
+        let twice = composition_correction(&corrected, &rejected.to_string(), &error).unwrap();
+        assert!(composition_correction(&twice, &rejected.to_string(), &error).is_err());
+        let accepted = compose(&mut candidate, &valid, &twice).unwrap();
+        assert!(accepted["composition_correction"].is_null());
+        assert_eq!(accepted["http_calls"], old["http_calls"]);
+        assert_eq!(accepted["combination_search"], old["combination_search"]);
     }
 
     #[test]

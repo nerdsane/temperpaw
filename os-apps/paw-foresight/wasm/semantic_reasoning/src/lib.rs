@@ -32,7 +32,7 @@ Reference contract: existing catalog nodes use exact ref_ identifiers; never rec
 
 Resource contract: at most128 TOTAL hypotheses plus research_evidence per batch; capacity5000 Jev calls,2048 nodes,64 rounds and one hour. These are limits, not targets or category counts. Continue while another round can add a materially different mechanism or resolve a consequential uncertainty. Stop with continue_exploring=false when it cannot, explaining why and what remains unknown. A budget stop means incomplete exploration, not convergence."#;
 
-const WORLD_COMPOSITION_PROMPT: &str = r#"Turn the explored evidence and possibilities into a few genuinely different WORLDS that answer the user's question. The small nodes are building blocks, not the final answer. Find coherent combinations and causal chains: what people do, what becomes cheap or scarce, who gains or loses, what disappears, and what changes next. Do not turn each node into a separate world or split one familiar lesson into several cards. A world is more than a themed list. Its defining changes must fit together and have a clear reason to occur together. Consider rival mechanisms and evidence that challenges the combination. Do not force an optimistic/pessimistic/middle template, a compliance split, or the same axes for every question.
+const WORLD_COMPOSITION_PROMPT: &str = r#"Turn the explored evidence and possibilities into a few genuinely different WORLDS that answer the user's question. The small nodes are building blocks, not the final answer. Compare candidate worlds with the observed baseline and discard repackaged present-day workflows. Select distinct downstream consequences: what becomes possible or unnecessary, how software itself changes, and how a person's life differs. Follow second- and third-order effects supported by the explored components. Do not merely select the highest-scoring clusters because they are easiest to defend; retain plausible low-likelihood alternatives when they imply a meaningfully different future. Shared components are allowed, but worlds must differ in consequences, not just titles. Explain the difference from today's baseline without inventing unevaluated component events. Find coherent combinations and causal chains: what people do, what becomes cheap or scarce, who gains or loses, what disappears, and what changes next. Do not turn each node into a separate world or split one familiar lesson into several cards. A world is more than a themed list. Its defining changes must fit together and have a clear reason to occur together. Consider rival mechanisms and evidence that challenges the combination. Do not force an optimistic/pessimistic/middle template, a compliance split, or the same axes for every question.
 
 Begin with the present at world.last_ingest_date. Separate supported observations, assumptions supplied by the user, and unresolved facts. A practice already common in the relevant setting is the starting point, not a future breakthrough. Describe what changes AFTER that starting point. Do not universalize a user's own workflow or an early-adopter example to everyone. Source retrieval dates are not publication dates. If current evidence is missing, state that plainly. The final worlds should differ in consequences and ways of living, not only in speed of adoption.
 
@@ -143,6 +143,7 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
             "choose_next_operation":definitions::choose_next_operation(),
             "operation_role":"Advisory possibilities, not instructions, completion claims or a prescribed sequence."
         },
+        "composition_correction":program["composition_correction"],
         "issues":program["issues"], "stop_reason":program["stop_reason"],
         "remaining_calls":program["remaining_calls"], "round":program["round"],
         "combination_search":program["combination_search"], "world_audits":program["world_audits"],
@@ -230,6 +231,17 @@ mod reasoning_tests {
 
     mod outlook_contract {
         include!("../../semantic_outlook.rs");
+    }
+
+    #[test]
+    fn composer_receives_exact_rejected_draft_and_validation_feedback() {
+        let correction = json!({"attempt":1,"validation_error":"Counter ref_0012 is evidence, not a hypothesis", "rejected_draft":"{invalid draft}"});
+        let input = reasoning_input(
+            &json!({"nodes":[]}),
+            &json!({"composition_correction":correction}),
+        )
+        .unwrap();
+        assert_eq!(input["composition_correction"], correction);
     }
 
     #[test]

@@ -12,4 +12,8 @@ Verification exercises actual prior-state injection, cleared current estimates, 
 
 The engine reserves 3,600 of its 5,000 question budget for combination/world work and checks the exact next-pass task count before scheduling. The maximum allowed world shapes across all revisions can exceed the global budget; the reserve is not a completion guarantee. Time and trace limits remain hard limits, and every active world's receipt reports an interrupted pass rather than silently omitting a world.
 
+Cumulative question ceilings are 1,400 for exploration, 2,400 for combination search, and 5,000 for world evaluation. Their time ceilings are 50, 53, and 60 minutes. Reaching the exploration ceiling still leaves combination search available; provider or trace failures remain hard stops.
+
+Invalid composition returns through `CompositionRejected` to the reasoning state with the exact rejected draft and validation error, for at most two corrective attempts. It does not enter the snapshot or repeat research or Jev checks. Sources remain distinct from counter hypotheses. Large saved runs use the existing governed HTTP host operation with a bounded 64 MiB checkpoint envelope, retaining the 24 MiB trace limit. Resume preserves the original clock, scores and full trace; it never truncates history to fit the SDK's default HTTP buffer.
+
 Provider feedback uses one task legend and indexed per-round judgment vectors, plus deduplicated evidence contexts. Canonical task IDs and complete structured evaluations remain in persisted receipts; no judgments or worlds are omitted from the compact provider view. A maximum valid 12-component connected DAG with long identities and large supplied evidence is covered by a third-pass payload regression under 128 KB.

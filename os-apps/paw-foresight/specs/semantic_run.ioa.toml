@@ -640,3 +640,20 @@ on_failure = "Fail"
 [action.triggers.config]
 max_memory = "268435456"
 max_fuel = "10000000000"
+
+
+# Invalid composition is returned to the composer without repeating evaluation.
+[[action]]
+name = "CompositionRejected"
+kind = "input"
+from = ["Expanding"]
+to = "ReasoningSetup"
+params = ["program_json"]
+[[action.triggers]]
+name = "semantic_reasoning"
+kind = "wasm"
+module = "semantic_reasoning"
+on_failure = "Fail"
+[action.triggers.config]
+max_memory = "268435456"
+max_fuel = "10000000000"

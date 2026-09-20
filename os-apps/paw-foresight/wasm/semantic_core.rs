@@ -10,18 +10,21 @@ pub const MAX_ROUNDS: u64 = 64;
 // Questions, not HTTP requests: independent structural questions can share a call.
 pub const WORLD_CALL_RESERVE: usize = 3600;
 pub const WORLD_TIME_RESERVE_MS: u64 = 600_000;
+// The reserved tail contains pair search followed by world evaluation.
+pub const COMBINATION_CALL_BUDGET: usize = 1000;
+pub const COMBINATION_TIME_BUDGET_MS: u64 = 180_000;
 pub fn call_limit(program: &Value) -> usize {
-    if program["stage"] == "worlds" {
-        MAX_CALLS
-    } else {
-        MAX_CALLS - WORLD_CALL_RESERVE
+    match program["stage"].as_str() {
+        Some("worlds") => MAX_CALLS,
+        Some("combinations") => MAX_CALLS - WORLD_CALL_RESERVE + COMBINATION_CALL_BUDGET,
+        _ => MAX_CALLS - WORLD_CALL_RESERVE,
     }
 }
 pub fn time_limit(program: &Value) -> u64 {
-    if program["stage"] == "worlds" {
-        MAX_MS
-    } else {
-        MAX_MS - WORLD_TIME_RESERVE_MS
+    match program["stage"].as_str() {
+        Some("worlds") => MAX_MS,
+        Some("combinations") => MAX_MS - WORLD_TIME_RESERVE_MS + COMBINATION_TIME_BUDGET_MS,
+        _ => MAX_MS - WORLD_TIME_RESERVE_MS,
     }
 }
 pub mod evaluation {

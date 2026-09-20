@@ -90,6 +90,27 @@ fn next_phase(
         "explore"
     }
 }
+fn plan_combination_phase(
+    snapshot: &Value,
+    program: &mut Value,
+    calls: usize,
+    elapsed: u64,
+) -> bool {
+    let search = json!({"stage":"combinations"});
+    program["stage"] == "exploration"
+        && program["combination_search"].is_null()
+        && !matches!(
+            program["stop_reason"].as_str(),
+            Some("provider_error" | "trace_budget")
+        )
+        && elapsed < core::time_limit(&search)
+        && core::search::plan_combinations(
+            snapshot,
+            program,
+            core::call_limit(&search).saturating_sub(calls),
+        )
+}
+
 fn step(ctx: &Context) -> Result<(), String> {
     let mut program = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let trace = core::parse(core::field(&ctx.entity_state, "trace_json"))?;
@@ -124,21 +145,7 @@ fn step(ctx: &Context) -> Result<(), String> {
             );
             return Ok(());
         }
-        if phase == "compose"
-            && program["stage"] == "exploration"
-            && program["combination_search"].is_null()
-            && !matches!(
-                program["stop_reason"].as_str(),
-                Some("provider_error" | "trace_budget" | "time_budget")
-            )
-            && core::search::plan_combinations(
-                &snapshot,
-                &mut program,
-                core::MAX_CALLS
-                    .saturating_sub(core::WORLD_CALL_RESERVE)
-                    .saturating_sub(calls),
-            )
-        {
+        if phase == "compose" && plan_combination_phase(&snapshot, &mut program, calls, elapsed) {
             set_success_result(
                 "SearchPlanned",
                 &json!({"program_json":program.to_string()}),
@@ -187,6 +194,52 @@ mod tests {
         assert_eq!(next_phase(&s, &mut p, 213, 1000), "compose");
         assert_eq!(p["stop_reason"], "exploration_converged");
     }
+    #[test]
+    fn exploration_cap_preserves_pair_search_and_world_capacity() {
+        let mut program = json!({"stage":"exploration","continue_exploring":true});
+        let snapshot = json!({"nodes":[{"Id":"a","kind":"scenario"},{"Id":"b","kind":"scenario"},{"Id":"c","kind":"scenario"}]});
+        let calls = core::call_limit(&program);
+        assert_eq!(calls, 1400);
+        assert_eq!(next_phase(&snapshot, &mut program, calls, 0), "compose");
+        let search_limit = core::call_limit(&json!({"stage":"combinations"}));
+        assert_eq!(search_limit, 2400);
+        assert!(plan_combination_phase(&snapshot, &mut program, calls, 0));
+        assert_eq!(program["tasks"].as_array().unwrap().len(), 3);
+        assert!(core::call_limit(&program) > calls);
+        assert_eq!(core::MAX_CALLS - search_limit, 2600);
+    }
+
+    #[test]
+    fn exploration_time_boundary_can_search_but_hard_stops_cannot() {
+        let snapshot = json!({"nodes":[{"Id":"a","kind":"scenario"},{"Id":"b","kind":"scenario"},{"Id":"c","kind":"scenario"}]});
+        let mut program = json!({"stage":"exploration","stop_reason":"time_budget"});
+        let boundary = core::time_limit(&program);
+        assert!(plan_combination_phase(
+            &snapshot,
+            &mut program,
+            1400,
+            boundary
+        ));
+        assert_eq!(core::time_limit(&program), boundary + 180_000);
+        assert_eq!(core::MAX_MS - core::time_limit(&program), 420_000);
+        for reason in ["provider_error", "trace_budget"] {
+            let mut stopped = json!({"stage":"exploration","stop_reason":reason});
+            assert!(!plan_combination_phase(
+                &snapshot,
+                &mut stopped,
+                1400,
+                boundary
+            ));
+        }
+        let mut expired = json!({"stage":"exploration","stop_reason":"time_budget"});
+        assert!(!plan_combination_phase(
+            &snapshot,
+            &mut expired,
+            1400,
+            boundary + 180_000
+        ));
+    }
+
     #[test]
     fn reserves_calls_and_time_for_world_evaluation() {
         let snapshot = json!({"nodes":[]});

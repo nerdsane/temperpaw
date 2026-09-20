@@ -13,17 +13,18 @@ fn read_bounded(ctx: &Context, path: &str, max_bytes: usize) -> Result<Value, St
         .get("temper_api_url")
         .filter(|s| !s.is_empty() && !s.contains("{secret:"))
         .ok_or("Missing Temper URL")?;
-    let response = ctx.http_call(
-        "GET",
-        &format!("{api}/tdata/{path}"),
-        &[
-            ("x-tenant-id".into(), ctx.tenant.clone()),
-            ("x-temper-principal-kind".into(), "agent".into()),
-            ("x-temper-principal-id".into(), ctx.entity_id.clone()),
-            ("x-temper-agent-type".into(), "system".into()),
-        ],
-        "",
-    )?;
+    let url = format!("{api}/tdata/{path}");
+    let headers = [
+        ("x-tenant-id".into(), ctx.tenant.clone()),
+        ("x-temper-principal-kind".into(), "agent".into()),
+        ("x-temper-principal-id".into(), ctx.entity_id.clone()),
+        ("x-temper-agent-type".into(), "system".into()),
+    ];
+    let response = if max_bytes < temper_wasm_sdk::host::HTTP_BUF_LEN {
+        ctx.http_call("GET", &url, &headers, "")?
+    } else {
+        read_checkpoint_response(&url, &headers, max_bytes)?
+    };
     if response.status != 200 {
         return Err(format!("Snapshot read HTTP {}", response.status));
     }
@@ -33,6 +34,55 @@ fn read_bounded(ctx: &Context, path: &str, max_bytes: usize) -> Result<Value, St
         ));
     }
     core::parse(&response.body)
+}
+
+/// The persisted trace can exceed the SDK's general-purpose 4 MiB buffer.
+/// Use the same governed HTTP host operation with an explicitly bounded buffer;
+/// never omit or truncate prior evaluations to make a checkpoint fit.
+fn read_checkpoint_response(
+    url: &str,
+    headers: &[(String, String)],
+    max_bytes: usize,
+) -> Result<HttpResponse, String> {
+    let headers = serde_json::to_string(headers).map_err(|e| e.to_string())?;
+    let mut buffer = vec![0u8; max_bytes + 4]; // three-digit status plus newline
+    // SAFETY: all input slices and the writable output allocation live through
+    // the synchronous host call. The returned length is checked before slicing.
+    let len = unsafe {
+        temper_wasm_sdk::host::host_http_call(
+            b"GET".as_ptr() as i32,
+            3,
+            url.as_ptr() as i32,
+            url.len() as i32,
+            headers.as_ptr() as i32,
+            headers.len() as i32,
+            b"".as_ptr() as i32,
+            0,
+            buffer.as_mut_ptr() as i32,
+            buffer.len() as i32,
+        )
+    };
+    if len == -2 {
+        return Err(format!(
+            "Checkpoint exceeds {max_bytes} bytes; refusing truncation"
+        ));
+    }
+    if len < 0 || len as usize > buffer.len() {
+        return Err(format!("Checkpoint HTTP read failed with code {len}"));
+    }
+    buffer.truncate(len as usize);
+    let mut response = String::from_utf8(buffer).map_err(|_| "Invalid checkpoint encoding")?;
+    let split = response
+        .find('\n')
+        .ok_or("Missing checkpoint HTTP status")?;
+    let status = response[..split]
+        .parse()
+        .map_err(|_| "Invalid checkpoint HTTP status")?;
+    response.drain(..=split);
+    Ok(HttpResponse {
+        status,
+        body: response,
+    })
 }
 fn snapshot_node(n: &Value) -> Value {
     let mut safe = json!({});
@@ -240,12 +290,12 @@ fn run_inner(ctx: &Context) -> Result<(), String> {
         if !valid_id(resume_id) || resume_id == ctx.entity_id {
             return Err("Invalid resume identity".into());
         }
-        // Leave overhead beneath the SDK's 4 MiB HTTP buffer; select only the
-        // checkpoint payload and trusted launch metadata, never session prompts.
+        // Read only the trusted checkpoint and launch metadata. JSON escaping
+        // of the bounded 24 MiB trace plus graph/program needs a larger envelope.
         let path = format!(
             "SemanticRuns('{resume_id}')?$select=Id,Status,world_id,agent_id,model,provider,snapshot_json,program_json,trace_json,started_at_ms,phase"
         );
-        let record = read_bounded(ctx, &path, 3_500_000)?;
+        let record = read_bounded(ctx, &path, 64 * 1024 * 1024)?;
         let prepared = resume_checkpoint(&record, id, Context::get_time_millis() as u64)?;
         set_success_result(resume_transition(&prepared)?, &prepared);
         return Ok(());
