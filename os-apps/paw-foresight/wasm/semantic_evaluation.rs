@@ -99,7 +99,7 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
         .find(|n| field(n, "Id") == id)
         .ok_or("Task references absent node")?;
     let edges = parse(field(node, "edges"))?;
-    let prerequisites: Vec<Value> = edges.as_array().ok_or("Invalid edges")?.iter().filter(|e| e["kind"] == "requires").map(|edge| {
+    let mut prerequisites: Vec<Value> = edges.as_array().ok_or("Invalid edges")?.iter().filter(|e| e["kind"] == "requires").map(|edge| {
         let target = edge["to_id"].as_str().unwrap_or("");
         json!({"id":target,"node":nodes.iter().find(|n|field(n,"Id")==target).map(digest),"assessment":program["results"][target],"evaluations":program["evaluations"][target]})
     }).collect();
@@ -122,7 +122,7 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
         )
     });
     let mut selected = std::collections::BTreeSet::new();
-    let comparisons: Vec<_> = candidates
+    let mut comparisons: Vec<_> = candidates
         .iter()
         .rev()
         .take(8)
@@ -150,6 +150,21 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
         _ => return Err("Unsupported semantic function".into()),
     };
     let is_world = field(node, "kind") == "world";
+    if is_world && task["function"] == "estimate_likelihood" {
+        // Joint-event likelihood needs its defining components and explicit counters,
+        // not the novelty comparison sample or decision-utility scores.
+        comparisons.clear();
+        for prerequisite in &mut prerequisites {
+            for field in ["assessment", "evaluations"] {
+                if let Some(values) = prerequisite[field].as_object_mut() {
+                    values.retain(|function, _| {
+                        matches!(function.as_str(), "classify_gap" | "estimate_likelihood")
+                    });
+                }
+            }
+        }
+    }
+
     let mut counter_hypotheses = vec![];
     let evidence: Vec<_> = nodes
         .iter()
@@ -383,4 +398,31 @@ fn provenance_context_encoding_is_lossless_and_preserves_typed_values() {
     packed.as_object_mut().unwrap().remove("evidence_sets");
     packed.as_object_mut().unwrap().remove("context_encoding");
     assert_eq!(packed, original);
+}
+
+#[cfg(test)]
+#[test]
+fn joint_likelihood_preserves_sources_components_and_counters_not_novelty_sample() {
+    let snapshot = json!({"world":{"Id":"question"},"nodes":[{"Id":"h","kind":"scenario","statement":"Defining event","edges":"[]"},{"Id":"other","kind":"scenario","statement":"Unrelated novelty comparison","edges":"[]"},{"Id":"counter","kind":"scenario","statement":"Counter event","edges":"[]"},{"Id":"source","kind":"evidence","source_quote":"Exact source quote","edges":"[]"},{"Id":"w","kind":"world","statement":"Joint event","component_ids":["h"],"counter_ids":["counter"],"edges":"[{\"kind\":\"requires\",\"to_id\":\"h\"}]"}]});
+    let judgments = json!({"classify_gap":{"selected":"evidence"},"estimate_likelihood":{"probability":0.4},"evaluate_novelty":{"score":2},"decision_value":{"score":3}});
+    let program = json!({"cursor":0,"tasks":[{"nodeId":"w","function":"estimate_likelihood"}],"results":{"h":{"classify_gap":"evidence","estimate_likelihood":"0.4","evaluate_novelty":"2","decision_value":"3"}},"evaluations":{"h":judgments}});
+    let request = request(&snapshot, &program).unwrap();
+    assert_eq!(request["state"]["comparisons"], json!([]));
+    assert_eq!(
+        request["state"]["prerequisites"][0]["node"]["statement"],
+        "Defining event"
+    );
+    assert_eq!(
+        request["state"]["counter_hypotheses"][0]["node"]["Id"],
+        "counter"
+    );
+    assert_eq!(
+        request["state"]["source_evidence"][0]["source_quote"],
+        "Exact source quote"
+    );
+    assert_eq!(
+        request["state"]["prerequisites"][0]["evaluations"],
+        json!({"classify_gap":{"selected":"evidence"},"estimate_likelihood":{"probability":0.4}})
+    );
+    assert_eq!(program["evaluations"]["h"], judgments);
 }

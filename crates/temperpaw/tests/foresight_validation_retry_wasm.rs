@@ -193,10 +193,9 @@ async fn world_likelihood_interns_provenance_losslessly_in_actual_provider_input
                 .unwrap() as usize;
             value["context"]["evidence_ids"] = sets[index].clone();
         }
-        assert_eq!(
-            node["evaluations"],
-            evaluations[node["id"].as_str().unwrap()]
-        );
+        let mut expected = evaluations[node["id"].as_str().unwrap()].clone();
+        expected.as_object_mut().unwrap().retain(|k, _| matches!(k.as_str(), "classify_gap" | "estimate_likelihood"));
+        assert_eq!(node["evaluations"], expected);
     }
     state.as_object_mut().unwrap().remove("evidence_sets");
     state.as_object_mut().unwrap().remove("context_encoding");
