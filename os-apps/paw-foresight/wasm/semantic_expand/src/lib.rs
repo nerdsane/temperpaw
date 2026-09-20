@@ -537,6 +537,28 @@ fn attach_world_probabilities(
         ] {
             outcome[key] = node[key].clone();
         }
+        // Context references are persisted world inputs, not writer-generated identities.
+        let mut context_ids = std::collections::BTreeSet::new();
+        let refinement = &program["world_refinement"][&id];
+        let evidence = refinement["rounds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|round| round["evidence_ids"].as_array().into_iter().flatten());
+        for reference in node["component_ids"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .chain(node["counter_ids"].as_array().into_iter().flatten())
+            .chain(evidence)
+        {
+            let reference = reference.as_str().ok_or("Invalid world context identity")?;
+            if !nodes.iter().any(|n| core::field(n, "Id") == reference) {
+                return Err("Unknown canonical world context reference".into());
+            }
+            context_ids.insert(reference);
+        }
+        outcome["scenario_ids"] = json!(context_ids);
         outcome["definition"] = node["statement"].clone();
         outcome["audit"] = core::search::audit_world(node, program);
         if !program["world_refinement"][&id].is_null() {
@@ -811,6 +833,37 @@ mod tests {
         (snapshot, generated, program)
     }
     #[test]
+    #[ignore = "Requires captured final writer output"]
+    fn captured_writer_context_is_attached_from_canonical_nodes() {
+        let raw: Value = serde_json::from_str(
+            &std::fs::read_to_string(std::env::var("FORESIGHT_WRITER_FIXTURE").unwrap()).unwrap(),
+        )
+        .unwrap();
+        let record = &raw["fields"];
+        let snapshot = core::parse(core::field(record, "snapshot_json")).unwrap();
+        let program = core::parse(core::field(record, "program_json")).unwrap();
+        let mut answer = core::parse(core::field(record, "reasoning_result")).unwrap();
+        references::References::new(&snapshot)
+            .unwrap()
+            .resolve_generated(&mut answer);
+        attach_world_probabilities(&mut answer, &program, &snapshot).unwrap();
+        outlook::validate(&answer, &snapshot).unwrap();
+        for outcome in answer["outcomes"].as_array().unwrap() {
+            for id in outcome["scenario_ids"].as_array().unwrap() {
+                assert!(
+                    snapshot["nodes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|n| n["Id"] == *id)
+                );
+            }
+        }
+        answer["outcomes"][0]["world_id"] = json!("invented-world");
+        assert!(attach_world_probabilities(&mut answer, &program, &snapshot).is_err());
+    }
+
+    #[test]
     fn composition_cannot_reuse_immutable_world_ids_when_old_counter_was_lost() {
         let (mut snapshot, generated, old) = world_fixture();
         let mut program = compose(&mut snapshot, &generated, &old).unwrap();
@@ -908,6 +961,34 @@ mod tests {
         let mut linked = generated.clone();
         linked["hypotheses"].as_array_mut().unwrap().push(json!({"id":"consequence","statement":"A subsequent future consequence","requires":["alternative"],"parent":"alternative"}));
         assert!(expand(&mut snapshot.clone(), &linked, "challenge", &json!({})).is_ok());
+    }
+
+    #[test]
+    fn world_context_uses_only_canonical_components_counters_and_evidence() {
+        let (mut snapshot, generated, old) = world_fixture();
+        let mut program = compose(&mut snapshot, &generated, &old).unwrap();
+        program["world_refinement"]["world-r1-one"] = json!({"rounds":[
+            {"evidence_ids":["e","e"]}, {"evidence_ids":["e"]}
+        ]});
+        let mut answer = json!({"schema":"foresight-worlds-v3","outcomes":[{
+            "world_id":"world-r1-one","scenario_ids":["invented-structural-check"]
+        }]});
+        attach_world_probabilities(&mut answer, &program, &snapshot).unwrap();
+        assert_eq!(
+            answer["outcomes"][0]["scenario_ids"],
+            json!(["a", "b", "c", "d", "e"])
+        );
+        program["world_refinement"]["world-r1-one"]["rounds"][0]["evidence_ids"] =
+            json!(["unknown-source"]);
+        assert_eq!(
+            attach_world_probabilities(&mut answer, &program, &snapshot).unwrap_err(),
+            "Unknown canonical world context reference"
+        );
+        answer["outcomes"][0]["world_id"] = json!("unknown-world");
+        assert_eq!(
+            attach_world_probabilities(&mut answer, &program, &snapshot).unwrap_err(),
+            "Outcome must reference a composed world"
+        );
     }
 
     #[test]

@@ -62,9 +62,9 @@ const WRITING_STYLE: &str = r#"Write for a curious person outside the industry. 
 
 const SYNTHESIS_PROMPT: &str = r#"Present the composed WORLDS as the answer. These are joint futures built from many explored pieces, not individual event cards. The worlds have already been constructed and evaluated separately. Return one outcome for each supplied world, preserving its defining event, components and challenges. Do not invent, merge or split worlds at this writing step. Explain the different lives they imply, the causal path, and what could break each one. Start beyond what the baseline says is already happening. Present a few distinct worlds in plain, vivid prose rather than a summary of industry news. Explain how their supplied facets and causal chains interact. Distinguish recorded consistency judgments, conditional estimates, unresolved issues and whole-world odds. Do not claim uncertainty was resolved or consistency proven merely because an audit ran. Refinement rounds are repeated model judgments about the same world, not independent evidence. Stable scores do not establish accuracy; preserve incomplete rounds and the engine's stop reason.
 
-Return JSON ONLY: {"schema":"foresight-worlds-v3","headline":"<=160 characters; the important choice or contrast between these worlds","horizon":"exact world.target_date","probability_basis":"model_implied_world_estimate","probability_model":"overlapping_worlds","calibrated":false,"summary":"<=400 characters; what the reader learns from comparing the worlds","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"short stable ID","world_id":"exact supplied world ref_ ID","title":"<=100 characters; concrete claim","definition":"copy the exact world statement, <=1000 characters","component_ids":["copy world component refs"],"counter_ids":["copy world counter refs"],"scenario_ids":["related actual node refs, evidence or hypotheses"],"scene":"<=600 characters; a short imagined moment in this world","narrative":"<=1200 characters; why, who gains or loses, what could break it","what_you_can_do":["0–4 concrete steps, each <=240 characters"],"signals":["1–8 things to watch, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
+Return JSON ONLY: {"schema":"foresight-worlds-v3","headline":"<=160 characters; the important choice or contrast between these worlds","horizon":"exact world.target_date","probability_basis":"model_implied_world_estimate","probability_model":"overlapping_worlds","calibrated":false,"summary":"<=400 characters; what the reader learns from comparing the worlds","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"short stable ID","world_id":"exact supplied world ref_ ID","title":"<=100 characters; concrete claim","definition":"copy the exact world statement, <=1000 characters","component_ids":["copy world component refs"],"counter_ids":["copy world counter refs"],"scene":"<=600 characters; a short imagined moment in this world","narrative":"<=1200 characters; why, who gains or loses, what could break it","what_you_can_do":["0–4 concrete steps, each <=240 characters"],"signals":["1–8 things to watch, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
 
-The engine attaches the baseline, exact world definition, component and challenge links, facets, causal chain, assumptions, recorded audit and evaluation status, and each world's own Jev estimate. Do not supply a probability or infer one from component odds. Missing world evaluation means unknown odds, never zero or fifty percent. Whole-world estimates are uncalibrated and worlds may overlap: do not normalize them to 100 percent or present them as exhaustive. A stopped or incomplete search must remain explicit. A low estimate can still describe an important alternative. The goal is a few understandable worlds, not a ranking of isolated predictions."#;
+The engine attaches the baseline, exact world definition, component, challenge and source-context links, facets, causal chain, assumptions, recorded audit and evaluation status, and each world's own Jev estimate. Do not supply a probability or infer one from component odds. Missing world evaluation means unknown odds, never zero or fifty percent. Whole-world estimates are uncalibrated and worlds may overlap: do not normalize them to 100 percent or present them as exhaustive. A stopped or incomplete search must remain explicit. A low estimate can still describe an important alternative. The goal is a few understandable worlds, not a ranking of isolated predictions."#;
 
 fn node_catalog(snapshot: &Value) -> Vec<Value> {
     snapshot["nodes"]
@@ -214,7 +214,7 @@ fn world_writing_input(snapshot: &Value, program: &Value) -> Result<Value, Strin
             "world":snapshot["world"], "baseline":program["baseline"], "worlds":worlds,
             "world_audits":program["world_audits"], "world_refinement":compact_world_refinement(program),
             "evaluations":evaluations, "stop_reason":program["stop_reason"],
-            "evaluation_error":program["last_error"], "exploration_note":program["exploration_note"]
+            "evaluation_error":if program["stop_reason"] == "provider_error" {program["last_error"].clone()} else {Value::Null}, "exploration_note":program["exploration_note"]
         }))
     })
 }
@@ -434,6 +434,18 @@ mod reasoning_tests {
         );
         assert_eq!(input["baseline"]["as_of"], "2026-09-19");
         assert!(world_writing_input(&json!({"nodes":[]}), &program).is_err());
+    }
+
+    #[test]
+    fn writer_does_not_mistake_recovered_provider_errors_for_an_interrupted_evaluation() {
+        let snapshot = json!({"nodes":[{"Id":"w1","kind":"world"},{"Id":"w2","kind":"world"}]});
+        let mut program = json!({"stop_reason":"world_audits_incomplete","last_error":"Historical token overflow"});
+        assert!(world_writing_input(&snapshot, &program).unwrap()["evaluation_error"].is_null());
+        program["stop_reason"] = json!("provider_error");
+        assert_eq!(
+            world_writing_input(&snapshot, &program).unwrap()["evaluation_error"],
+            "Historical token overflow"
+        );
     }
 
     #[test]
