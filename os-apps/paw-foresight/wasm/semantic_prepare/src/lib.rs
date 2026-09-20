@@ -224,9 +224,18 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         return Err("Invalid resume evaluations or history".into());
     }
     let ids: std::collections::BTreeSet<_> = nodes.iter().map(|n| core::field(n, "Id")).collect();
+    let mut validated = std::collections::BTreeSet::new();
+    let mut validate_structural = |task: &Value| -> Result<(), String> {
+        let identity = task.to_string();
+        if !validated.contains(&identity) {
+            core::search::validate_task(&snapshot, task)?;
+            validated.insert(identity);
+        }
+        Ok(())
+    };
     for task in tasks {
         if core::search::is_structural(task) {
-            core::search::request(&snapshot, &program, task)?;
+            validate_structural(task)?;
         } else if !ids.contains(core::field(task, "nodeId")) {
             return Err("Resume task references missing node".into());
         }
@@ -240,7 +249,7 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         let valid_subject = if structural {
             item["task"]["nodeId"] == item["nodeId"]
                 && item["task"]["function"] == item["function"]
-                && core::search::request(&snapshot, &program, &item["task"]).is_ok()
+                && validate_structural(&item["task"]).is_ok()
         } else {
             ids.contains(core::field(item, "nodeId"))
         };

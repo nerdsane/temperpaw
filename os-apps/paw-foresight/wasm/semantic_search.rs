@@ -367,7 +367,9 @@ pub fn is_structural(task: &Value) -> bool {
     )
 }
 
-pub fn request(snapshot: &Value, program: &Value, task: &Value) -> Result<Value, String> {
+/// Validate identity and structural subjects without constructing provider state.
+/// Checkpoint reads must not serialize evidence and judgment histories per receipt.
+pub fn validate_task(snapshot: &Value, task: &Value) -> Result<(), String> {
     let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
     let world = nodes.iter().find(|n| n["Id"] == task["world_id"]);
     if task["world_id"].is_string() && world.is_none_or(|w| field(w, "kind") != "world") {
@@ -378,18 +380,8 @@ pub fn request(snapshot: &Value, program: &Value, task: &Value) -> Result<Value,
     {
         return Err("Structural task does not match its immutable world".into());
     }
-    let get = |id: &str| {
-        nodes
-            .iter()
-            .find(|n| field(n, "Id") == id)
-            .cloned()
-            .ok_or("Missing structural subject".to_owned())
-    };
-    let mut state = json!({"world_question":snapshot["world"],"baseline":program["baseline"],"world":world,"source_evidence":nodes.iter().filter(|n|matches!(field(n,"kind"),"evidence"|"research_evidence")).collect::<Vec<_>>()});
-    if let Some(world) = world {
-        state["previous_world_judgments"] = previous_world_judgments(program, world);
-    }
-    let question = match field(task, "function") {
+    let exists = |id: &str| nodes.iter().any(|n| field(n, "Id") == id);
+    match field(task, "function") {
         "check_pair" => {
             let pair = ids(&task["pair_ids"])?;
             if pair.len() != 2 || pair[0] == pair[1] {
@@ -405,6 +397,49 @@ pub fn request(snapshot: &Value, program: &Value, task: &Value) -> Result<Value,
             if world.is_none() && field(task, "nodeId") != pair_id(pair[0], pair[1]) {
                 return Err("Pair task identity does not match its subjects".into());
             }
+        }
+        "check_world_consistency" => {
+            let world = world.ok_or("Missing world for consistency test")?;
+            if ids(&world["component_ids"])?.iter().any(|id| !exists(id)) {
+                return Err("Missing structural subject".into());
+            }
+        }
+        "check_transition" | "conditional_on" | "conditional_off" => {
+            let world = world.ok_or("Missing world for causal link")?;
+            let link = world["chain"]
+                .as_array()
+                .ok_or("Missing causal chain")?
+                .iter()
+                .find(|link| link["id"] == task["link_id"])
+                .ok_or("Missing causal link")?;
+            if ids(&link["from_ids"])?.iter().any(|id| !exists(id)) || !exists(field(link, "to_id"))
+            {
+                return Err("Missing structural subject".into());
+            }
+        }
+        _ => return Err("Unknown structural function".into()),
+    }
+    Ok(())
+}
+
+pub fn request(snapshot: &Value, program: &Value, task: &Value) -> Result<Value, String> {
+    validate_task(snapshot, task)?;
+    let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
+    let world = nodes.iter().find(|n| n["Id"] == task["world_id"]);
+    let get = |id: &str| {
+        nodes
+            .iter()
+            .find(|n| field(n, "Id") == id)
+            .cloned()
+            .ok_or("Missing structural subject".to_owned())
+    };
+    let mut state = json!({"world_question":snapshot["world"],"baseline":program["baseline"],"world":world,"source_evidence":nodes.iter().filter(|n|matches!(field(n,"kind"),"evidence"|"research_evidence")).collect::<Vec<_>>()});
+    if let Some(world) = world {
+        state["previous_world_judgments"] = previous_world_judgments(program, world);
+    }
+    let question = match field(task, "function") {
+        "check_pair" => {
+            let pair = ids(&task["pair_ids"])?;
             state["events"] = json!([get(pair[0])?, get(pair[1])?]);
             json!({"type":"choice","instructions":"Can BOTH specified events occur in the SAME world within the stated scope and dates, including any supplied world assumptions? Check incompatible resource uses, mutually exclusive actors or outcomes, timing and prerequisites. Different subjects or sequential states can coexist. This is logical/causal compatibility, NOT whether either event is likely, novel or already observed. Missing proof of the future alone is not a conflict. Preserve ambiguity.","criteria":{"compatible":"No material contradiction identified in the supplied pair and assumptions.","conflict":"The supplied events cannot jointly hold as scoped or their stated mechanisms conflict.","uncertain":"A material ambiguity prevents judging coexistence."}})
         }
@@ -468,6 +503,44 @@ mod tests {
         let snapshot = json!({"world":{"target_date":"2027-09-01","last_ingest_date":"2026-09-20"},"nodes":[{"Id":"a","kind":"scenario"},{"Id":"b","kind":"scenario"},{"Id":"c","kind":"scenario"},world.clone()]});
         (world, snapshot)
     }
+    #[test]
+    fn structural_validation_matches_request_checks_without_building_evidence_payloads() {
+        let (world, mut snapshot) = fixture();
+        let tasks: Vec<_> = world_tasks(&world)
+            .into_iter()
+            .filter(is_structural)
+            .collect();
+        for task in &tasks {
+            assert!(validate_task(&snapshot, task).is_ok());
+            assert!(request(&snapshot, &json!({}), task).is_ok());
+        }
+        for (key, value) in [
+            ("world_id", json!("missing")),
+            ("nodeId", json!("forged")),
+            ("pair_ids", json!(["a", "a"])),
+            ("pair_ids", json!(["a", "missing"])),
+            ("depth", json!(1)),
+        ] {
+            let mut bad = tasks[0].clone();
+            bad[key] = value;
+            assert!(validate_task(&snapshot, &bad).is_err());
+            assert!(request(&snapshot, &json!({}), &bad).is_err());
+        }
+        let mut link = tasks
+            .iter()
+            .find(|t| t["function"] == "check_transition")
+            .unwrap()
+            .clone();
+        link["link_id"] = json!("missing");
+        assert!(validate_task(&snapshot, &link).is_err());
+        snapshot["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Id":"large","kind":"evidence","statement":"x".repeat(150_000)}));
+        assert!(validate_task(&snapshot, &tasks[0]).is_ok());
+        assert!(request(&snapshot, &json!({}), &tasks[0]).is_err());
+    }
+
     #[test]
     fn causal_cycles_reversed_time_and_missing_facets_fail() {
         let (world, snapshot) = fixture();
@@ -673,9 +746,14 @@ pub fn refine_worlds(
         // Its previous checkpoint and every HTTP attempt remain in the old run
         // and immutable trace. Completed round receipts are never rewritten.
         history.retain(|prior| prior["round"] != pass || prior["complete"] == true);
-        let current = history.iter().find(|prior| prior["round"] == pass).unwrap_or(&receipt);
+        let current = history
+            .iter()
+            .find(|prior| prior["round"] == pass)
+            .unwrap_or(&receipt);
         let stable = history
-            .iter().rev().find(|prior| prior["round"].as_u64().is_some_and(|round| round < pass))
+            .iter()
+            .rev()
+            .find(|prior| prior["round"].as_u64().is_some_and(|round| round < pass))
             .is_some_and(|previous| stable_judgments(previous, current));
         if !history.iter().any(|prior| prior["round"] == pass) {
             history.push(receipt);
@@ -753,12 +831,33 @@ mod refinement_tests {
     #[test]
     fn resumed_partial_pass_does_not_create_duplicate_rounds_or_false_convergence() {
         let (snapshot, mut program) = fixture();
-        assert!(!refine_worlds(&snapshot, &mut program, 1, 1000, "provider_error"));
-        assert!(!refine_worlds(&snapshot, &mut program, 2, 2000, "provider_error"));
-        assert_eq!(program["world_refinement"]["w"]["rounds"].as_array().unwrap().len(), 1);
+        assert!(!refine_worlds(
+            &snapshot,
+            &mut program,
+            1,
+            1000,
+            "provider_error"
+        ));
+        assert!(!refine_worlds(
+            &snapshot,
+            &mut program,
+            2,
+            2000,
+            "provider_error"
+        ));
+        assert_eq!(
+            program["world_refinement"]["w"]["rounds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         // Repair historical repeated incomplete receipts from older releases.
         let partial = program["world_refinement"]["w"]["rounds"][0].clone();
-        program["world_refinement"]["w"]["rounds"].as_array_mut().unwrap().push(partial);
+        program["world_refinement"]["w"]["rounds"]
+            .as_array_mut()
+            .unwrap()
+            .push(partial);
         fill(&snapshot, &mut program, 0.23);
         assert!(refine_worlds(&snapshot, &mut program, 20, 3000, ""));
         assert_eq!(program["world_pass"], 2);
@@ -768,11 +867,23 @@ mod refinement_tests {
         assert_eq!(history[0]["complete"], true);
         assert_eq!(program["world_refinement"]["w"]["converged"], false);
         let first = history[0].clone();
-        assert!(!refine_worlds(&snapshot, &mut program, 21, 4000, "provider_error"));
+        assert!(!refine_worlds(
+            &snapshot,
+            &mut program,
+            21,
+            4000,
+            "provider_error"
+        ));
         fill(&snapshot, &mut program, 0.24);
         assert!(!refine_worlds(&snapshot, &mut program, 40, 5000, ""));
         assert_eq!(program["world_refinement"]["w"]["rounds"][0], first);
-        assert_eq!(program["world_refinement"]["w"]["rounds"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            program["world_refinement"]["w"]["rounds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(program["world_refinement"]["w"]["converged"], true);
     }
 
