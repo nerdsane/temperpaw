@@ -1,0 +1,601 @@
+use temper_wasm_sdk::prelude::*;
+// Each phase includes the shared evaluator contract but uses only its own subset.
+#[allow(dead_code, unused_imports)]
+mod core {
+    include!("../../semantic_core.rs");
+}
+
+// The producer projects aliases; the consumer resolves them. Both share one mapping.
+#[allow(dead_code)]
+mod references {
+    include!("../../semantic_references.rs");
+}
+
+const MAX_REASONING_INPUT_BYTES: usize = 3 * 1024 * 1024;
+mod definitions {
+    include!("../../semantic_definitions.rs");
+}
+
+const EXPLORATION_PROMPT: &str = r#"Construct genuinely different causal futures as possible answers to the user's question in state.world.description as future event hypotheses for Jev to evaluate. Begin from what is observed at world.last_ingest_date and what the user assumes, then reason about what could become different by world.target_date.
+
+Existing roles and workflows are not default invariants. Today's way of accomplishing something is one arrangement, not a requirement the future must preserve. Identify the assumptions that make that arrangement necessary. Ask what happens if an assumption changes, what would cause that change, and what people could then do that they cannot do now. Follow the consequences until the hypothesis changes the answer to the user's question. Equally consider why the change might fail or reverse. Neither preserving nor eliminating today's arrangements is a required conclusion.
+
+Build hypotheses from causal reasoning; they need not already appear in a source. Label conjectural premises honestly. Evidence constrains their plausibility, not which possibilities you are allowed to formulate. Use research where it can distinguish competing explanations or test an important premise. A missing citation is not an instruction to replace an interesting possibility with a familiar outcome with easier citations. Jev will assess likelihood separately; do not supply probabilities.
+
+Use the catalog to avoid repeating work, not as the agenda for the next round. Retain alternatives with different mechanisms even when they overlap. State the specific future change, the causal chain and what could prevent it. Give a short imagined scene of the resulting life in plain language. Details in the scene are illustrations, not extra predictions.
+
+Research contract: use available read-only temper.web_search and temper.web_fetch. Prefer direct temper.web_fetch(url); web_fetch accepts only a URL. On failure, web_search result's text field may contain bounded source-extracted text. Report only claims and quotations actually contained in that returned text, never infer them from titles, URLs or search summaries. Label indexed-excerpt evidence, direct-fetch failure and date/context limits; use weak_signal when context remains unverified. Fetch smaller article/text-version URLs only when actually discovered. Keep publication dates distinct from retrieval dates, and old findings distinct from the observed present. For frozen hindcasts, return research_evidence=[] and use only supplied evidence within the vantage; later remembered knowledge is inadmissible. Report tool failures and contradictory evidence honestly. A citation or Jev label does not prove a future.
+
+Return JSON ONLY: {"hypotheses":[{"id":"unique-ascii-id","title":"concise distinct hypothesis","statement":"self-contained observable future event with actors and horizon","mechanism":"how and why it could happen, including the causal assumptions","requires":["existing node ID or new hypothesis/evidence ID whose truth this mechanism actually requires"],"parent":"optional existing or same-batch hypothesis ID when meaningfully extending or revising it","scene":"short imagined moment showing how a person lives or works if this exact event happens; not an observation","signal":"optional observable early signal","falsifier":"optional disconfirming observation","evidence_note":"what supports or challenges the mechanism and what is still conjecture","research_question":"optional consequential unanswered question"}],"research_evidence":[{"id":"unique-ascii-id","statement":"finding with date, scope, uncertainty and conflicting interpretation where relevant","url":"exact retrieved HTTPS URL","quote":"short supporting excerpt, maximum 25 words and 200 characters per source","observed_at":"YYYY-MM-DD","provenance":"observed|contested|weak_signal"}],"continue_exploring":true,"exploration_note":"what this exploration learned, which framing changed, and why another round would or would not be useful"}.
+
+Reference contract: existing catalog nodes use exact ref_ identifiers; never reconstruct UUIDs. New ASCII IDs must be unique and must not begin ref_. requires contains only existing or same-batch IDs whose events the mechanism actually requires; use [] when none are identified. parent is optional exact lineage, not proof. Keep sourced observations separate from hypothetical implications. Source URLs must be retrieved HTTPS URLs. Quotes are at most25 words and200 characters per source.
+
+Resource contract: at most128 TOTAL hypotheses plus research_evidence per batch; capacity5000 Jev calls,2048 nodes,64 rounds and one hour. These are limits, not targets or category counts. Continue while another round can add a materially different mechanism or resolve a consequential uncertainty. Stop with continue_exploring=false when it cannot, explaining why and what remains unknown. A budget stop means incomplete exploration, not convergence."#;
+
+const CHALLENGE_PROMPT: &str = r#"Independently challenge the framing of the user's future question. You have the question, its conditions and observed evidence, but no previous candidate futures or scores. Identify causal assumptions that make today's arrangements seem necessary. Construct alternative mechanisms under which those assumptions change, and follow their consequences for what people can do and what becomes unnecessary. Also consider what could prevent or reverse the change. Do not preserve a familiar workflow merely because it appears in current sources. No particular future, topic, positive outcome or disappearance is required. A conjecture needs a coherent mechanism, not a source already predicting it. Keep observations separate from conjecture and respect the supplied vantage and horizon; frozen hindcasts admit no later knowledge.
+
+Return JSON ONLY: {"premises_challenged":[{"assumption":"a changeable causal premise, <=600 characters","alternative":"how it could differ and why that matters, <=1200 characters"}],"hypotheses":[{"id":"unique short ASCII ID, not ref_","title":"distinct future claim","statement":"self-contained observable future event with scope and horizon","mechanism":"causal path and assumptions","requires":["exact visible evidence ref_ ID or a new hypothesis ID in this batch"],"parent":"optional new hypothesis ID in this same batch only","scene":"imagined everyday consequence","signal":"observable early sign","falsifier":"what would undermine the mechanism","evidence_note":"what is observed versus conjectural","research_question":"important unanswered premise"}],"research_evidence":[],"continue_exploring":true,"exploration_note":"what changed in the framing and whether more exploration would add a different mechanism"}.
+
+At most32 premises and128 hypotheses; these are resource limits, not targets. Return no fabricated research. Existing ref_ IDs refer only to the visible evidence catalog; do not guess hidden hypotheses or reconstruct UUIDs. New hypotheses may depend on each other. Use [] when there is no identified prerequisite. Probabilities are evaluated separately by Jev; never supply them. You may return no new hypotheses if you cannot formulate another consequential mechanism, explaining the limit honestly."#;
+
+fn challenge_input(snapshot: &Value) -> Result<Value, String> {
+    let evidence = references::evidence_snapshot(snapshot);
+    let input = references::References::new(&evidence)?.project(&json!({
+        "world":evidence["world"],"observed_evidence":evidence["nodes"],
+        "reference_scope":"Only the evidence references shown here and new hypotheses in your own batch may be referenced."
+    }));
+    if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
+        return Err("Independent challenge evidence exceeds context bound".into());
+    }
+    Ok(input)
+}
+
+const WORLD_COMPOSITION_PROMPT: &str = r#"Turn the explored evidence and possibilities into a few genuinely different WORLDS that answer the user's question. The small nodes are building blocks, not the final answer. Compare candidate worlds with the observed baseline and discard repackaged present-day workflows. Select distinct downstream consequences: what becomes possible or unnecessary, how software itself changes, and how a person's life differs. Follow second- and third-order effects supported by the explored components. Do not merely select the highest-scoring clusters because they are easiest to defend; retain plausible low-likelihood alternatives when they imply a meaningfully different future. Shared components are allowed, but worlds must differ in consequences, not just titles. Explain the difference from today's baseline without inventing unevaluated component events. Find coherent combinations and causal chains: what people do, what becomes cheap or scarce, who gains or loses, what disappears, and what changes next. Do not turn each node into a separate world or split one familiar lesson into several cards. A world is more than a themed list. Its defining changes must fit together and have a clear reason to occur together. Consider rival mechanisms and evidence that challenges the combination. Do not force an optimistic/pessimistic/middle template, a compliance split, or the same axes for every question.
+
+Begin with the present at world.last_ingest_date. Separate supported observations, assumptions supplied by the user, and unresolved facts. A practice already common in the relevant setting is the starting point, not a future breakthrough. Describe what changes AFTER that starting point. Do not universalize a user's own workflow or an early-adopter example to everyone. Source retrieval dates are not publication dates. If current evidence is missing, state that plainly. The final worlds should differ in consequences and ways of living, not only in speed of adoption.
+
+Return JSON ONLY: {"baseline":{"as_of":"exact world.last_ingest_date","observed":[{"claim":"<=400 characters; present fact with scope and source-date limits","evidence_ids":["actual evidence node refs, not hypotheses"]}],"assumptions":["<=240 characters; user conditions or openly assumed premises"],"unknowns":["<=240 characters; missing current evidence"]},"worlds":[{"id":"unique short ASCII ID, not ref_","title":"<=100 characters; a clear claim people can picture","statement":"<=1000 characters; precise joint future event: ALL defining component changes happen together within the target horizon, with actors and scope","mechanism":"<=1200 characters; why these changes fit together and what could break the chain","component_ids":["3–12 different existing scenario/revision refs defining this world's joint event"],"counter_ids":["0–12 existing hypothesis refs that challenge this world; not its prerequisites"],"facets":[{"id":"unique local facet id <=80 characters","title":"short emergent dimension <=100 characters","description":"what changes and interacts with other facets, <=800 characters","component_ids":["defining component refs"]}],"chain":[{"id":"unique local link id <=80 characters","from_ids":["prerequisite component refs"],"to_id":"consequence component ref","mechanism":"why these conditions change the consequence, <=800 characters","by":"YYYY-MM-DD between baseline and horizon"}],"assumptions":["0–12 explicit assumptions, each <=600 characters"],"scene":"<=600 characters; an imagined everyday moment in this world","narrative":"<=1200 characters; why this world could happen, who gains or struggles, and a serious challenge","what_you_can_do":["0–4 practical steps, each <=240 characters"],"signals":["1–8 observable early signs, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
+
+Choose 2–6 distinct worlds, a compact answer rather than a quota to fill. Use only exact existing ref_ IDs for components and challenges. A component is a defining future change, not merely a source citation. Do not pick unrelated claims to make a story look rich. Do not invent new core events at this stage: they would bypass exploration. Build layered worlds, not lists of jobs or themed suggestions. Give each world 3–12 distinct facets: dimensions of everyday life or software that emerge from its actual changes, without a prescribed topic list. Each facet links its defining components. Give 2–24 explicit causal links between components, with a mechanism and date by which the link operates. Links form a connected directed prerequisite graph covering every component; do not create cycles. Each link has a distinct consequence to_id; combine its prerequisite from_ids into that link. Every component also belongs to a facet. Link dates must respect causal ordering. State assumptions separately. Use combination_search and world_audits as recorded model judgments: they are not proof. When prior worlds are challenged, construct revised worlds that address or openly retain the specific conflicts and unknowns. Never claim a check ran unless its actual result is supplied. If exploration is weak or stopped early, say so in the baseline unknowns and the narratives. Each world will receive its OWN fresh Jev evaluation of the whole joint event, including dependencies and counterevidence. Never supply probabilities or combine the component estimates yourself. These worlds may overlap; they are not a complete partition of every possible future."#;
+
+const WRITING_STYLE: &str = r#"Write for a curious person outside the industry. Be direct, concrete and easy to picture. No corporate language, news roundups, slogans or unexplained professional shorthand. Say what a person does, buys, stops needing or notices on an ordinary day. A scene is explicitly imagined, not evidence. A title makes a clear claim; it does not name a management theme. Explain why in familiar words, including what could stop it. Do not exaggerate to sound ambitious. Translate technical terms: suggested code changes, the project's code, who can see private data, connections to other tools. If a technical name is essential, explain it. Keep short paragraphs and avoid repeating the same point in every field."#;
+
+const SYNTHESIS_PROMPT: &str = r#"Present the composed WORLDS as the answer. These are joint futures built from many explored pieces, not individual event cards. The worlds have already been constructed and evaluated separately. Return one outcome for each supplied world, preserving its defining event, components and challenges. Do not invent, merge or split worlds at this writing step. Explain the different lives they imply, the causal path, and what could break each one. Start beyond what the baseline says is already happening. Present a few distinct worlds in plain, vivid prose rather than a summary of industry news. Explain how their supplied facets and causal chains interact. Distinguish recorded consistency judgments, conditional estimates, unresolved issues and whole-world odds. Do not claim uncertainty was resolved or consistency proven merely because an audit ran. Refinement rounds are repeated model judgments about the same world, not independent evidence. Stable scores do not establish accuracy; preserve incomplete rounds and the engine's stop reason.
+
+Return JSON ONLY: {"schema":"foresight-worlds-v3","headline":"<=160 characters; the important choice or contrast between these worlds","horizon":"exact world.target_date","probability_basis":"model_implied_world_estimate","probability_model":"overlapping_worlds","calibrated":false,"summary":"<=400 characters; what the reader learns from comparing the worlds","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"short stable ID","world_id":"exact supplied world ref_ ID","title":"<=100 characters; concrete claim","definition":"copy the exact world statement, <=1000 characters","component_ids":["copy world component refs"],"counter_ids":["copy world counter refs"],"scene":"<=600 characters; a short imagined moment in this world","narrative":"<=1200 characters; why, who gains or loses, what could break it","what_you_can_do":["0–4 concrete steps, each <=240 characters"],"signals":["1–8 things to watch, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
+
+The engine attaches the baseline, exact world definition, component, challenge and source-context links, facets, causal chain, assumptions, recorded audit and evaluation status, and each world's own Jev estimate. Do not supply a probability or infer one from component odds. Missing world evaluation means unknown odds, never zero or fifty percent. Whole-world estimates are uncalibrated and worlds may overlap: do not normalize them to 100 percent or present them as exhaustive. A stopped or incomplete search must remain explicit. A low estimate can still describe an important alternative. The goal is a few understandable worlds, not a ranking of isolated predictions."#;
+
+fn node_catalog(snapshot: &Value) -> Vec<Value> {
+    snapshot["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|node| {
+            let mut compact = json!({});
+            for key in [
+                "Id",
+                "kind",
+                "title",
+                "statement",
+                "mechanism",
+                "edges",
+                "parent",
+                "provenance",
+                "signal",
+                "falsifier",
+                "evidence_note",
+                "research_question",
+                "scene",
+                "component_ids",
+                "counter_ids",
+                "narrative",
+                "what_you_can_do",
+                "signals",
+                "falsifiers",
+                "facets",
+                "chain",
+                "assumptions",
+                "revision",
+                "archived",
+            ] {
+                if let Some(value) = node.get(key) {
+                    compact[key] = value.clone();
+                }
+            }
+            compact
+        })
+        .collect()
+}
+
+fn compact_evaluations(program: &Value) -> Value {
+    let mut compact = json!({});
+    if let Some(nodes) = program["evaluations"].as_object() {
+        for (id, evaluations) in nodes {
+            if let Some(evaluations) = evaluations.as_object() {
+                for (function, evaluation) in evaluations {
+                    for key in ["probability", "score", "selected"] {
+                        if let Some(value) = evaluation.get(key) {
+                            compact[id][function][key] = value.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    compact
+}
+
+// Writers need every round's judgments, not repeated provider envelopes and
+// per-question provenance. Full receipts remain in the program and final answer.
+fn compact_world_refinement(program: &Value) -> Value {
+    let mut histories = program["world_refinement"].clone();
+    if let Some(worlds) = histories.as_object_mut() {
+        for history in worlds.values_mut() {
+            if let Some(rounds) = history["rounds"].as_array_mut() {
+                for round in rounds {
+                    round["evaluations"] = compact_evaluations(round);
+                }
+            }
+        }
+    }
+    histories
+}
+
+// Evaluation history remains intact; the generator receives assessments rather
+// than a second planner's repeated per-node operation recommendations.
+fn without_operation_recommendations(mut assessments: Value) -> Value {
+    if let Some(nodes) = assessments.as_object_mut() {
+        for node in nodes.values_mut() {
+            if let Some(functions) = node.as_object_mut() {
+                functions.remove("choose_next_operation");
+            }
+        }
+    }
+    assessments
+}
+
+fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
+    let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
+    let evidence: Vec<_> = nodes
+        .iter()
+        .filter(|node| {
+            !matches!(
+                core::field(node, "kind"),
+                "hypothesis" | "scenario" | "revision" | "option" | "world"
+            )
+        })
+        .collect();
+    let input = json!({
+        "world":snapshot["world"], "catalog":node_catalog(snapshot),
+        "source_evidence":evidence, "baseline":program["baseline"],
+        "assessments":without_operation_recommendations(program["results"].clone()), "evaluations": without_operation_recommendations(compact_evaluations(program)), "assessment_semantics":core::gap_criteria(),
+        "evaluation_semantics":{
+            "score_scale":"Expected category index on a 0–4 scale, not a probability or a percentage.",
+            "evaluate_novelty":definitions::evaluate_novelty(),
+            "decision_value":definitions::decision_value()
+        },
+        "composition_correction":program["composition_correction"],
+        "issues":program["issues"], "stop_reason":program["stop_reason"],
+        "remaining_calls":program["remaining_calls"], "round":program["round"],
+        "combination_search":program["combination_search"], "world_audits":program["world_audits"],
+        "active_world_ids":program["active_world_ids"], "world_revision":program["world_revision"], "world_refinement":compact_world_refinement(program)
+    });
+    let input = references::References::new(snapshot)?.project(&input);
+    if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
+        return Err(
+            "Reasoning context exceeds 3 MiB; refusing to silently omit explored hypotheses".into(),
+        );
+    }
+    Ok(input)
+}
+
+fn world_writing_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
+    let worlds: Vec<_> = node_catalog(snapshot)
+        .into_iter()
+        .filter(|n| {
+            n["kind"] == "world"
+                && program["active_world_ids"]
+                    .as_array()
+                    .map_or(n["archived"] != true, |ids| ids.contains(&n["Id"]))
+        })
+        .collect();
+    if !(2..=6).contains(&worlds.len()) {
+        return Err("Writing requires 2–6 composed worlds".into());
+    }
+    let all_evaluations = compact_evaluations(program);
+    let mut evaluations = json!({});
+    for world in &worlds {
+        let id = core::field(world, "Id");
+        evaluations[id] = all_evaluations[id].clone();
+    }
+    references::References::new(snapshot).map(|refs| {
+        refs.project(&json!({
+            "world":snapshot["world"], "baseline":program["baseline"], "worlds":worlds,
+            "world_audits":program["world_audits"], "world_refinement":compact_world_refinement(program),
+            "evaluations":evaluations, "stop_reason":program["stop_reason"],
+            "evaluation_error":if program["stop_reason"] == "provider_error" {program["last_error"].clone()} else {Value::Null}, "exploration_note":program["exploration_note"]
+        }))
+    })
+}
+
+fn research_enabled(phase: &str, snapshot: &Value) -> bool {
+    matches!(phase, "seed" | "explore")
+        && core::field(&snapshot["world"], "hindcast_mode") == "false"
+}
+
+fn setup(ctx: &Context) -> Result<(), String> {
+    let phase = core::field(&ctx.entity_state, "phase");
+    let snapshot = core::parse(core::field(&ctx.entity_state, "snapshot_json"))?;
+    let program = core::parse(core::field(&ctx.entity_state, "program_json"))?;
+    let prompt = match phase {
+        "seed" | "explore" => EXPLORATION_PROMPT,
+        "compose" => WORLD_COMPOSITION_PROMPT,
+        "challenge" => CHALLENGE_PROMPT,
+        "synthesize" => SYNTHESIS_PROMPT,
+        _ => return Err("Unknown reasoning phase".into()),
+    };
+    let input = if phase == "synthesize" {
+        world_writing_input(&snapshot, &program)?
+    } else if phase == "challenge" {
+        challenge_input(&snapshot)?
+    } else {
+        reasoning_input(&snapshot, &program)?
+    };
+    let prompt = format!("{WRITING_STYLE}\n\n{prompt}");
+    let web_research = research_enabled(phase, &snapshot);
+    set_success_result(
+        "LaunchReasoning",
+        &json!({"system_prompt":prompt,"user_message":input.to_string(),"tools_enabled":if web_research {"temper_web_search,temper_web_fetch"} else {""},"tool_choice":if web_research {"auto"} else {"none"},"max_turns":if web_research {"32"} else {"1"}}),
+    );
+    Ok(())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run(_: i32, _: i32) -> i32 {
+    match Context::from_host().and_then(|ctx| setup(&ctx)) {
+        Ok(()) => (),
+        Err(e) => set_success_result("Fail", &json!({"error_message":e})),
+    };
+    0
+}
+
+#[cfg(test)]
+mod reasoning_tests {
+    use super::*;
+
+    mod outlook_contract {
+        include!("../../semantic_outlook.rs");
+    }
+
+    #[test]
+    fn independent_challenge_ignores_candidate_prose_scores_and_order_but_retains_evidence() {
+        let source = json!({"Id":"e","kind":"evidence","statement":"Observed capability","provenance":"observed"});
+        let a = json!({"world":{"description":"What might change?"},"nodes":[{"Id":"h","kind":"scenario","statement":"Review remains essential","mechanism":"Present arrangement persists"},source]});
+        let b = json!({"world":a["world"],"nodes":[source,{"Id":"different","kind":"revision","statement":"Review disappears","mechanism":"A different premise","probability":0.99}]});
+        assert_eq!(challenge_input(&a).unwrap(), challenge_input(&b).unwrap());
+        let mut c = b.clone();
+        c["nodes"][0]["statement"] = json!("A different observed capability");
+        assert_ne!(challenge_input(&a).unwrap(), challenge_input(&c).unwrap());
+        let program = json!({"results":{"h":{"evaluate_novelty":"3.9"}}});
+        let ordinary = reasoning_input(&a, &program).unwrap();
+        assert_eq!(ordinary["catalog"].as_array().unwrap().len(), 2);
+        assert!(challenge_input(&a).unwrap()["catalog"].is_null());
+        assert_eq!(
+            challenge_input(&a).unwrap()["observed_evidence"][0]["Id"],
+            "ref_0001"
+        );
+        assert!(!research_enabled("challenge", &a));
+    }
+
+    #[test]
+    fn composer_receives_exact_rejected_draft_and_validation_feedback() {
+        let correction = json!({"attempt":1,"validation_error":"Counter ref_0012 is evidence, not a hypothesis", "rejected_draft":"{invalid draft}"});
+        let input = reasoning_input(
+            &json!({"nodes":[]}),
+            &json!({"composition_correction":correction}),
+        )
+        .unwrap();
+        assert_eq!(input["composition_correction"], correction);
+    }
+
+    #[test]
+    fn exploration_preserves_evidence_and_novelty_without_inheriting_operation_agendas() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"h","kind":"scenario","statement":"A distinct possible future","research_question":"What could overturn the mechanism?"}]});
+        let program = json!({"results":{"h":{"classify_gap":"evidence","evaluate_novelty":"1.2","estimate_likelihood":"0.4","choose_next_operation":"research"}},"evaluations":{"h":{"evaluate_novelty":{"score":1.2},"estimate_likelihood":{"probability":0.4},"choose_next_operation":{"selected":"research"}}},"exploration_note":"Research more invoices and security incidents."});
+        let original = program.clone();
+        let input = reasoning_input(&snapshot, &program).unwrap();
+        assert!(
+            input["assessments"]["ref_0001"]
+                .get("choose_next_operation")
+                .is_none()
+        );
+        assert!(
+            input["evaluations"]["ref_0001"]
+                .get("choose_next_operation")
+                .is_none()
+        );
+        assert!(input.get("exploration_note").is_none());
+        assert_eq!(input["assessments"]["ref_0001"]["classify_gap"], "evidence");
+        assert_eq!(
+            input["evaluations"]["ref_0001"]["evaluate_novelty"]["score"],
+            1.2
+        );
+        assert_eq!(
+            input["evaluations"]["ref_0001"]["estimate_likelihood"]["probability"],
+            0.4
+        );
+        assert_eq!(
+            input["catalog"][0]["statement"],
+            snapshot["nodes"][0]["statement"]
+        );
+        assert_eq!(
+            input["catalog"][0]["research_question"],
+            snapshot["nodes"][0]["research_question"]
+        );
+        assert_eq!(program, original);
+        assert_eq!(
+            compact_evaluations(&program)["h"]["choose_next_operation"]["selected"],
+            "research"
+        );
+    }
+
+    #[test]
+    fn reasoning_score_legends_are_the_same_definitions_sent_to_jev() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"h","kind":"scenario","statement":"Future","edges":"[]","signal":"Signal","falsifier":"Falsifier","evidence_note":"Limited evidence","research_question":"Unanswered","scene":"Hypothetical scene"}]});
+        let mut program = core::plan(snapshot["nodes"].as_array().unwrap()).unwrap();
+        let input = reasoning_input(&snapshot, &program).unwrap();
+        for function in ["evaluate_novelty", "decision_value"] {
+            let index = program["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|task| task["function"] == function)
+                .unwrap();
+            program["cursor"] = json!(index);
+            let request = core::request(&snapshot, &program).unwrap();
+            assert_eq!(
+                input["evaluation_semantics"][function],
+                request["questions"]["result"]["criteria"]
+            );
+        }
+        for field in [
+            "signal",
+            "falsifier",
+            "evidence_note",
+            "research_question",
+            "scene",
+        ] {
+            assert_eq!(input["catalog"][0][field], snapshot["nodes"][0][field]);
+        }
+        assert!(input["evaluation_semantics"]["choose_next_operation"].is_null());
+    }
+
+    #[test]
+    fn exploration_can_use_bounded_indexed_text_with_explicit_limits() {
+        for required in [
+            "result's text field",
+            "actually contained in that returned text",
+            "indexed-excerpt evidence",
+            "direct-fetch failure",
+            "weak_signal",
+            "only when actually discovered",
+            "web_fetch accepts only a URL",
+        ] {
+            assert!(EXPLORATION_PROMPT.contains(required), "missing {required}");
+        }
+        assert!(EXPLORATION_PROMPT.contains("return research_evidence=[]"));
+    }
+
+    #[test]
+    fn composer_sees_recorded_search_and_audits_while_writer_uses_only_active_worlds() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"old","kind":"world","archived":true},{"Id":"a","kind":"world","facets":[{"id":"f"}],"chain":[],"assumptions":["Explicit premise"]},{"Id":"b","kind":"world"}]});
+        let program = json!({"active_world_ids":["a","b"],"world_revision":2,"combination_search":{"candidate_ids":["a","b"],"pairs":[{"pair_ids":["a","b"],"result":"compatible"}],"candidate_sets":[{"component_ids":["a","b"]}]},"world_audits":{"old":{"status":"challenged"}}});
+        let input = reasoning_input(&snapshot, &program).unwrap();
+        assert_eq!(input["world_revision"], 2);
+        assert_eq!(input["world_audits"]["ref_0001"]["status"], "challenged");
+        assert_eq!(
+            input["combination_search"]["candidate_ids"],
+            json!(["ref_0002", "ref_0003"])
+        );
+        assert_eq!(
+            input["combination_search"]["pairs"][0]["pair_ids"],
+            json!(["ref_0002", "ref_0003"])
+        );
+        assert_eq!(
+            input["combination_search"]["candidate_sets"][0]["component_ids"],
+            json!(["ref_0002", "ref_0003"])
+        );
+        let writer = world_writing_input(&snapshot, &program).unwrap();
+        assert_eq!(writer["worlds"].as_array().unwrap().len(), 2);
+        assert!(
+            writer["worlds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|n| n["Id"] != "ref_0001")
+        );
+        assert_eq!(
+            writer["worlds"][0]["facets"],
+            snapshot["nodes"][1]["facets"]
+        );
+    }
+
+    #[test]
+    fn world_writer_receives_only_composed_worlds_and_their_own_estimates() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"h","kind":"scenario","statement":"component"},{"Id":"w1","kind":"world","statement":"joint one","component_ids":["h"]},{"Id":"w2","kind":"world","statement":"joint two","component_ids":["h"]}]});
+        let program = json!({"baseline":{"as_of":"2026-09-19"},"evaluations":{"h":{"estimate_likelihood":{"probability":0.9}},"w1":{"estimate_likelihood":{"probability":0.23}}}});
+        let input = world_writing_input(&snapshot, &program).unwrap();
+        assert_eq!(input["worlds"].as_array().unwrap().len(), 2);
+        assert!(input["evaluations"].get("ref_0001").is_none());
+        assert_eq!(
+            input["evaluations"]["ref_0002"]["estimate_likelihood"]["probability"],
+            0.23
+        );
+        assert_eq!(input["baseline"]["as_of"], "2026-09-19");
+        assert!(world_writing_input(&json!({"nodes":[]}), &program).is_err());
+    }
+
+    #[test]
+    fn writer_does_not_mistake_recovered_provider_errors_for_an_interrupted_evaluation() {
+        let snapshot = json!({"nodes":[{"Id":"w1","kind":"world"},{"Id":"w2","kind":"world"}]});
+        let mut program = json!({"stop_reason":"world_audits_incomplete","last_error":"Historical token overflow"});
+        assert!(world_writing_input(&snapshot, &program).unwrap()["evaluation_error"].is_null());
+        program["stop_reason"] = json!("provider_error");
+        assert_eq!(
+            world_writing_input(&snapshot, &program).unwrap()["evaluation_error"],
+            "Historical token overflow"
+        );
+    }
+
+    #[test]
+    fn writing_preserves_every_refinement_judgment_without_repeating_provider_receipts() {
+        let snapshot = json!({"nodes":[{"Id":"w1","kind":"world"},{"Id":"w2","kind":"world"}]});
+        let round = json!({"round":1,"complete":true,"probability":0.42,"audit_status":"uncertain","evidence_ids":["source"],"assessments":{"w1":{"estimate_likelihood":"0.42"}},"evaluations":{"w1":{"estimate_likelihood":{"probability":0.42,"answer":{"noul":0.42},"evidence_ids":["source"],"provider_payload":"x".repeat(100_000)}}}});
+        let program = json!({"world_refinement":{"w1":{"world_id":"w1","accuracy_verified":false,"stop_reason":"max_refinement_passes","rounds":[round.clone(),round.clone()]}}});
+        let before = program.clone();
+        for input in [
+            reasoning_input(&snapshot, &program).unwrap(),
+            world_writing_input(&snapshot, &program).unwrap(),
+        ] {
+            let history = &input["world_refinement"]["ref_0001"];
+            assert_eq!(history["accuracy_verified"], false);
+            assert_eq!(history["stop_reason"], "max_refinement_passes");
+            assert_eq!(history["rounds"].as_array().unwrap().len(), 2);
+            for receipt in history["rounds"].as_array().unwrap() {
+                for key in [
+                    "round",
+                    "complete",
+                    "probability",
+                    "audit_status",
+                    "evidence_ids",
+                ] {
+                    assert_eq!(receipt[key], round[key]);
+                }
+                assert_eq!(
+                    receipt["assessments"]["ref_0001"]["estimate_likelihood"],
+                    "0.42"
+                );
+                assert_eq!(
+                    receipt["evaluations"]["ref_0001"]["estimate_likelihood"],
+                    json!({"probability":0.42})
+                );
+            }
+            assert!(input.to_string().len() < 20_000);
+        }
+        assert_eq!(program, before);
+    }
+
+    #[test]
+    fn synthesis_sees_actual_numeric_estimates_without_duplicate_answer_payloads() {
+        let snapshot = json!({"nodes":[{"Id":"h","kind":"scenario","statement":"Future"}]});
+        let program = json!({"evaluations":{"h":{"estimate_likelihood":{"probability":0.37,"answer":{"noul":0.37}}}}});
+        let input = reasoning_input(&snapshot, &program).unwrap();
+        assert_eq!(
+            input["evaluations"]["ref_0001"]["estimate_likelihood"]["probability"],
+            0.37
+        );
+        assert!(
+            input["evaluations"]["ref_0001"]["estimate_likelihood"]
+                .get("answer")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn catalog_preserves_actual_future_statement_and_mechanism() {
+        let node = json!({"Id":"future-a","kind":"scenario","statement":"A novel future, not repeated option text","mechanism":"unexpected interaction","edges":"[]"});
+        let catalog = node_catalog(&json!({"nodes":[node.clone()]}));
+        assert_eq!(catalog[0], node);
+    }
+
+    #[test]
+    fn complete_catalog_retains_every_hypothesis_without_ranked_duplication() {
+        let nodes: Vec<_> = (0..150).map(|i| json!({"Id":format!("h-{i}"),"kind":"hypothesis","statement":format!("Unique future {i}")})).collect();
+        let input = reasoning_input(&json!({"nodes":nodes}), &json!({})).unwrap();
+        assert!(input.get("frontier").is_none());
+        assert_eq!(input["catalog"].as_array().unwrap().len(), 150);
+        assert_eq!(input["catalog"][149]["statement"], "Unique future 149");
+        assert_eq!(input["assessment_semantics"], core::gap_criteria());
+    }
+
+    #[test]
+    fn oversized_context_is_explicit_failure_not_silent_truncation() {
+        let snapshot =
+            json!({"nodes":[{"Id":"huge","statement":"x".repeat(MAX_REASONING_INPUT_BYTES)}]});
+        assert!(
+            reasoning_input(&snapshot, &json!({}))
+                .unwrap_err()
+                .contains("refusing")
+        );
+    }
+
+    #[test]
+    fn live_seed_and_exploration_can_research_but_hindcast_and_synthesis_cannot() {
+        let live = json!({"world":{"hindcast_mode":"false"}});
+        let frozen = json!({"world":{"hindcast_mode":"true"}});
+        for phase in ["seed", "explore"] {
+            assert!(research_enabled(phase, &live));
+            assert!(!research_enabled(phase, &frozen));
+        }
+        assert!(!research_enabled("synthesize", &live));
+        assert!(!research_enabled("explore", &json!({})));
+    }
+
+    #[test]
+    fn prompts_require_open_hypotheses_and_engine_owned_event_probabilities() {
+        assert!(EXPLORATION_PROMPT.contains("continue_exploring"));
+        assert!(EXPLORATION_PROMPT.starts_with("Construct genuinely different causal futures"));
+        assert!(
+            EXPLORATION_PROMPT.contains("Existing roles and workflows are not default invariants")
+        );
+        assert!(EXPLORATION_PROMPT.contains("they need not already appear in a source"));
+        assert!(EXPLORATION_PROMPT.contains("do not supply probabilities"));
+        let schema = EXPLORATION_PROMPT
+            .split_once("Return JSON ONLY: ")
+            .unwrap()
+            .1
+            .split_once("\n\nReference contract:")
+            .unwrap()
+            .0
+            .trim_end_matches('.');
+        let schema: Value = serde_json::from_str(schema).unwrap();
+        assert_eq!(schema["continue_exploring"], true);
+        for key in [
+            "id",
+            "statement",
+            "mechanism",
+            "requires",
+            "parent",
+            "scene",
+            "signal",
+            "falsifier",
+            "evidence_note",
+            "research_question",
+        ] {
+            assert!(
+                schema["hypotheses"][0].get(key).is_some(),
+                "missing hypothesis field {key}"
+            );
+        }
+        for key in [
+            "id",
+            "statement",
+            "url",
+            "quote",
+            "observed_at",
+            "provenance",
+        ] {
+            assert!(
+                schema["research_evidence"][0].get(key).is_some(),
+                "missing evidence field {key}"
+            );
+        }
+        assert!(schema["hypotheses"][0].get("probability").is_none());
+        assert!(!EXPLORATION_PROMPT.contains("EXACTLY FOUR"));
+        assert!(!EXPLORATION_PROMPT.contains("81 alternative"));
+        assert!(SYNTHESIS_PROMPT.contains("overlapping_worlds"));
+        assert!(SYNTHESIS_PROMPT.contains("own Jev estimate"));
+        assert!(!SYNTHESIS_PROMPT.contains("summing EXACTLY1"));
+    }
+}

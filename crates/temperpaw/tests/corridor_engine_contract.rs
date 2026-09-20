@@ -220,15 +220,17 @@ fn forecast_is_immutable_once_registered() {
     let path = spec_path("forecast.ioa.toml");
     let spec = parse_spec(&path);
 
-    // The only legal transitions are resolution and scoring. No action may
-    // alter the registered question or probability, and nothing leaves Scored.
-    let allowed: BTreeSet<&str> = ["Resolve", "Score", "Void"].into_iter().collect();
+    // Registration is the sole writer, and it is unavailable after Created.
     for act in actions(&spec) {
         let name = act.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        assert!(
-            allowed.contains(name),
-            "Forecast declares unexpected action {name}; registration is immutable"
-        );
+        if name == "Register" {
+            assert_eq!(action_from(act), BTreeSet::from(["Created".to_string()]));
+            assert_eq!(
+                act.get("to").and_then(|v| v.as_str()),
+                Some("Preregistered")
+            );
+            continue;
+        }
         let params = action_params(act);
         for frozen in ["probability", "question", "resolve_by"] {
             assert!(

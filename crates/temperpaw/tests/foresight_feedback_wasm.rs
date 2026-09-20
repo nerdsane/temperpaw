@@ -1,0 +1,454 @@
+//! Iterative feedback is exercised through actual guests with deterministic provider replies.
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+use temper_wasm::{
+    SimWasmHost, StreamRegistry, WasmEngine, WasmHost, WasmInvocationContext, WasmResourceLimits,
+};
+
+fn bytes(module: &str) -> Vec<u8> {
+    if module == "semantic_step"
+        && let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
+    }
+    if module == "semantic_expand"
+        && let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output=std::process::Command::new("bash").current_dir(&root).args(["-c",&format!("set -euo pipefail; source os-apps/wasm-build-env.sh; temperpaw_build_wasm os-apps/paw-foresight/wasm/{module} wasm32-unknown-unknown --locked")]).output().expect("build semantic WASM");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::read(String::from_utf8(output.stdout).unwrap().trim()).unwrap()
+}
+async fn invoke(engine: &WasmEngine, module: &str, fields: Value) -> Value {
+    let hash = engine.compile_and_cache(&bytes(module)).unwrap();
+    let ctx = WasmInvocationContext {
+        tenant: "test".into(),
+        entity_type: "SemanticRun".into(),
+        entity_id: "run-fixture".into(),
+        trigger_action: "Next".into(),
+        wasm_module: Some(module.into()),
+        trigger_params: json!({}),
+        entity_state: json!({"fields":fields}),
+        agent_id: None,
+        session_id: None,
+        integration_config: BTreeMap::new(),
+        trace_id: String::new(),
+        workflow_root_entity_type: None,
+        workflow_root_entity_id: None,
+        workflow_run_id: None,
+        http_request: None,
+    };
+    invoke_with_host(
+        engine,
+        module,
+        ctx,
+        Arc::new(SimWasmHost::new().with_default_response(500, "unexpected provider IO")),
+        hash,
+    )
+    .await
+}
+async fn invoke_with_host(
+    engine: &WasmEngine,
+    _module: &str,
+    ctx: WasmInvocationContext,
+    host: Arc<dyn WasmHost>,
+    hash: String,
+) -> Value {
+    let r = engine
+        .invoke(
+            &hash,
+            &ctx,
+            host,
+            &WasmResourceLimits {
+                max_memory: 256 * 1024 * 1024,
+                max_fuel: 10_000_000_000,
+                ..Default::default()
+            },
+            Arc::new(RwLock::new(StreamRegistry::default())),
+        )
+        .await
+        .unwrap();
+    serde_json::to_value(r).unwrap()
+}
+
+#[derive(Default)]
+struct WorldProvider {
+    requests: Mutex<Vec<Value>>,
+    fail: AtomicBool,
+    drift: AtomicBool,
+}
+#[async_trait::async_trait]
+impl WasmHost for WorldProvider {
+    async fn http_call(
+        &self,
+        method: &str,
+        url: &str,
+        _headers: &[(String, String)],
+        body: &str,
+    ) -> Result<(u16, String), String> {
+        assert_eq!(method, "POST");
+        assert_eq!(url, "https://api.typesafe.ai/v1/systemone");
+        let request: Value = serde_json::from_str(body).unwrap();
+        self.requests.lock().unwrap().push(request.clone());
+        if self.fail.load(Ordering::SeqCst) {
+            return Ok((503, "fixture transient failure".into()));
+        }
+        let probability = if self.drift.load(Ordering::SeqCst) {
+            0.23 + 0.1 * ((self.requests.lock().unwrap().len() - 1) / 4) as f64
+        } else {
+            0.23
+        };
+        let answers: serde_json::Map<String, Value> = request["questions"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(key, q)| {
+                let answer = if q["type"] == "noul" {
+                    json!({"type":"noul","noul":probability})
+                } else {
+                    let options = q["criteria"].as_object().unwrap();
+                    let choice = if options.contains_key("compatible") {
+                        "compatible"
+                    } else if options.contains_key("plausible") {
+                        "plausible"
+                    } else {
+                        "none"
+                    };
+                    let probabilities: serde_json::Map<String, Value> = options
+                        .keys()
+                        .map(|k| (k.clone(), json!(if k == choice { 1.0 } else { 0.0 })))
+                        .collect();
+                    json!({"type":"choice","choice":choice,"probabilities":probabilities})
+                };
+                (key.clone(), answer)
+            })
+            .collect();
+        Ok((
+            200,
+            json!({"model":"jev-1.13.0","answers":answers}).to_string(),
+        ))
+    }
+
+    async fn http_call_binary(
+        &self,
+        _: &str,
+        _: &str,
+        _: &[(String, String)],
+        _: &[u8],
+    ) -> Result<(u16, Vec<u8>), String> {
+        Err("Unexpected binary IO".into())
+    }
+    fn get_secret(&self, _: &str) -> Result<String, String> {
+        Ok("fixture-only".into())
+    }
+    fn log(&self, _: &str, _: &str) {}
+}
+fn snapshot() -> Value {
+    let mut s = json!({"world":{"Id":"question","target_date":"2027-09-20","last_ingest_date":"2026-09-20","hindcast_mode":"false"},"nodes":[
+      {"Id":"e","kind":"evidence","statement":"A clinic already uses an assistant for appointment reminders.","quote":"The assistant sends appointment reminders today.","observed_at":"2026-09-19","claim_type":"observed","source_refs":["https://example.org/clinic"],"edges":"[]"},
+      {"Id":"h1","kind":"scenario","statement":"Clinics automate bookings by September 2027.","edges":"[]"},
+      {"Id":"h2","kind":"revision","statement":"Patients accept assistant-run bookings by September 2027.","edges":"[]"},
+      {"Id":"counter","kind":"scenario","statement":"Patients demand human approval by September 2027.","edges":"[]"},
+      {"Id":"w1","kind":"world","statement":"By September 2027 clinics run bookings without reception staff and patients accept this change.","component_ids":["h1","h2"],"counter_ids":["counter"],"resolve_by":"2027-09-20","edges":"[{\"kind\":\"requires\",\"to_id\":\"h1\"},{\"kind\":\"requires\",\"to_id\":\"h2\"},{\"kind\":\"requires\",\"to_id\":\"e\"}]"},
+      {"Id":"w2","kind":"world","statement":"By September 2027 clinics automate routine bookings while humans approve every change.","component_ids":["h1","h2"],"counter_ids":["counter"],"resolve_by":"2027-09-20","edges":"[]"}
+    ]});
+    s["nodes"].as_array_mut().unwrap().push(json!({"Id":"h3","kind":"scenario","statement":"Clinics reduce reception staffing by September 2027.","edges":"[]"}));
+    for i in [4, 5] {
+        s["nodes"][i]["component_ids"] = json!(["h1", "h2", "h3"]);
+        s["nodes"][i]["facets"] = json!([{"id":"f1","title":"Bookings","description":"Booking work changes","component_ids":["h1"]},{"id":"f2","title":"Patients","description":"Patients accept the change","component_ids":["h2"]},{"id":"f3","title":"Staff","description":"Staffing changes","component_ids":["h3"]}]);
+        s["nodes"][i]["assumptions"] = json!([]);
+        s["nodes"][i]["chain"] = json!([{"id":"a","from_ids":["h1"],"to_id":"h2","mechanism":"Reliable automation earns acceptance","by":"2027-03-01"},{"id":"b","from_ids":["h2"],"to_id":"h3","mechanism":"Acceptance permits fewer reception shifts","by":"2027-09-20"}]);
+    }
+    s
+}
+fn answer(snapshot: &Value) -> Value {
+    let outcome = |index: usize| {
+        let n = &snapshot["nodes"][index];
+        json!({"id":n["Id"],"world_id":n["Id"],"title":"A different day at the clinic","definition":n["statement"],"component_ids":n["component_ids"],"counter_ids":n["counter_ids"],"scenario_ids":["h1","h2","e"],"probability":0.99,"narrative":"Bookings change who spends time on the phone.","scene":"A receptionist helps a worried patient while bookings arrive automatically.","what_you_can_do":["Ask a clinic how exceptions are handled."],"signals":["Fewer calls to reception"],"falsifiers":["Patients insist on calling"]})
+    };
+    json!({"schema":"foresight-worlds-v3","probability_model":"overlapping_worlds","probability_basis":"model_implied_world_estimate","calibrated":false,"evaluation_status":"evaluated","evaluation_note":"","headline":"Two possible clinic mornings","summary":"Both worlds build on reminders that already exist.","horizon":"2027-09-20","baseline":{"as_of":"2026-09-20","observed":[{"claim":"Appointment reminders already run automatically.","evidence_ids":["e"]}],"assumptions":[],"unknowns":["Will patients accept unsupervised changes?"]},"evidence_limits":["One observed clinic; model estimates are uncalibrated."],"research_questions":[],"outcomes":[outcome(4),outcome(5)]})
+}
+
+async fn prepared(engine: &WasmEngine) -> Value {
+    let full = snapshot();
+    let mut s = full.clone();
+    s["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|n| n["kind"] != "world");
+    let worlds: Vec<Value> = [4usize, 5]
+        .iter()
+        .map(|&i| {
+            let mut w = full["nodes"][i].clone();
+            w["id"] = w["Id"].clone();
+            for (key, text) in [
+                ("title", "A new clinic morning"),
+                (
+                    "mechanism",
+                    "Bookings, acceptance and staffing change together",
+                ),
+                ("scene", "A clinic opens without booking calls waiting"),
+                ("narrative", "Staff help patients rather than arrange times"),
+            ] {
+                w[key] = json!(text);
+            }
+            for key in ["signals", "falsifiers", "what_you_can_do"] {
+                w[key] = json!(["Observe reception staffing"]);
+            }
+            w
+        })
+        .collect();
+    let result = json!({"baseline":answer(&full)["baseline"],"worlds":worlds});
+    let fields = json!({"phase":"compose","snapshot_json":s.to_string(),"program_json":json!({"round":1,"tasks":[],"cursor":0,"results":{},"evaluations":{}}).to_string(),"reasoning_result":result.to_string()});
+    let r = invoke(engine, "semantic_expand", fields).await;
+    assert_eq!(r["callback_action"], "Expanded", "{r}");
+    let mut fields = r["callback_params"].clone();
+    fields["trace_json"] = json!("[]");
+    fields["phase"] = json!("compose");
+    fields["started_at_ms"] = json!(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string()
+    );
+    fields
+}
+async fn call(engine: &WasmEngine, fields: Value, host: Arc<WorldProvider>) -> Value {
+    let hash = engine.compile_and_cache(&bytes("semantic_call")).unwrap();
+    let ctx = WasmInvocationContext {
+        tenant: "test".into(),
+        entity_type: "SemanticRun".into(),
+        entity_id: "feedback-test".into(),
+        trigger_action: "Evaluate".into(),
+        wasm_module: Some("semantic_call".into()),
+        trigger_params: json!({}),
+        entity_state: json!({"fields":fields}),
+        agent_id: None,
+        session_id: None,
+        integration_config: BTreeMap::from([("typesafe_api_key".into(), "fixture-only".into())]),
+        trace_id: String::new(),
+        workflow_root_entity_type: None,
+        workflow_root_entity_id: None,
+        workflow_run_id: None,
+        http_request: None,
+    };
+    invoke_with_host(engine, "semantic_call", ctx, host, hash).await
+}
+fn apply(fields: &mut Value, callback: &Value) {
+    for (k, v) in callback["callback_params"].as_object().unwrap() {
+        fields[k] = v.clone();
+    }
+}
+fn program(fields: &Value) -> Value {
+    serde_json::from_str(fields["program_json"].as_str().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn prior_judgments_reenter_requests_without_reusing_cached_answers() {
+    let engine = WasmEngine::new().unwrap();
+    let host = Arc::new(WorldProvider::default());
+    let mut fields = prepared(&engine).await;
+    let first = call(&engine, fields.clone(), host.clone()).await;
+    assert_eq!(first["callback_action"], "Recorded", "{first}");
+    apply(&mut fields, &first);
+    let first_trace: Value = serde_json::from_str(fields["trace_json"].as_str().unwrap()).unwrap();
+    let first_http = host.requests.lock().unwrap().len();
+    assert!(first_http > 0);
+    let next = invoke(&engine, "semantic_step", fields.clone()).await;
+    assert_eq!(
+        next["callback_action"], "SearchPlanned",
+        "callback={}",
+        next["callback_action"]
+    );
+    apply(&mut fields, &next);
+    let p = program(&fields);
+    assert_eq!(p["world_pass"], 2);
+    let history = p["world_refinement"].clone();
+    for id in p["active_world_ids"].as_array().unwrap() {
+        let id = id.as_str().unwrap();
+        assert_eq!(history[id]["rounds"].as_array().unwrap().len(), 1);
+        assert_eq!(history[id]["rounds"][0]["probability"], 0.23);
+        assert!(p["results"][id]["estimate_likelihood"].is_null());
+    }
+    let second = call(&engine, fields.clone(), host.clone()).await;
+    assert_eq!(second["callback_action"], "Recorded", "{second}");
+    apply(&mut fields, &second);
+    let trace: Value = serde_json::from_str(fields["trace_json"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        &trace.as_array().unwrap()[..first_trace.as_array().unwrap().len()],
+        first_trace.as_array().unwrap()
+    );
+    assert_eq!(
+        trace.as_array().unwrap().len(),
+        first_trace.as_array().unwrap().len() * 2
+    );
+    {
+        let requests = host.requests.lock().unwrap();
+        assert_eq!(requests.len(), first_http * 2);
+        let second_input = requests[first_http].to_string();
+        assert!(second_input.contains("previous_world_judgments"));
+        assert!(second_input.contains("0.23"));
+        assert!(second_input.contains("check_world_consistency"));
+        let feedback = &requests[first_http]["state"]["cases"]["q0"]["previous_world_judgments"];
+        let legend = feedback["question_legend"].as_array().unwrap();
+        let values = feedback["rounds"][0]["judgments"].as_array().unwrap();
+        assert_eq!(legend.len(), values.len());
+        for (question, value) in legend.iter().zip(values) {
+            match question["function"].as_str().unwrap() {
+                "estimate_likelihood" | "conditional_on" | "conditional_off" => {
+                    assert_eq!(value, "0.23")
+                }
+                "check_transition" => assert_eq!(value, "plausible"),
+                _ => assert_eq!(value, "compatible"),
+            }
+        }
+    }
+    let finished = invoke(&engine, "semantic_step", fields.clone()).await;
+    assert_eq!(finished["callback_action"], "Reason", "{finished}");
+    assert_eq!(finished["callback_params"]["phase"], "synthesize");
+    apply(&mut fields, &finished);
+    let p = program(&fields);
+    for id in p["active_world_ids"].as_array().unwrap() {
+        let id = id.as_str().unwrap();
+        let receipt = &p["world_refinement"][id];
+        assert_eq!(receipt["rounds"][0], history[id]["rounds"][0]);
+        assert_eq!(receipt["rounds"].as_array().unwrap().len(), 2);
+        assert_eq!(receipt["converged"], true);
+        assert_eq!(receipt["accuracy_verified"], false);
+    }
+    let current: Value = serde_json::from_str(fields["snapshot_json"].as_str().unwrap()).unwrap();
+    let mut output = answer(&snapshot());
+    let worlds: Vec<_> = current["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| n["kind"] == "world" && n["archived"] != true)
+        .collect();
+    for (outcome, world) in output["outcomes"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .zip(worlds)
+    {
+        outcome["id"] = world["Id"].clone();
+        outcome["world_id"] = world["Id"].clone();
+        outcome["definition"] = world["statement"].clone();
+        outcome["component_ids"] = world["component_ids"].clone();
+        outcome["counter_ids"] = world["counter_ids"].clone();
+    }
+    fields["phase"] = json!("synthesize");
+    fields["reasoning_result"] = json!(output.to_string());
+    let completed = invoke(&engine, "semantic_expand", fields).await;
+    assert_eq!(
+        completed["callback_action"], "Complete",
+        "{}",
+        completed["callback_params"]["error_message"]
+    );
+    let output: Value =
+        serde_json::from_str(completed["callback_params"]["answer"].as_str().unwrap()).unwrap();
+    for outcome in output["outcomes"].as_array().unwrap() {
+        assert_eq!(
+            outcome["refinement"],
+            p["world_refinement"][outcome["world_id"].as_str().unwrap()]
+        );
+        assert_eq!(outcome["probability"], 0.23);
+    }
+}
+
+#[tokio::test]
+async fn provider_failure_does_not_claim_convergence_or_discard_prior_pass() {
+    let engine = WasmEngine::new().unwrap();
+    let host = Arc::new(WorldProvider::default());
+    let mut fields = prepared(&engine).await;
+    let first = call(&engine, fields.clone(), host.clone()).await;
+    apply(&mut fields, &first);
+    let next = invoke(&engine, "semantic_step", fields.clone()).await;
+    assert_eq!(next["callback_action"], "SearchPlanned");
+    apply(&mut fields, &next);
+    let history = program(&fields)["world_refinement"].clone();
+    host.fail.store(true, Ordering::SeqCst);
+    let failed = call(&engine, fields.clone(), host.clone()).await;
+    assert_eq!(failed["callback_action"], "Recorded");
+    apply(&mut fields, &failed);
+    assert_eq!(program(&fields)["stop_reason"], "provider_error");
+    let stopped = invoke(&engine, "semantic_step", fields.clone()).await;
+    assert_ne!(stopped["callback_action"], "Complete");
+    assert_ne!(stopped["callback_action"], "SearchPlanned");
+    apply(&mut fields, &stopped);
+    let p = program(&fields);
+    for id in p["active_world_ids"].as_array().unwrap() {
+        let id = id.as_str().unwrap();
+        assert_eq!(
+            p["world_refinement"][id]["rounds"][0],
+            history[id]["rounds"][0]
+        );
+        assert_ne!(p["world_refinement"][id]["converged"], true);
+        assert_eq!(p["world_refinement"][id]["accuracy_verified"], false);
+    }
+}
+
+#[tokio::test]
+async fn changing_estimates_stop_at_three_passes_and_expired_budget_spends_no_http() {
+    let engine = WasmEngine::new().unwrap();
+    let host = Arc::new(WorldProvider::default());
+    host.drift.store(true, Ordering::SeqCst);
+    let mut fields = prepared(&engine).await;
+    for pass in 1..=3 {
+        let r = call(&engine, fields.clone(), host.clone()).await;
+        assert_eq!(r["callback_action"], "Recorded");
+        apply(&mut fields, &r);
+        let next = invoke(&engine, "semantic_step", fields.clone()).await;
+        if pass < 3 {
+            assert_eq!(
+                next["callback_action"], "SearchPlanned",
+                "pass{pass}: {next}"
+            );
+        } else {
+            assert_eq!(next["callback_action"], "Reason");
+            assert_eq!(next["callback_params"]["phase"], "synthesize");
+        }
+        apply(&mut fields, &next);
+    }
+    let p = program(&fields);
+    for id in p["active_world_ids"].as_array().unwrap() {
+        let r = &p["world_refinement"][id.as_str().unwrap()];
+        assert_eq!(r["rounds"].as_array().unwrap().len(), 3);
+        assert_eq!(r["converged"], false);
+        assert_eq!(r["accuracy_verified"], false);
+    }
+    let empty_host = Arc::new(WorldProvider::default());
+    let mut expired = prepared(&engine).await;
+    expired["started_at_ms"] = json!(
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            - 3_600_001)
+            .to_string()
+    );
+    let r = call(&engine, expired, empty_host.clone()).await;
+    assert_eq!(r["callback_action"], "Recorded");
+    assert_eq!(program(&r["callback_params"])["stop_reason"], "time_budget");
+    assert_eq!(empty_host.requests.lock().unwrap().len(), 0);
+    let mut exhausted = prepared(&engine).await;
+    exhausted["trace_json"] =
+        json!(json!(vec![json!({"fixture":"already-counted"}); 5000]).to_string());
+    let r = call(&engine, exhausted, empty_host.clone()).await;
+    assert_eq!(r["callback_action"], "Recorded");
+    assert_eq!(program(&r["callback_params"])["stop_reason"], "call_budget");
+    assert_eq!(empty_host.requests.lock().unwrap().len(), 0);
+}
