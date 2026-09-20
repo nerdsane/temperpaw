@@ -45,6 +45,45 @@ fn digest(node: &Value) -> Value {
     }
     Value::Object(out)
 }
+/// Request-only lossless encoding: repeated provenance sets are stored once.
+/// Typed evaluation values stay alongside references; persisted program is untouched.
+pub fn compact_evaluation_contexts(state: &mut Value) {
+    fn visit(value: &mut Value, sets: &mut Vec<Value>) {
+        match value {
+            Value::Object(object) => {
+                if let Some(context) = object.get_mut("context").and_then(Value::as_object_mut)
+                    && let Some(ids) = context.get_mut("evidence_ids")
+                    && ids.is_array()
+                    && ids.to_string().len() > 128
+                {
+                    let index = sets.iter().position(|v| v == ids).unwrap_or_else(|| {
+                        sets.push(ids.clone());
+                        sets.len() - 1
+                    });
+                    *ids = json!({"$evidence_set_ref":index});
+                }
+                for child in object.values_mut() {
+                    visit(child, sets);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    visit(child, sets);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut sets = vec![];
+    visit(state, &mut sets);
+    if !sets.is_empty() {
+        state["evidence_sets"] = json!(sets);
+        state["context_encoding"] = json!(
+            "lossless-evidence-sets-v1: a context.evidence_ids object with $evidence_set_ref index means the exact ordered ID array at state.evidence_sets[index]. All typed evaluations and source claims are unchanged."
+        );
+    }
+}
+
 pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
     let cursor = program["cursor"].as_u64().ok_or("Missing cursor")? as usize;
     let task = &program["tasks"][cursor];
@@ -143,7 +182,8 @@ pub fn request(snapshot: &Value, program: &Value) -> Result<Value, String> {
     } else {
         Value::Null
     };
-    let request = json!({"model":MODEL,"state":{"world":snapshot["world"],"node":digest(node),"prerequisites":prerequisites,"counter_hypotheses":counter_hypotheses,"source_evidence":evidence,"baseline":program["baseline"],"world_audit":audit,"previous_world_judgments":if is_world { super::search::previous_world_judgments(program,node) } else { Value::Null },"comparisons":comparisons,"assessment":program["results"][id],"evaluations":program["evaluations"][id]},"questions":{"result":question}});
+    let mut request = json!({"model":MODEL,"state":{"world":snapshot["world"],"node":digest(node),"prerequisites":prerequisites,"counter_hypotheses":counter_hypotheses,"source_evidence":evidence,"baseline":program["baseline"],"world_audit":audit,"previous_world_judgments":if is_world { super::search::previous_world_judgments(program,node) } else { Value::Null },"comparisons":comparisons,"assessment":program["results"][id],"evaluations":program["evaluations"][id]},"questions":{"result":question}});
+    compact_evaluation_contexts(&mut request["state"]);
     if request.to_string().len() > 128 * 1024 {
         return Err("Semantic request exceeds 128 KB".into());
     }
@@ -319,4 +359,28 @@ mod comparison_tests {
         assert_eq!(r["state"]["node"]["observed_at"], "2026-09-19");
         assert_eq!(r["state"]["node"]["claim_type"], "reported_observation");
     }
+}
+
+#[cfg(test)]
+#[test]
+fn provenance_context_encoding_is_lossless_and_preserves_typed_values() {
+    let ids: Vec<_> = (0..35)
+        .map(|i| format!("evidence-id-with-realistic-length-{i}"))
+        .collect();
+    let original = json!({"prerequisites":(0..6).map(|i|json!({"id":format!("h{i}"),"evaluations":{"likelihood":{"type":"noul","probability":0.23,"answer":{"type":"noul","probability":0.23},"context":{"round":2,"evidence_ids":ids}},"gap":{"type":"choice","selected":"evidence","context":{"round":2,"evidence_ids":ids}}}})).collect::<Vec<_>>(),"source_evidence":[{"quote":"Keep this exact dated quotation."}]});
+    let mut packed = original.clone();
+    compact_evaluation_contexts(&mut packed);
+    assert!(packed.to_string().len() * 2 < original.to_string().len());
+    let sets = packed["evidence_sets"].clone();
+    for node in packed["prerequisites"].as_array_mut().unwrap() {
+        for value in node["evaluations"].as_object_mut().unwrap().values_mut() {
+            let index = value["context"]["evidence_ids"]["$evidence_set_ref"]
+                .as_u64()
+                .unwrap() as usize;
+            value["context"]["evidence_ids"] = sets[index].clone();
+        }
+    }
+    packed.as_object_mut().unwrap().remove("evidence_sets");
+    packed.as_object_mut().unwrap().remove("context_encoding");
+    assert_eq!(packed, original);
 }

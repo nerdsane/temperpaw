@@ -59,6 +59,9 @@ pub fn plan(nodes: &[Value]) -> Result<Value, String> {
             return Err("Missing or duplicate event identity".into());
         }
     }
+    // Composed worlds have their own structural/whole-event planner. They are
+    // never evidence or ordinary exploration tasks, including archived worlds.
+    by_id.retain(|_, node| field(node, "kind") != "world");
     let mut prerequisites: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut dependents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut issues = vec![];
@@ -109,9 +112,7 @@ pub fn plan(nodes: &[Value]) -> Result<Value, String> {
             .unwrap_or(0);
         depths.insert(id.clone(), depth);
         let hypothesis = matches!(field(by_id[&id], "kind"), "scenario" | "revision");
-        let functions: &[&str] = if field(by_id[&id], "kind") == "world" {
-            &["classify_gap", "estimate_likelihood"]
-        } else if hypothesis {
+        let functions: &[&str] = if hypothesis {
             &[
                 "classify_gap",
                 "estimate_likelihood",

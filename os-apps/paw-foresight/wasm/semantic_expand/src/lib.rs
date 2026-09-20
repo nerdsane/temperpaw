@@ -303,7 +303,14 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
     if nodes.len() + worlds.len() > core::MAX_NODES {
         return Err("World composition exceeds node budget".into());
     }
-    let revision = old["world_revision"].as_u64().unwrap_or(0) + 1;
+    let revision = old["world_revision"].as_u64().unwrap_or(0).max(
+        nodes
+            .iter()
+            .filter(|node| node["kind"] == "world")
+            .filter_map(|node| node["revision"].as_u64())
+            .max()
+            .unwrap_or(0),
+    ) + 1;
     let mut added = vec![];
     let mut identities = std::collections::BTreeSet::new();
     for world in worlds {
@@ -619,11 +626,32 @@ fn replan(snapshot: &Value, old: &Value, generated: &Value, added: usize) -> Res
         "http_calls",
         "independent_challenge",
         "batch_byte_cap",
+        "world_revision",
+        "world_refinement",
+        "world_audits",
+        "active_world_ids",
+        "resume_mode",
     ] {
         if !old[key].is_null() {
             program[key] = old[key].clone();
         }
     }
+    // Older recovered programs dropped this counter; immutable nodes retain
+    // the authoritative revision, so subsequent composition cannot reuse IDs.
+    let stored_revision = snapshot["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|node| node["kind"] == "world")
+        .filter_map(|node| node["revision"].as_u64())
+        .max()
+        .unwrap_or(0);
+    program["world_revision"] = json!(
+        old["world_revision"]
+            .as_u64()
+            .unwrap_or(0)
+            .max(stored_revision)
+    );
     program["round"] = json!(old["round"].as_u64().unwrap_or(0) + 1);
     program["continue_exploring"] =
         json!(generated["continue_exploring"].as_bool().unwrap_or(false));
@@ -782,6 +810,62 @@ mod tests {
         let program = json!({"results":{"a":{"estimate_likelihood":"0.9"},"b":{"estimate_likelihood":"0.8"}},"evaluations":{},"rounds":[],"round":6,"stop_reason":"exploration_converged"});
         (snapshot, generated, program)
     }
+    #[test]
+    fn composition_cannot_reuse_immutable_world_ids_when_old_counter_was_lost() {
+        let (mut snapshot, generated, old) = world_fixture();
+        let mut program = compose(&mut snapshot, &generated, &old).unwrap();
+        program.as_object_mut().unwrap().remove("world_revision");
+        let revised = compose(&mut snapshot, &generated, &program).unwrap();
+        assert_eq!(revised["world_revision"], 2);
+        assert!(
+            revised["active_world_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|id| id.as_str().unwrap().starts_with("world-r2-"))
+        );
+    }
+
+    #[test]
+    fn recovered_exploration_replans_only_events_and_preserves_world_history() {
+        let mut snapshot = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":"e","kind":"evidence","edges":"[]"},{"Id":"h","kind":"scenario","statement":"An explored event","edges":"[]"},{"Id":"world-r3-old","kind":"world","revision":3,"archived":true,"edges":"[]"}]});
+        let old = json!({"stage":"exploration","world_revision":3,"world_refinement":{"world-r3-old":{"rounds":[{"round":1,"complete":false}]}},"world_audits":{"world-r3-old":{"status":"not_tested"}},"active_world_ids":[],"resume_mode":"unfinished_exploration","results":{},"evaluations":{},"rounds":[]});
+        let generated = batch("new-alternative");
+        expand(&mut snapshot, &generated, "explore", &old).unwrap();
+        let replanned = replan(&snapshot, &old, &generated, 1).unwrap();
+        assert!(
+            replanned["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|t| t["nodeId"] != "world-r3-old")
+        );
+        for key in [
+            "world_revision",
+            "world_refinement",
+            "world_audits",
+            "active_world_ids",
+            "resume_mode",
+        ] {
+            assert_eq!(replanned[key], old[key]);
+        }
+        let mut lost = old.clone();
+        lost.as_object_mut().unwrap().remove("world_revision");
+        assert_eq!(
+            replan(&snapshot, &lost, &generated, 1).unwrap()["world_revision"],
+            3
+        );
+        let mut active = snapshot.clone();
+        active["nodes"][2]["archived"] = json!(false);
+        assert!(
+            core::plan(active["nodes"].as_array().unwrap()).unwrap()["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|t| t["nodeId"] != "world-r3-old")
+        );
+    }
+
     #[test]
     fn independent_challenge_uses_its_own_reference_scope_and_evaluates_new_events() {
         let snapshot = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":"old","kind":"scenario","statement":"Old framing","edges":"[]"},{"Id":"e","kind":"evidence","statement":"Observed fact","edges":"[]"}]});

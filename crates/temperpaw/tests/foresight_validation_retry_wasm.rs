@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use temper_wasm::{
-    SimWasmHost, StreamRegistry, WasmEngine, WasmInvocationContext, WasmResourceLimits,
+    SimWasmHost, StreamRegistry, WasmEngine, WasmHost, WasmInvocationContext, WasmResourceLimits,
 };
 async fn invoke(
     engine: &WasmEngine,
@@ -15,6 +15,14 @@ async fn invoke(
     response: &Value,
 ) -> Value {
     let host = SimWasmHost::new().with_default_response(status, &response.to_string());
+    invoke_host(engine, hash, fields, Arc::new(host)).await
+}
+async fn invoke_host(
+    engine: &WasmEngine,
+    hash: &str,
+    fields: Value,
+    host: Arc<dyn WasmHost>,
+) -> Value {
     let ctx = WasmInvocationContext {
         tenant: "test".into(),
         entity_type: "SemanticRun".into(),
@@ -36,7 +44,7 @@ async fn invoke(
         .invoke(
             hash,
             &ctx,
-            Arc::new(host),
+            host,
             &WasmResourceLimits {
                 max_memory: 256 * 1024 * 1024,
                 max_fuel: 10_000_000_000,
@@ -107,4 +115,112 @@ async fn inconsistent_choice_retries_then_only_valid_answer_advances() {
     let p: Value = serde_json::from_str(denied["program_json"].as_str().unwrap()).unwrap();
     assert_eq!(p["stop_reason"], "provider_error");
     assert!(p["validation_failures"].is_null());
+}
+
+#[derive(Default)]
+struct Capture(std::sync::Mutex<Vec<Value>>);
+#[async_trait::async_trait]
+impl WasmHost for Capture {
+    fn get_secret(&self, _: &str) -> Result<String, String> {
+        Err("not used".into())
+    }
+    fn log(&self, _: &str, _: &str) {}
+    async fn http_call_binary(
+        &self,
+        _: &str,
+        _: &str,
+        _: &[(String, String)],
+        _: &[u8],
+    ) -> Result<(u16, Vec<u8>), String> {
+        Err("not used".into())
+    }
+    async fn http_call(
+        &self,
+        _method: &str,
+        _url: &str,
+        _headers: &[(String, String)],
+        body: &str,
+    ) -> Result<(u16, String), String> {
+        self.0
+            .lock()
+            .unwrap()
+            .push(serde_json::from_str(body).unwrap());
+        Ok((
+            200,
+            json!({"model":"jev-1.13.0","answers":{"result":{"type":"noul","noul":0.23}}})
+                .to_string(),
+        ))
+    }
+}
+#[tokio::test]
+async fn world_likelihood_interns_provenance_losslessly_in_actual_provider_input() {
+    let ids: Vec<_> = (0..35)
+        .map(|i| format!("evidence-with-uuid-length-00000000-{i}"))
+        .collect();
+    let mut nodes:Vec<Value>=(0..6).map(|i|json!({"Id":format!("h{i}"),"kind":"scenario","statement":format!("Component {i} happens by 2027"),"edges":"[]"})).collect();
+    let mut evaluations = json!({});
+    for i in 0..6 {
+        for f in [
+            "classify_gap",
+            "estimate_likelihood",
+            "evaluate_novelty",
+            "decision_value",
+        ] {
+            evaluations[format!("h{i}")][f] = json!({"type":"noul","probability":0.23,"context":{"round":2,"task":{"nodeId":format!("h{i}"),"function":f},"evidence_ids":ids}});
+        }
+    }
+    nodes.push(json!({"Id":"world","kind":"world","statement":"All six components happen jointly by 2027","component_ids":(0..6).map(|i|format!("h{i}")).collect::<Vec<_>>(),"counter_ids":[],"edges":(0..6).map(|i|json!({"kind":"requires","to_id":format!("h{i}")})).collect::<Vec<_>>().pipe_json()}));
+    nodes.push(json!({"Id":ids[0],"kind":"evidence","statement":"Observed baseline","source_quote":"Exact quoted evidence remains here.","edges":"[]"}));
+    let snapshot = json!({"world":{"Id":"question"},"nodes":nodes});
+    let program = json!({"stage":"worlds","cursor":0,"tasks":[{"nodeId":"world","function":"estimate_likelihood"}],"results":{},"evaluations":evaluations});
+    let fields = json!({"snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"trace_json":"[]"});
+    let engine = WasmEngine::new().unwrap();
+    let path=std::env::var("ARN518_VALIDATION_WASM").unwrap_or_else(|_|format!("{}/../../os-apps/paw-foresight/wasm/semantic_call/target/wasm32-unknown-unknown/release/semantic_call.wasm",env!("CARGO_MANIFEST_DIR")));
+    let hash = engine
+        .compile_and_cache(&std::fs::read(path).unwrap())
+        .unwrap();
+    let host = Arc::new(Capture::default());
+    let out = invoke_host(&engine, &hash, fields, host.clone()).await;
+    let request = host.0.lock().unwrap()[0].clone();
+    let mut state = request["state"].clone();
+    let sets = state["evidence_sets"].clone();
+    assert_eq!(sets.as_array().unwrap().len(), 1);
+    let packed = state.to_string().len();
+    for node in state["prerequisites"].as_array_mut().unwrap() {
+        for value in node["evaluations"].as_object_mut().unwrap().values_mut() {
+            let index = value["context"]["evidence_ids"]["$evidence_set_ref"]
+                .as_u64()
+                .unwrap() as usize;
+            value["context"]["evidence_ids"] = sets[index].clone();
+        }
+        assert_eq!(
+            node["evaluations"],
+            evaluations[node["id"].as_str().unwrap()]
+        );
+    }
+    state.as_object_mut().unwrap().remove("evidence_sets");
+    state.as_object_mut().unwrap().remove("context_encoding");
+    assert!(packed * 2 < state.to_string().len());
+    assert_eq!(
+        state["source_evidence"][0]["source_quote"],
+        "Exact quoted evidence remains here."
+    );
+    let trace: Value = serde_json::from_str(out["trace_json"].as_str().unwrap()).unwrap();
+    assert_eq!(trace[0]["request"]["state_ref"]["evidence_sets"], sets);
+    let after: Value = serde_json::from_str(out["program_json"].as_str().unwrap()).unwrap();
+    for i in 0..6 {
+        assert_eq!(
+            after["evaluations"][format!("h{i}")],
+            evaluations[format!("h{i}")]
+        );
+    }
+}
+
+trait JsonText {
+    fn pipe_json(self) -> String;
+}
+impl JsonText for Vec<Value> {
+    fn pipe_json(self) -> String {
+        json!(self).to_string()
+    }
 }

@@ -131,16 +131,14 @@ fn exploration_interrupted(snapshot: &Value, program: &Value, trace: &Value) -> 
             || program["exploration_stop_reason"] == "provider_error")
         && !trace.as_array().into_iter().flatten().any(|item| {
             item["task"]["world_id"].as_str().is_some()
-                || item["nodeId"]
-                    .as_str()
-                    .is_some_and(|id| world_ids.contains(id))
+                || (item["function"] == "estimate_likelihood"
+                    && item["nodeId"]
+                        .as_str()
+                        .is_some_and(|id| world_ids.contains(id)))
         })
 }
 
-fn restore_exploration(
-    snapshot: &Value,
-    program: &Value,
-) -> Result<Option<(Value, Value)>, String> {
+fn restore_exploration(snapshot: &Value, program: &Value) -> Result<(Value, Value), String> {
     let nodes: Vec<_> = snapshot["nodes"]
         .as_array()
         .ok_or("Missing resume nodes")?
@@ -152,9 +150,6 @@ fn restore_exploration(
     planned["tasks"].as_array_mut().unwrap().retain(|task| {
         program["results"][core::field(task, "nodeId")][core::field(task, "function")].is_null()
     });
-    if planned["tasks"].as_array().unwrap().is_empty() {
-        return Ok(None);
-    }
     let mut restored = program.clone();
     restored["tasks"] = planned["tasks"].clone();
     restored["cursor"] = json!(0);
@@ -172,7 +167,7 @@ fn restore_exploration(
     {
         node["archived"] = json!(true);
     }
-    Ok(Some((snapshot, restored)))
+    Ok((snapshot, restored))
 }
 
 /// Resume only trusted persisted state; no caller-provided graph or evaluations.
@@ -313,10 +308,8 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
     if !valid_id(agent_id) || model.trim().is_empty() || provider.trim().is_empty() {
         return Err("Missing resume agent or provider metadata".into());
     }
-    if !exhausted
-        && interrupted_exploration
-        && let Some((snapshot, program)) = restore_exploration(&snapshot, &program)?
-    {
+    if !exhausted && interrupted_exploration {
+        let (snapshot, program) = restore_exploration(&snapshot, &program)?;
         return Ok(
             json!({"world_id":world_id,"agent_id":agent_id,"model":model,"provider":provider,
             "snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"trace_json":trace_raw,
@@ -361,7 +354,7 @@ fn resume_transition(prepared: &Value) -> Result<&'static str, String> {
     Ok(
         if core::field(prepared, "phase") != "synthesize"
             && (core::field(prepared, "phase") != "compose" || program["stage"] == "worlds")
-            && cursor < count
+            && (cursor < count || program["resume_mode"] == "unfinished_exploration")
         {
             "ResumePrepared"
         } else {
@@ -471,6 +464,33 @@ mod tests {
         json!({"Status":"Failed","world_id":"w","snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"trace_json":"[]","started_at_ms":"1000","phase":"explore","agent_id":"agent-a","model":"model-a","provider":"provider-a"})
     }
     #[test]
+    fn archived_world_classification_failure_resumes_even_when_real_tasks_are_complete() {
+        let snapshot = json!({"nodes":[{"Id":"h","kind":"scenario","edges":"[]"},{"Id":"old-world","kind":"world","archived":true,"edges":"[]"}]});
+        let mut old = json!({"stage":"exploration","stop_reason":"provider_error","results":{}});
+        let plan = core::plan(snapshot["nodes"].as_array().unwrap()).unwrap();
+        for task in plan["tasks"].as_array().unwrap() {
+            old["results"][core::field(task, "nodeId")][core::field(task, "function")] =
+                json!("recorded");
+        }
+        let trace =
+            json!([{"nodeId":"old-world","function":"classify_gap","error":"max_tokens_exceeded"}]);
+        assert!(exploration_interrupted(&snapshot, &old, &trace));
+        let (_, restored) = restore_exploration(&snapshot, &old).unwrap();
+        assert!(restored["tasks"].as_array().unwrap().is_empty());
+        assert_eq!(restored["continue_exploring"], true);
+        assert_eq!(
+            resume_transition(&json!({"phase":"explore","program_json":restored.to_string()}))
+                .unwrap(),
+            "ResumePrepared"
+        );
+        assert!(!exploration_interrupted(
+            &snapshot,
+            &old,
+            &json!([{"nodeId":"old-world","function":"estimate_likelihood"}])
+        ));
+    }
+
+    #[test]
     fn qualitative_answer_can_resume_unfinished_exploration_without_rewinding_world_checks() {
         let mut record = checkpoint();
         let mut snapshot = core::parse(core::field(&record, "snapshot_json")).unwrap();
@@ -524,7 +544,7 @@ mod tests {
         assert!(!exploration_interrupted(
             &snapshot,
             &program,
-            &json!([{"nodeId":"qualitative"}])
+            &json!([{"nodeId":"qualitative","function":"estimate_likelihood"}])
         ));
         program["exploration_stop_reason"] = json!("exploration_converged");
         record["program_json"] = json!(program.to_string());
@@ -552,7 +572,6 @@ mod tests {
         assert_eq!(prepared["phase"], "explore");
         assert_eq!(resume_transition(&prepared).unwrap(), "ResumePrepared");
         assert_eq!(restored["resume_mode"], "unfinished_exploration");
-        assert!(!restored["tasks"].as_array().unwrap().is_empty());
         assert!(restored["tasks"].as_array().unwrap().iter().all(|task| {
             old["results"][core::field(task, "nodeId")][core::field(task, "function")].is_null()
         }));
