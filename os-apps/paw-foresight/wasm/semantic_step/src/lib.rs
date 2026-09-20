@@ -83,6 +83,12 @@ fn next_phase(
         program["stop_reason"] = json!(exhausted);
         "compose"
     } else if program["continue_exploring"] == false {
+        if program["independent_challenge"]["status"] != "completed" {
+            program["independent_challenge"] =
+                json!({"status":"pending","trigger":"candidate_generation_reported_saturation"});
+            program["stop_reason"] = json!("independent_challenge_pending");
+            return "challenge";
+        }
         program["stop_reason"] = json!("exploration_converged");
         "compose"
     } else {
@@ -174,6 +180,23 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
 mod tests {
     use super::*;
     #[test]
+    fn self_declared_saturation_gets_one_independent_challenge_before_pair_search() {
+        let snapshot = json!({"nodes":[]});
+        let mut program = json!({"stage":"exploration","continue_exploring":false});
+        assert_eq!(next_phase(&snapshot, &mut program, 408, 1000), "challenge");
+        assert_eq!(program["independent_challenge"]["status"], "pending");
+        assert!(program["combination_search"].is_null());
+        program["independent_challenge"]["status"] = json!("completed");
+        program["continue_exploring"] = json!(true);
+        assert_eq!(next_phase(&snapshot, &mut program, 430, 1000), "explore");
+        program["continue_exploring"] = json!(false);
+        assert_eq!(next_phase(&snapshot, &mut program, 450, 1000), "compose");
+        let mut exhausted = json!({"stage":"exploration","continue_exploring":false});
+        assert_eq!(next_phase(&snapshot, &mut exhausted, 1400, 1000), "compose");
+        assert!(exhausted["independent_challenge"].is_null());
+    }
+
+    #[test]
     fn evaluates_multiple_rounds_instead_of_one_deepening() {
         let s = json!({"nodes":[]});
         let mut p = json!({"round":3,"continue_exploring":true});
@@ -190,7 +213,8 @@ mod tests {
     #[test]
     fn generator_can_conclude_without_filling_a_fixed_number() {
         let s = json!({"nodes":[]});
-        let mut p = json!({"continue_exploring":false});
+        let mut p =
+            json!({"continue_exploring":false,"independent_challenge":{"status":"completed"}});
         assert_eq!(next_phase(&s, &mut p, 213, 1000), "compose");
         assert_eq!(p["stop_reason"], "exploration_converged");
     }

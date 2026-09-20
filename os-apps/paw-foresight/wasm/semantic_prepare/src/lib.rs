@@ -207,7 +207,10 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         .filter(|n| *n > 0 && *n <= now_ms)
         .ok_or("Invalid resume start time")?;
     let phase = core::field(record, "phase");
-    if !matches!(phase, "seed" | "explore" | "compose" | "synthesize") {
+    if !matches!(
+        phase,
+        "seed" | "explore" | "challenge" | "compose" | "synthesize"
+    ) {
         return Err("Invalid resume phase".into());
     }
     let has_worlds = nodes.iter().any(|n| core::field(n, "kind") == "world");
@@ -516,6 +519,17 @@ mod tests {
         program["cursor"] = json!(1);
         record["program_json"] = json!(program.to_string());
         assert!(resume_checkpoint(&record, "w", 2000).is_err());
+    }
+
+    #[test]
+    fn independent_challenge_resumes_in_its_original_phase() {
+        let mut record = checkpoint();
+        record["phase"] = json!("challenge");
+        let prepared = resume_checkpoint(&record, "w", 2000).unwrap();
+        assert_eq!(prepared["phase"], "challenge");
+        assert_eq!(prepared["snapshot_json"], record["snapshot_json"]);
+        assert_eq!(prepared["trace_json"], record["trace_json"]);
+        assert_eq!(resume_transition(&prepared).unwrap(), "Prepared");
     }
 
     #[test]

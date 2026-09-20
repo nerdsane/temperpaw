@@ -32,6 +32,24 @@ Reference contract: existing catalog nodes use exact ref_ identifiers; never rec
 
 Resource contract: at most128 TOTAL hypotheses plus research_evidence per batch; capacity5000 Jev calls,2048 nodes,64 rounds and one hour. These are limits, not targets or category counts. Continue while another round can add a materially different mechanism or resolve a consequential uncertainty. Stop with continue_exploring=false when it cannot, explaining why and what remains unknown. A budget stop means incomplete exploration, not convergence."#;
 
+const CHALLENGE_PROMPT: &str = r#"Independently challenge the framing of the user's future question. You have the question, its conditions and observed evidence, but no previous candidate futures or scores. Identify causal assumptions that make today's arrangements seem necessary. Construct alternative mechanisms under which those assumptions change, and follow their consequences for what people can do and what becomes unnecessary. Also consider what could prevent or reverse the change. Do not preserve a familiar workflow merely because it appears in current sources. No particular future, topic, positive outcome or disappearance is required. A conjecture needs a coherent mechanism, not a source already predicting it. Keep observations separate from conjecture and respect the supplied vantage and horizon; frozen hindcasts admit no later knowledge.
+
+Return JSON ONLY: {"premises_challenged":[{"assumption":"a changeable causal premise, <=600 characters","alternative":"how it could differ and why that matters, <=1200 characters"}],"hypotheses":[{"id":"unique short ASCII ID, not ref_","title":"distinct future claim","statement":"self-contained observable future event with scope and horizon","mechanism":"causal path and assumptions","requires":["exact visible evidence ref_ ID or a new hypothesis ID in this batch"],"parent":"optional new hypothesis ID in this same batch only","scene":"imagined everyday consequence","signal":"observable early sign","falsifier":"what would undermine the mechanism","evidence_note":"what is observed versus conjectural","research_question":"important unanswered premise"}],"research_evidence":[],"continue_exploring":true,"exploration_note":"what changed in the framing and whether more exploration would add a different mechanism"}.
+
+At most32 premises and128 hypotheses; these are resource limits, not targets. Return no fabricated research. Existing ref_ IDs refer only to the visible evidence catalog; do not guess hidden hypotheses or reconstruct UUIDs. New hypotheses may depend on each other. Use [] when there is no identified prerequisite. Probabilities are evaluated separately by Jev; never supply them. You may return no new hypotheses if you cannot formulate another consequential mechanism, explaining the limit honestly."#;
+
+fn challenge_input(snapshot: &Value) -> Result<Value, String> {
+    let evidence = references::evidence_snapshot(snapshot);
+    let input = references::References::new(&evidence)?.project(&json!({
+        "world":evidence["world"],"observed_evidence":evidence["nodes"],
+        "reference_scope":"Only the evidence references shown here and new hypotheses in your own batch may be referenced."
+    }));
+    if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
+        return Err("Independent challenge evidence exceeds context bound".into());
+    }
+    Ok(input)
+}
+
 const WORLD_COMPOSITION_PROMPT: &str = r#"Turn the explored evidence and possibilities into a few genuinely different WORLDS that answer the user's question. The small nodes are building blocks, not the final answer. Compare candidate worlds with the observed baseline and discard repackaged present-day workflows. Select distinct downstream consequences: what becomes possible or unnecessary, how software itself changes, and how a person's life differs. Follow second- and third-order effects supported by the explored components. Do not merely select the highest-scoring clusters because they are easiest to defend; retain plausible low-likelihood alternatives when they imply a meaningfully different future. Shared components are allowed, but worlds must differ in consequences, not just titles. Explain the difference from today's baseline without inventing unevaluated component events. Find coherent combinations and causal chains: what people do, what becomes cheap or scarce, who gains or loses, what disappears, and what changes next. Do not turn each node into a separate world or split one familiar lesson into several cards. A world is more than a themed list. Its defining changes must fit together and have a clear reason to occur together. Consider rival mechanisms and evidence that challenges the combination. Do not force an optimistic/pessimistic/middle template, a compliance split, or the same axes for every question.
 
 Begin with the present at world.last_ingest_date. Separate supported observations, assumptions supplied by the user, and unresolved facts. A practice already common in the relevant setting is the starting point, not a future breakthrough. Describe what changes AFTER that starting point. Do not universalize a user's own workflow or an early-adopter example to everyone. Source retrieval dates are not publication dates. If current evidence is missing, state that plainly. The final worlds should differ in consequences and ways of living, not only in speed of adoption.
@@ -199,11 +217,14 @@ fn setup(ctx: &Context) -> Result<(), String> {
     let prompt = match phase {
         "seed" | "explore" => EXPLORATION_PROMPT,
         "compose" => WORLD_COMPOSITION_PROMPT,
+        "challenge" => CHALLENGE_PROMPT,
         "synthesize" => SYNTHESIS_PROMPT,
         _ => return Err("Unknown reasoning phase".into()),
     };
     let input = if phase == "synthesize" {
         world_writing_input(&snapshot, &program)?
+    } else if phase == "challenge" {
+        challenge_input(&snapshot)?
     } else {
         reasoning_input(&snapshot, &program)?
     };
@@ -231,6 +252,26 @@ mod reasoning_tests {
 
     mod outlook_contract {
         include!("../../semantic_outlook.rs");
+    }
+
+    #[test]
+    fn independent_challenge_ignores_candidate_prose_scores_and_order_but_retains_evidence() {
+        let source = json!({"Id":"e","kind":"evidence","statement":"Observed capability","provenance":"observed"});
+        let a = json!({"world":{"description":"What might change?"},"nodes":[{"Id":"h","kind":"scenario","statement":"Review remains essential","mechanism":"Present arrangement persists"},source]});
+        let b = json!({"world":a["world"],"nodes":[source,{"Id":"different","kind":"revision","statement":"Review disappears","mechanism":"A different premise","probability":0.99}]});
+        assert_eq!(challenge_input(&a).unwrap(), challenge_input(&b).unwrap());
+        let mut c = b.clone();
+        c["nodes"][0]["statement"] = json!("A different observed capability");
+        assert_ne!(challenge_input(&a).unwrap(), challenge_input(&c).unwrap());
+        let program = json!({"results":{"h":{"evaluate_novelty":"3.9"}}});
+        let ordinary = reasoning_input(&a, &program).unwrap();
+        assert_eq!(ordinary["catalog"].as_array().unwrap().len(), 2);
+        assert!(challenge_input(&a).unwrap()["catalog"].is_null());
+        assert_eq!(
+            challenge_input(&a).unwrap()["observed_evidence"][0]["Id"],
+            "ref_0001"
+        );
+        assert!(!research_enabled("challenge", &a));
     }
 
     #[test]

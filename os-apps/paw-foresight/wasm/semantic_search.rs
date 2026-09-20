@@ -669,10 +669,17 @@ pub fn refine_worlds(
         let history = program["world_refinement"][id]["rounds"]
             .as_array_mut()
             .unwrap();
+        // Resuming an interrupted pass updates that pass, not the round count.
+        // Its previous checkpoint and every HTTP attempt remain in the old run
+        // and immutable trace. Completed round receipts are never rewritten.
+        history.retain(|prior| prior["round"] != pass || prior["complete"] == true);
+        let current = history.iter().find(|prior| prior["round"] == pass).unwrap_or(&receipt);
         let stable = history
-            .last()
-            .is_some_and(|previous| stable_judgments(previous, &receipt));
-        history.push(receipt);
+            .iter().rev().find(|prior| prior["round"].as_u64().is_some_and(|round| round < pass))
+            .is_some_and(|previous| stable_judgments(previous, current));
+        if !history.iter().any(|prior| prior["round"] == pass) {
+            history.push(receipt);
+        }
         all_stable &= stable;
         all_complete &= complete;
         tasks.extend(world_tasks);
@@ -743,6 +750,32 @@ mod refinement_tests {
             };
         }
     }
+    #[test]
+    fn resumed_partial_pass_does_not_create_duplicate_rounds_or_false_convergence() {
+        let (snapshot, mut program) = fixture();
+        assert!(!refine_worlds(&snapshot, &mut program, 1, 1000, "provider_error"));
+        assert!(!refine_worlds(&snapshot, &mut program, 2, 2000, "provider_error"));
+        assert_eq!(program["world_refinement"]["w"]["rounds"].as_array().unwrap().len(), 1);
+        // Repair historical repeated incomplete receipts from older releases.
+        let partial = program["world_refinement"]["w"]["rounds"][0].clone();
+        program["world_refinement"]["w"]["rounds"].as_array_mut().unwrap().push(partial);
+        fill(&snapshot, &mut program, 0.23);
+        assert!(refine_worlds(&snapshot, &mut program, 20, 3000, ""));
+        assert_eq!(program["world_pass"], 2);
+        let history = &program["world_refinement"]["w"]["rounds"];
+        assert_eq!(history.as_array().unwrap().len(), 1);
+        assert_eq!(history[0]["round"], 1);
+        assert_eq!(history[0]["complete"], true);
+        assert_eq!(program["world_refinement"]["w"]["converged"], false);
+        let first = history[0].clone();
+        assert!(!refine_worlds(&snapshot, &mut program, 21, 4000, "provider_error"));
+        fill(&snapshot, &mut program, 0.24);
+        assert!(!refine_worlds(&snapshot, &mut program, 40, 5000, ""));
+        assert_eq!(program["world_refinement"]["w"]["rounds"][0], first);
+        assert_eq!(program["world_refinement"]["w"]["rounds"].as_array().unwrap().len(), 2);
+        assert_eq!(program["world_refinement"]["w"]["converged"], true);
+    }
+
     #[test]
     fn second_pass_consumes_prior_judgments_without_reusing_current_values() {
         let (snapshot, mut program) = fixture();

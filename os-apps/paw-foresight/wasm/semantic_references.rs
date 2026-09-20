@@ -3,6 +3,14 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 pub const PREFIX: &str = "ref_";
 
+// A separate namespace makes independent generation insensitive to candidate
+// prose, order, scores, or the number of previously explored hypotheses.
+pub fn evidence_snapshot(snapshot: &Value) -> Value {
+    json!({"world":snapshot["world"],"nodes":snapshot["nodes"].as_array().into_iter().flatten()
+        .filter(|node| matches!(node["kind"].as_str(),Some("evidence"|"research_evidence")))
+        .cloned().collect::<Vec<_>>()})
+}
+
 pub struct References {
     forward: BTreeMap<String, String>,
     reverse: BTreeMap<String, String>,

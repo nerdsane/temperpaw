@@ -8,11 +8,25 @@ fn provider_error(status: u16, body: &str, secret: &str) -> String {
     if body.len() <= 128 * 1024
         && let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
     {
-        let detail = value["error"]["message"]
+        let detail = value["detail"]["message"]
             .as_str()
+            .or_else(|| value["detail"]["reason"].as_str())
+            .or_else(|| value["error"]["message"].as_str())
             .or_else(|| value["message"].as_str())
             .or_else(|| value["detail"].as_str())
             .or_else(|| value["error"].as_str());
+        if let Some(code) = value["detail"]["error_type"].as_str() {
+            message.push_str(": ");
+            message.extend(
+                if secret.is_empty() {
+                    code.to_owned()
+                } else {
+                    code.replace(secret, "[redacted]")
+                }
+                .chars()
+                .take(128),
+            );
+        }
         if let Some(detail) = detail {
             let safe = if secret.is_empty() {
                 detail.to_owned()
@@ -24,6 +38,14 @@ fn provider_error(status: u16, body: &str, secret: &str) -> String {
         }
     }
     message
+}
+
+fn is_token_overflow(status: u16, body: &str) -> bool {
+    status == 400
+        && body.len() <= 128 * 1024
+        && serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .is_some_and(|v| v["detail"]["error_type"] == "max_tokens_exceeded")
 }
 
 fn call(ctx: &Context) -> Result<(), String> {
@@ -52,11 +74,11 @@ fn call(ctx: &Context) -> Result<(), String> {
             p["stop_reason"] = json!("trace_budget");
             break;
         }
-        if let Ok(started) = core::field(&ctx.entity_state, "started_at_ms").parse::<u64>() {
-            if (Context::get_time_millis() as u64).saturating_sub(started) >= core::time_limit(&p) {
-                p["stop_reason"] = json!("time_budget");
-                break;
-            }
+        if let Ok(started) = core::field(&ctx.entity_state, "started_at_ms").parse::<u64>()
+            && (Context::get_time_millis() as u64).saturating_sub(started) >= core::time_limit(&p)
+        {
+            p["stop_reason"] = json!("time_budget");
+            break;
         }
         let batch = core::batch::prepare(
             &snapshot,
@@ -74,6 +96,7 @@ fn call(ctx: &Context) -> Result<(), String> {
             .unwrap_or(trace.as_array().unwrap().len() as u64)
             + 1;
         p["http_calls"] = json!(http_call);
+        let mut token_overflow = false;
         let response_result = (|| -> Result<serde_json::Value, String> {
             let r = ctx
                 .http_call(
@@ -87,6 +110,7 @@ fn call(ctx: &Context) -> Result<(), String> {
                 )
                 .map_err(|_| "Semantic provider transport failed")?;
             if !(200..300).contains(&r.status) {
+                token_overflow = is_token_overflow(r.status, &r.body);
                 return Err(provider_error(r.status, &r.body, key));
             }
             if r.body.len() > 128 * 1024 {
@@ -101,7 +125,11 @@ fn call(ctx: &Context) -> Result<(), String> {
             Err(error) => {
                 let index = trace.as_array().unwrap().len();
                 trace.as_array_mut().unwrap().push(json!({"index":index,"nodeId":node,"function":function,"requestHash":format!("{:x}",Sha256::digest(encoded.as_bytes())),"startedAtMs":started,"elapsedMs":Context::get_time_millis()-started,"error":error,"requestFormat":"failed-attempt-hash-only","httpCallId":http_call,"task":task}));
-                p["stop_reason"] = json!("provider_error");
+                p["stop_reason"] = if token_overflow && core::batch::reduce_cap(&mut p, &batch) {
+                    json!("batch_repacking")
+                } else {
+                    json!("provider_error")
+                };
                 p["last_error"] = json!(error);
                 break;
             }
@@ -171,4 +199,31 @@ fn provider_errors_preserve_bounded_reason_without_secrets_or_raw_bodies() {
     );
     let huge = serde_json::json!({"message":"x".repeat(3000)}).to_string();
     assert!(provider_error(400, &huge, "secret").len() < 1100);
+}
+
+#[test]
+fn structured_token_limit_retains_code_and_redacts_reason() {
+    let error = provider_error(
+        400,
+        r#"{"detail":{"error_type":"max_tokens_exceeded","reason":"state secret exceeds tokens"}}"#,
+        "secret",
+    );
+    assert!(error.contains("max_tokens_exceeded"));
+    assert!(error.contains("[redacted]"));
+    assert!(!error.contains("secret"));
+}
+
+#[test]
+fn only_confirmed_token_overflow_is_repackable() {
+    let body = r#"{"detail":{"error_type":"max_tokens_exceeded"}}"#;
+    assert!(is_token_overflow(400, body));
+    assert!(!is_token_overflow(403, body));
+    assert!(!is_token_overflow(
+        400,
+        r#"{"detail":{"error_type":"invalid_request"}}"#
+    ));
+    assert!(!is_token_overflow(
+        400,
+        r#"{"message":"max_tokens_exceeded"}"#
+    ));
 }
