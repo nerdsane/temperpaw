@@ -49,7 +49,7 @@ pub fn prepare(snapshot: &Value, program: &Value, remaining: usize) -> Result<Ba
         tasks: vec![],
         individual: vec![],
     };
-    for (index, task) in tasks
+    for (_index, task) in tasks
         .iter()
         .enumerate()
         .take(
@@ -63,9 +63,9 @@ pub fn prepare(snapshot: &Value, program: &Value, remaining: usize) -> Result<Ba
         if structural && !super::search::is_structural(task) {
             break;
         }
-        let mut view = program.clone();
-        view["cursor"] = json!(index);
-        let individual = super::request(snapshot, &view)?;
+        // Structural requests take their task explicitly; avoid cloning the whole
+        // accumulated program for every independent question.
+        let individual = super::search::request(snapshot, program, task)?;
         let key = format!("q{}", batch.tasks.len());
         let mut state = individual["state"].clone();
         let mut common = json!({});
@@ -93,10 +93,11 @@ pub fn prepare(snapshot: &Value, program: &Value, remaining: usize) -> Result<Ba
             super::field(&question, "instructions")
         ));
         candidate["questions"][&key] = question;
-        if candidate.to_string().len() > cap && !batch.tasks.is_empty() {
+        let candidate_bytes = candidate.to_string().len();
+        if candidate_bytes > cap && !batch.tasks.is_empty() {
             break;
         }
-        if candidate.to_string().len() > 128 * 1024 {
+        if candidate_bytes > 128 * 1024 {
             if batch.tasks.is_empty() {
                 return Err("Batched semantic request exceeds 128 KB".into());
             }
@@ -151,6 +152,11 @@ mod tests {
         let p = json!({"cursor":0,"tasks":[{"nodeId":"pair:1:a:1:b","function":"check_pair","pair_ids":["a","b"]},{"nodeId":"pair:1:a:1:c","function":"check_pair","pair_ids":["a","c"]},{"nodeId":"a","function":"estimate_likelihood"}]});
         let batch = prepare(&s, &p, 10).unwrap();
         assert_eq!(batch.tasks.len(), 2);
+        for (index, individual) in batch.individual.iter().enumerate() {
+            let mut old_view = p.clone();
+            old_view["cursor"] = json!(index);
+            assert_eq!(*individual, super::super::request(&s, &old_view).unwrap());
+        }
         let answer = json!({"type":"choice","choice":"compatible","probabilities":{"compatible":0.8,"conflict":0.1,"uncertain":0.1}});
         let mut response = json!({"model":super::super::MODEL,"answers":{"q0":answer,"q1":answer}});
         assert_eq!(answers(&batch, &response).unwrap().len(), 2);

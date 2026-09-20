@@ -224,3 +224,76 @@ impl JsonText for Vec<Value> {
         json!(self).to_string()
     }
 }
+
+#[derive(Default)]
+struct PairCapture(std::sync::Mutex<Vec<Value>>);
+#[async_trait::async_trait]
+impl WasmHost for PairCapture {
+    fn get_secret(&self, _: &str) -> Result<String, String> {
+        Err("unused".into())
+    }
+    fn log(&self, _: &str, _: &str) {}
+    async fn http_call_binary(
+        &self,
+        _: &str,
+        _: &str,
+        _: &[(String, String)],
+        _: &[u8],
+    ) -> Result<(u16, Vec<u8>), String> {
+        Err("unused".into())
+    }
+    async fn http_call(
+        &self,
+        _: &str,
+        _: &str,
+        _: &[(String, String)],
+        body: &str,
+    ) -> Result<(u16, String), String> {
+        let request: Value = serde_json::from_str(body).unwrap();
+        self.0.lock().unwrap().push(request.clone());
+        let mut answers = json!({});
+        for (key, q) in request["questions"].as_object().unwrap() {
+            let mut probabilities = json!({});
+            for choice in q["criteria"].as_object().unwrap().keys() {
+                probabilities[choice] = json!(if choice == "compatible" { 1.0 } else { 0.0 });
+            }
+            answers[key] =
+                json!({"type":"choice","choice":"compatible","probabilities":probabilities});
+        }
+        Ok((
+            200,
+            json!({"model":"jev-1.13.0","answers":answers}).to_string(),
+        ))
+    }
+}
+#[tokio::test]
+#[ignore = "Optional local captured checkpoint; no private data committed"]
+async fn captured_large_pair_program_fits_existing_fuel_budget() {
+    let path = std::env::var("ARN518_PAIR_RECORD").unwrap();
+    let record: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let fields = record.get("fields").unwrap_or(&record).clone();
+    let before: Value = serde_json::from_str(fields["program_json"].as_str().unwrap()).unwrap();
+    let trace: Value = serde_json::from_str(fields["trace_json"].as_str().unwrap()).unwrap();
+    let engine = WasmEngine::new().unwrap();
+    let path = std::env::var("ARN518_VALIDATION_WASM").unwrap();
+    let hash = engine
+        .compile_and_cache(&std::fs::read(path).unwrap())
+        .unwrap();
+    let host = Arc::new(PairCapture::default());
+    let out = invoke_host(&engine, &hash, fields, host.clone()).await;
+    let after: Value = serde_json::from_str(out["program_json"].as_str().unwrap()).unwrap();
+    let nexttrace: Value = serde_json::from_str(out["trace_json"].as_str().unwrap()).unwrap();
+    assert!(after["cursor"].as_u64().unwrap() > before["cursor"].as_u64().unwrap());
+    assert_eq!(
+        &nexttrace.as_array().unwrap()[..trace.as_array().unwrap().len()],
+        trace.as_array().unwrap()
+    );
+    assert_eq!(after["tasks"], before["tasks"]);
+    println!(
+        "preserved {} checks, advanced cursor {} -> {}, HTTP calls {}",
+        trace.as_array().unwrap().len(),
+        before["cursor"],
+        after["cursor"],
+        host.0.lock().unwrap().len()
+    );
+}
