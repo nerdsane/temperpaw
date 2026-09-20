@@ -10,15 +10,15 @@ use temper_wasm::{
 };
 
 fn bytes(module: &str) -> Vec<u8> {
-    if module == "semantic_step" {
-        if let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE") {
-            return std::fs::read(path).unwrap();
-        }
+    if module == "semantic_step"
+        && let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
     }
-    if module == "semantic_expand" {
-        if let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE") {
-            return std::fs::read(path).unwrap();
-        }
+    if module == "semantic_expand"
+        && let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output=std::process::Command::new("bash").current_dir(&root).args(["-c",&format!("set -euo pipefail; source os-apps/wasm-build-env.sh; temperpaw_build_wasm os-apps/paw-foresight/wasm/{module} wasm32-unknown-unknown --locked")]).output().expect("build semantic WASM");
@@ -201,25 +201,26 @@ async fn fresh_world_reply_is_not_a_component_probability() {
     )
     .unwrap();
     assert_eq!(program["results"]["w1"]["estimate_likelihood"], "0.23");
-    let requests = host.requests.lock().unwrap();
-    assert_eq!(requests.len(), 1);
-    let state = &requests[0]["state"];
-    assert_eq!(
-        state["node"]["statement"],
-        snapshot["nodes"][4]["statement"]
-    );
-    let encoded = state.to_string();
-    for exact in [
-        "The assistant sends appointment reminders today.",
-        "2026-09-19",
-        "Patients demand human approval by September 2027.",
-    ] {
-        assert!(
-            encoded.contains(exact),
-            "Missing actual evidence/counter in provider payload: {exact}"
+    {
+        let requests = host.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        let state = &requests[0]["state"];
+        assert_eq!(
+            state["node"]["statement"],
+            snapshot["nodes"][4]["statement"]
         );
+        let encoded = state.to_string();
+        for exact in [
+            "The assistant sends appointment reminders today.",
+            "2026-09-19",
+            "Patients demand human approval by September 2027.",
+        ] {
+            assert!(
+                encoded.contains(exact),
+                "Missing actual evidence/counter in provider payload: {exact}"
+            );
+        }
     }
-    drop(requests);
     let fields = json!({"phase":"synthesize","snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"reasoning_result":answer(&snapshot).to_string()});
     let completed = invoke(&engine, "semantic_expand", fields).await;
     assert_eq!(completed["callback_action"], "Complete", "{completed}");
