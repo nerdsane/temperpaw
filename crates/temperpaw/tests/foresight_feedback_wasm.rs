@@ -13,15 +13,15 @@ use temper_wasm::{
 };
 
 fn bytes(module: &str) -> Vec<u8> {
-    if module == "semantic_step" {
-        if let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE") {
-            return std::fs::read(path).unwrap();
-        }
+    if module == "semantic_step"
+        && let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
     }
-    if module == "semantic_expand" {
-        if let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE") {
-            return std::fs::read(path).unwrap();
-        }
+    if module == "semantic_expand"
+        && let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output=std::process::Command::new("bash").current_dir(&root).args(["-c",&format!("set -euo pipefail; source os-apps/wasm-build-env.sh; temperpaw_build_wasm os-apps/paw-foresight/wasm/{module} wasm32-unknown-unknown --locked")]).output().expect("build semantic WASM");
@@ -296,27 +296,27 @@ async fn prior_judgments_reenter_requests_without_reusing_cached_answers() {
         trace.as_array().unwrap().len(),
         first_trace.as_array().unwrap().len() * 2
     );
-    let requests = host.requests.lock().unwrap();
-    assert_eq!(requests.len(), first_http * 2);
-    let second_input = requests[first_http].to_string();
-    assert!(second_input.contains("previous_world_judgments"));
-    assert!(second_input.contains("0.23"));
-    assert!(second_input.contains("check_world_consistency"));
-    let feedback = &requests[first_http]["state"]["cases"]["q0"]["previous_world_judgments"];
-    let legend = feedback["question_legend"].as_array().unwrap();
-    let values = feedback["rounds"][0]["judgments"].as_array().unwrap();
-    assert_eq!(legend.len(), values.len());
-    for (question, value) in legend.iter().zip(values) {
-        match question["function"].as_str().unwrap() {
-            "estimate_likelihood" | "conditional_on" | "conditional_off" => {
-                assert_eq!(value, "0.23")
+    {
+        let requests = host.requests.lock().unwrap();
+        assert_eq!(requests.len(), first_http * 2);
+        let second_input = requests[first_http].to_string();
+        assert!(second_input.contains("previous_world_judgments"));
+        assert!(second_input.contains("0.23"));
+        assert!(second_input.contains("check_world_consistency"));
+        let feedback = &requests[first_http]["state"]["cases"]["q0"]["previous_world_judgments"];
+        let legend = feedback["question_legend"].as_array().unwrap();
+        let values = feedback["rounds"][0]["judgments"].as_array().unwrap();
+        assert_eq!(legend.len(), values.len());
+        for (question, value) in legend.iter().zip(values) {
+            match question["function"].as_str().unwrap() {
+                "estimate_likelihood" | "conditional_on" | "conditional_off" => {
+                    assert_eq!(value, "0.23")
+                }
+                "check_transition" => assert_eq!(value, "plausible"),
+                _ => assert_eq!(value, "compatible"),
             }
-            "check_transition" => assert_eq!(value, "plausible"),
-            _ => assert_eq!(value, "compatible"),
         }
     }
-
-    drop(requests);
     let finished = invoke(&engine, "semantic_step", fields.clone()).await;
     assert_eq!(finished["callback_action"], "Reason", "{finished}");
     assert_eq!(finished["callback_params"]["phase"], "synthesize");

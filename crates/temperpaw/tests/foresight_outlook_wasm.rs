@@ -10,15 +10,15 @@ use temper_wasm::{
 };
 
 fn bytes(module: &str) -> Vec<u8> {
-    if module == "semantic_step" {
-        if let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE") {
-            return std::fs::read(path).unwrap();
-        }
+    if module == "semantic_step"
+        && let Ok(path) = std::env::var("ARN518_STEP_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
     }
-    if module == "semantic_expand" {
-        if let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE") {
-            return std::fs::read(path).unwrap();
-        }
+    if module == "semantic_expand"
+        && let Ok(path) = std::env::var("ARN518_OUTLOOK_EXPAND_WASM_OVERRIDE")
+    {
+        return std::fs::read(path).unwrap();
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output=std::process::Command::new("bash").current_dir(&root).args(["-c",&format!("set -euo pipefail; source os-apps/wasm-build-env.sh; temperpaw_build_wasm os-apps/paw-foresight/wasm/{module} wasm32-unknown-unknown --locked")]).output().expect("build semantic WASM");
