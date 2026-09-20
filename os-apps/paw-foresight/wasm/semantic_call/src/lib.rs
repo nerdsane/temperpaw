@@ -48,6 +48,27 @@ fn is_token_overflow(status: u16, body: &str) -> bool {
             .is_some_and(|v| v["detail"]["error_type"] == "max_tokens_exceeded")
 }
 
+// A successfully parsed but invalid typed answer may be retried twice, never repaired.
+fn validation_retry(program: &mut serde_json::Value) -> bool {
+    let failures = program["validation_failures"]
+        .as_u64()
+        .unwrap_or(0)
+        .saturating_add(1);
+    program["validation_failures"] = json!(failures);
+    failures <= 2
+}
+fn safe_rejected_response(response: &serde_json::Value, secret: &str) -> serde_json::Value {
+    let typed = json!({"model":response["model"],"answers":response["answers"]});
+    let encoded = typed.to_string();
+    let safe = if secret.is_empty() {
+        encoded
+    } else {
+        encoded.replace(secret, "[redacted]")
+    };
+    // Valid provider bodies are already bounded to 128 KiB. Never persist arbitrary body text.
+    serde_json::from_str(&safe).unwrap_or(json!({"error":"response redaction failed"}))
+}
+
 fn call(ctx: &Context) -> Result<(), String> {
     let mut p = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let mut trace = core::parse(core::field(&ctx.entity_state, "trace_json"))?;
@@ -97,6 +118,7 @@ fn call(ctx: &Context) -> Result<(), String> {
             + 1;
         p["http_calls"] = json!(http_call);
         let mut token_overflow = false;
+        let mut rejected_response = None;
         let response_result = (|| -> Result<serde_json::Value, String> {
             let r = ctx
                 .http_call(
@@ -117,15 +139,25 @@ fn call(ctx: &Context) -> Result<(), String> {
                 return Err("Provider response exceeds bound".into());
             }
             let response = core::parse(&r.body)?;
-            core::batch::answers(&batch, &response)?;
+            if let Err(error) = core::batch::answers(&batch, &response) {
+                rejected_response = Some(response);
+                return Err(error);
+            }
             Ok(response)
         })();
         let response = match response_result {
             Ok(response) => response,
             Err(error) => {
+                let error: String = error
+                    .replace(key, "[redacted]")
+                    .chars()
+                    .take(2048)
+                    .collect();
                 let index = trace.as_array().unwrap().len();
-                trace.as_array_mut().unwrap().push(json!({"index":index,"nodeId":node,"function":function,"requestHash":format!("{:x}",Sha256::digest(encoded.as_bytes())),"startedAtMs":started,"elapsedMs":Context::get_time_millis()-started,"error":error,"requestFormat":"failed-attempt-hash-only","httpCallId":http_call,"task":task}));
-                p["stop_reason"] = if token_overflow && core::batch::reduce_cap(&mut p, &batch) {
+                trace.as_array_mut().unwrap().push(json!({"index":index,"nodeId":node,"function":function,"requestHash":format!("{:x}",Sha256::digest(encoded.as_bytes())),"startedAtMs":started,"elapsedMs":Context::get_time_millis()-started,"error":error,"requestFormat":"failed-attempt-hash-only","httpCallId":http_call,"task":task,"rejectedResponse":rejected_response.as_ref().map(|v| safe_rejected_response(v, key))}));
+                p["stop_reason"] = if rejected_response.is_some() && validation_retry(&mut p) {
+                    json!("validation_retry")
+                } else if token_overflow && core::batch::reduce_cap(&mut p, &batch) {
                     json!("batch_repacking")
                 } else {
                     json!("provider_error")
@@ -134,6 +166,10 @@ fn call(ctx: &Context) -> Result<(), String> {
                 break;
             }
         };
+        p["validation_failures"] = json!(0);
+        if p["stop_reason"] == "validation_retry" {
+            p["stop_reason"] = json!("");
+        }
         let answers = core::batch::answers(&batch, &response)?;
         for (offset, (decision, mut evaluation, response)) in answers.into_iter().enumerate() {
             let task = &batch.tasks[offset];
@@ -226,4 +262,21 @@ fn only_confirmed_token_overflow_is_repackable() {
         400,
         r#"{"message":"max_tokens_exceeded"}"#
     ));
+}
+
+#[test]
+fn validation_retries_are_bounded_without_mutating_checkpoint() {
+    let mut p = json!({"cursor":4,"tasks":["unchanged"],"results":{"prior":0.4}});
+    assert!(validation_retry(&mut p));
+    assert!(validation_retry(&mut p));
+    assert!(!validation_retry(&mut p));
+    assert!(!validation_retry(&mut p));
+    assert_eq!(p["cursor"], 4);
+    assert_eq!(p["results"]["prior"], 0.4);
+    let safe = safe_rejected_response(
+        &json!({"model":"jev-1.13.0","answers":{"result":{"choice":"secret"}},"unrelated":"omitted"}),
+        "secret",
+    );
+    assert_eq!(safe["answers"]["result"]["choice"], "[redacted]");
+    assert!(safe.get("unrelated").is_none());
 }

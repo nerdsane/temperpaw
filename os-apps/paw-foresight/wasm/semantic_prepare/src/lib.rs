@@ -118,6 +118,63 @@ fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
 }
 
+fn exploration_interrupted(snapshot: &Value, program: &Value, trace: &Value) -> bool {
+    let world_ids: std::collections::BTreeSet<_> = snapshot["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|n| n["kind"] == "world")
+        .filter_map(|n| n["Id"].as_str())
+        .collect();
+    program["stop_reason"] == "provider_error"
+        && (program["stage"] == "exploration"
+            || program["exploration_stop_reason"] == "provider_error")
+        && !trace.as_array().into_iter().flatten().any(|item| {
+            item["task"]["world_id"].as_str().is_some()
+                || item["nodeId"]
+                    .as_str()
+                    .is_some_and(|id| world_ids.contains(id))
+        })
+}
+
+fn restore_exploration(
+    snapshot: &Value,
+    program: &Value,
+) -> Result<Option<(Value, Value)>, String> {
+    let nodes: Vec<_> = snapshot["nodes"]
+        .as_array()
+        .ok_or("Missing resume nodes")?
+        .iter()
+        .filter(|n| n["kind"] != "world")
+        .cloned()
+        .collect();
+    let mut planned = core::plan(&nodes)?;
+    planned["tasks"].as_array_mut().unwrap().retain(|task| {
+        program["results"][core::field(task, "nodeId")][core::field(task, "function")].is_null()
+    });
+    if planned["tasks"].as_array().unwrap().is_empty() {
+        return Ok(None);
+    }
+    let mut restored = program.clone();
+    restored["tasks"] = planned["tasks"].clone();
+    restored["cursor"] = json!(0);
+    restored["stage"] = json!("exploration");
+    restored["continue_exploring"] = json!(true);
+    restored["stop_reason"] = json!("resumed_after_provider_error");
+    restored["resume_mode"] = json!("unfinished_exploration");
+    restored["active_world_ids"] = json!([]);
+    let mut snapshot = snapshot.clone();
+    for node in snapshot["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|n| n["kind"] == "world")
+    {
+        node["archived"] = json!(true);
+    }
+    Ok(Some((snapshot, restored)))
+}
+
 /// Resume only trusted persisted state; no caller-provided graph or evaluations.
 fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Value, String> {
     if core::field(record, "world_id") != world_id {
@@ -142,19 +199,23 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         .as_u64()
         .filter(|n| *n <= tasks.len() as u64)
         .ok_or("Invalid resume cursor")?;
-    let partial_answer = core::field(record, "Status") == "Completed"
-        && program["stage"] == "worlds"
-        && program["stop_reason"] == "provider_error"
-        && cursor < tasks.len() as u64
-        && program["world_refinement"]
-            .as_object()
-            .is_some_and(|worlds| {
-                worlds.values().any(|world| {
-                    world["rounds"]
-                        .as_array()
-                        .is_some_and(|rounds| rounds.iter().any(|round| round["complete"] == false))
-                })
-            });
+    let interrupted_exploration = exploration_interrupted(&snapshot, &program, &trace);
+    let partial_answer = (core::field(record, "Status") == "Completed"
+        && interrupted_exploration
+        && program["exploration_stop_reason"] == "provider_error")
+        || (core::field(record, "Status") == "Completed"
+            && program["stage"] == "worlds"
+            && program["stop_reason"] == "provider_error"
+            && cursor < tasks.len() as u64
+            && program["world_refinement"]
+                .as_object()
+                .is_some_and(|worlds| {
+                    worlds.values().any(|world| {
+                        world["rounds"].as_array().is_some_and(|rounds| {
+                            rounds.iter().any(|round| round["complete"] == false)
+                        })
+                    })
+                }));
     if !matches!(core::field(record, "Status"), "Failed" | "Cancelled") && !partial_answer {
         return Err(
             "Only stopped exploration or a provider-interrupted partial answer can be resumed"
@@ -251,6 +312,16 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
     let provider = core::field(record, "provider");
     if !valid_id(agent_id) || model.trim().is_empty() || provider.trim().is_empty() {
         return Err("Missing resume agent or provider metadata".into());
+    }
+    if !exhausted
+        && interrupted_exploration
+        && let Some((snapshot, program)) = restore_exploration(&snapshot, &program)?
+    {
+        return Ok(
+            json!({"world_id":world_id,"agent_id":agent_id,"model":model,"provider":provider,
+            "snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"trace_json":trace_raw,
+            "started_at_ms":started_raw,"phase":"explore"}),
+        );
     }
     // Keep the program exactly unless a spent budget needs its honest stop reason.
     let pending_tasks = cursor < tasks.len() as u64;
@@ -399,6 +470,94 @@ mod tests {
         let program = json!({"schema":"foresight-open-semantic-v2","tasks":[],"cursor":0,"results":{"h":{"estimate_likelihood":"0.37"}},"evaluations":{},"rounds":[],"round":2});
         json!({"Status":"Failed","world_id":"w","snapshot_json":snapshot.to_string(),"program_json":program.to_string(),"trace_json":"[]","started_at_ms":"1000","phase":"explore","agent_id":"agent-a","model":"model-a","provider":"provider-a"})
     }
+    #[test]
+    fn qualitative_answer_can_resume_unfinished_exploration_without_rewinding_world_checks() {
+        let mut record = checkpoint();
+        let mut snapshot = core::parse(core::field(&record, "snapshot_json")).unwrap();
+        snapshot["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Id":"qualitative","kind":"world","edges":"[]"}));
+        let mut program = core::parse(core::field(&record, "program_json")).unwrap();
+        program["stage"] = json!("worlds");
+        program["stop_reason"] = json!("provider_error");
+        program["exploration_stop_reason"] = json!("provider_error");
+        program["world_revision"] = json!(1);
+        program["tasks"] = json!([]);
+        program["cursor"] = json!(0);
+        program["http_calls"] = json!(17);
+        record["Status"] = json!("Completed");
+        record["phase"] = json!("synthesize");
+        record["snapshot_json"] = json!(snapshot.to_string());
+        record["program_json"] = json!(program.to_string());
+        let prepared = resume_checkpoint(&record, "w", 2000).unwrap();
+        let restored = core::parse(core::field(&prepared, "program_json")).unwrap();
+        assert_eq!(prepared["phase"], "explore");
+        assert_eq!(resume_transition(&prepared).unwrap(), "ResumePrepared");
+        assert_eq!(restored["resume_mode"], "unfinished_exploration");
+        for key in ["results", "evaluations", "http_calls", "world_revision"] {
+            assert_eq!(restored[key], program[key]);
+        }
+        assert_eq!(prepared["trace_json"], record["trace_json"]);
+        assert_eq!(prepared["started_at_ms"], record["started_at_ms"]);
+        let restored_snapshot = core::parse(core::field(&prepared, "snapshot_json")).unwrap();
+        assert_eq!(
+            restored_snapshot["nodes"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["archived"],
+            true
+        );
+        assert!(
+            restored["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|t| t["nodeId"] != "qualitative" && t["function"] != "choose_next_operation")
+        );
+        assert!(!exploration_interrupted(
+            &snapshot,
+            &program,
+            &json!([{"task":{"world_id":"qualitative"}}])
+        ));
+        assert!(!exploration_interrupted(
+            &snapshot,
+            &program,
+            &json!([{"nodeId":"qualitative"}])
+        ));
+        program["exploration_stop_reason"] = json!("exploration_converged");
+        record["program_json"] = json!(program.to_string());
+        assert!(resume_checkpoint(&record, "w", 2000).is_err());
+    }
+
+    #[test]
+    #[ignore = "Requires explicit local completed exploration fixture"]
+    fn saved_completed_exploration_recovers_all_recorded_checks() {
+        let raw: Value = serde_json::from_str(
+            &std::fs::read_to_string(std::env::var("FORESIGHT_EXPLORATION_FIXTURE").unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        let record = &raw["fields"];
+        let now = core::field(record, "started_at_ms").parse::<u64>().unwrap() + 1000;
+        let prepared = resume_checkpoint(record, core::field(record, "world_id"), now).unwrap();
+        assert_eq!(prepared["trace_json"], record["trace_json"]);
+        assert_eq!(prepared["started_at_ms"], record["started_at_ms"]);
+        let old = core::parse(core::field(record, "program_json")).unwrap();
+        let restored = core::parse(core::field(&prepared, "program_json")).unwrap();
+        for key in ["results", "evaluations", "http_calls"] {
+            assert_eq!(restored[key], old[key]);
+        }
+        assert_eq!(prepared["phase"], "explore");
+        assert_eq!(resume_transition(&prepared).unwrap(), "ResumePrepared");
+        assert_eq!(restored["resume_mode"], "unfinished_exploration");
+        assert!(!restored["tasks"].as_array().unwrap().is_empty());
+        assert!(restored["tasks"].as_array().unwrap().iter().all(|task| {
+            old["results"][core::field(task, "nodeId")][core::field(task, "function")].is_null()
+        }));
+    }
+
     #[test]
     fn resume_preserves_checkpoint_and_rejects_running_cross_world_or_corrupt_data() {
         let record = checkpoint();
@@ -617,7 +776,7 @@ mod tests {
                 .iter()
                 .filter(|t| t["nodeId"] == "h")
                 .count(),
-            5
+            4
         );
     }
 }

@@ -215,7 +215,10 @@ pub fn validate(request: &Value, response: &Value) -> Result<String, String> {
             let selected = answer["choice"].as_str().ok_or("Missing choice")?;
             let max = probabilities.iter().copied().fold(0.0, f64::max);
             if answer["probabilities"][selected].as_f64() != Some(max) {
-                return Err("Choice is not argmax".into());
+                return Err(format!(
+                    "Choice is not argmax: selected={selected}, selected_probability={}, max_probability={max}",
+                    answer["probabilities"][selected]
+                ));
             }
             Ok(if max < 0.65 && options.contains_key("uncertain") {
                 "uncertain"

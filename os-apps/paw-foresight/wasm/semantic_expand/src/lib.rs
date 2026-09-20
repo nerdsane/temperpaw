@@ -272,7 +272,6 @@ fn expand(
         node["mechanism"] = v["mechanism"].clone();
         if let Some(parent) = parent {
             node["before_gap"] = program["results"][&parent]["classify_gap"].clone();
-            node["operation"] = program["results"][&parent]["choose_next_operation"].clone();
         }
         node["research_status"] = json!(if reports.is_empty() {
             "no_new_sources"
@@ -1127,7 +1126,7 @@ mod tests {
         assert_eq!(revised["parent"], "existing-hypothesis");
         assert_eq!(revised["kind"], "revision");
         assert_eq!(revised["before_gap"], "evidence");
-        assert_eq!(revised["operation"], "challenge");
+        assert!(revised["operation"].is_null());
     }
 
     #[test]
@@ -1162,7 +1161,7 @@ mod tests {
         expand(&mut s, &g, "explore", &p).unwrap();
         let next = replan(&s, &p, &g, 1).unwrap();
         assert_eq!(next["round"], 2);
-        assert_eq!(next["tasks"].as_array().unwrap().len(), 5);
+        assert_eq!(next["tasks"].as_array().unwrap().len(), 4);
         assert_eq!(s["nodes"][0], original);
         assert_eq!(next["results"], p["results"]);
     }

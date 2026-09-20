@@ -117,10 +117,9 @@ pub fn plan(nodes: &[Value]) -> Result<Value, String> {
                 "estimate_likelihood",
                 "evaluate_novelty",
                 "decision_value",
-                "choose_next_operation",
             ]
         } else {
-            &["classify_gap", "choose_next_operation"]
+            &["classify_gap"]
         };
         for function in functions {
             tasks.push(json!({"nodeId":id,"function":function,"depth":depth}));
@@ -167,9 +166,9 @@ mod tests {
             node("z", "evidence", &[]),
         ])
         .unwrap();
-        assert_eq!(p["tasks"].as_array().unwrap().len(), 12);
+        assert_eq!(p["tasks"].as_array().unwrap().len(), 9);
         assert_eq!(p["tasks"][0]["nodeId"], "z");
-        assert_eq!(p["tasks"][2]["function"], "classify_gap");
+        assert_eq!(p["tasks"][1]["function"], "classify_gap");
     }
     #[test]
     fn thousands_of_evaluations_are_planned_without_a_cartesian_product() {
@@ -177,7 +176,7 @@ mod tests {
             .map(|i| node(&format!("h{i}"), "scenario", &[]))
             .collect();
         let p = plan(&nodes).unwrap();
-        assert_eq!(p["tasks"].as_array().unwrap().len(), 5000);
+        assert_eq!(p["tasks"].as_array().unwrap().len(), 4000);
         assert_eq!(p["max_calls"], 5000);
     }
     #[test]
@@ -188,7 +187,7 @@ mod tests {
             node("ok", "scenario", &["missing"]),
         ])
         .unwrap();
-        assert_eq!(p["tasks"].as_array().unwrap().len(), 5);
+        assert_eq!(p["tasks"].as_array().unwrap().len(), 4);
         assert!(
             p["issues"]
                 .to_string()
@@ -209,8 +208,8 @@ mod tests {
             ));
         }
         let p = plan(&nodes).unwrap();
-        assert_eq!(p["tasks"].as_array().unwrap().len(), 500);
-        assert_eq!(p["tasks"][499]["depth"], 99);
+        assert_eq!(p["tasks"].as_array().unwrap().len(), 400);
+        assert_eq!(p["tasks"][399]["depth"], 99);
     }
     #[test]
     fn identities_and_memory_budget_are_enforced() {

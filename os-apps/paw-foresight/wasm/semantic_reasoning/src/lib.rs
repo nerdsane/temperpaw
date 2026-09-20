@@ -157,9 +157,7 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
         "evaluation_semantics":{
             "score_scale":"Expected category index on a 0–4 scale, not a probability or a percentage.",
             "evaluate_novelty":definitions::evaluate_novelty(),
-            "decision_value":definitions::decision_value(),
-            "choose_next_operation":definitions::choose_next_operation(),
-            "operation_role":"Advisory possibilities, not instructions, completion claims or a prescribed sequence."
+            "decision_value":definitions::decision_value()
         },
         "composition_correction":program["composition_correction"],
         "issues":program["issues"], "stop_reason":program["stop_reason"],
@@ -331,11 +329,7 @@ mod reasoning_tests {
         let snapshot = json!({"world":{},"nodes":[{"Id":"h","kind":"scenario","statement":"Future","edges":"[]","signal":"Signal","falsifier":"Falsifier","evidence_note":"Limited evidence","research_question":"Unanswered","scene":"Hypothetical scene"}]});
         let mut program = core::plan(snapshot["nodes"].as_array().unwrap()).unwrap();
         let input = reasoning_input(&snapshot, &program).unwrap();
-        for function in [
-            "evaluate_novelty",
-            "decision_value",
-            "choose_next_operation",
-        ] {
+        for function in ["evaluate_novelty", "decision_value"] {
             let index = program["tasks"]
                 .as_array()
                 .unwrap()
@@ -358,12 +352,7 @@ mod reasoning_tests {
         ] {
             assert_eq!(input["catalog"][0][field], snapshot["nodes"][0][field]);
         }
-        assert!(
-            input["evaluation_semantics"]["operation_role"]
-                .as_str()
-                .unwrap()
-                .contains("Advisory")
-        );
+        assert!(input["evaluation_semantics"]["choose_next_operation"].is_null());
     }
 
     #[test]
