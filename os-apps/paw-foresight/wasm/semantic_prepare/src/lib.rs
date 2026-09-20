@@ -120,9 +120,6 @@ fn valid_id(id: &str) -> bool {
 
 /// Resume only trusted persisted state; no caller-provided graph or evaluations.
 fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Value, String> {
-    if !matches!(core::field(record, "Status"), "Failed" | "Cancelled") {
-        return Err("Only failed or cancelled exploration can be resumed".into());
-    }
     if core::field(record, "world_id") != world_id {
         return Err("Resume world mismatch".into());
     }
@@ -145,6 +142,25 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         .as_u64()
         .filter(|n| *n <= tasks.len() as u64)
         .ok_or("Invalid resume cursor")?;
+    let partial_answer = core::field(record, "Status") == "Completed"
+        && program["stage"] == "worlds"
+        && program["stop_reason"] == "provider_error"
+        && cursor < tasks.len() as u64
+        && program["world_refinement"]
+            .as_object()
+            .is_some_and(|worlds| {
+                worlds.values().any(|world| {
+                    world["rounds"]
+                        .as_array()
+                        .is_some_and(|rounds| rounds.iter().any(|round| round["complete"] == false))
+                })
+            });
+    if !matches!(core::field(record, "Status"), "Failed" | "Cancelled") && !partial_answer {
+        return Err(
+            "Only stopped exploration or a provider-interrupted partial answer can be resumed"
+                .into(),
+        );
+    }
     if !program["results"].is_object()
         || !program["evaluations"].is_object()
         || !program["rounds"].is_array()
@@ -204,7 +220,12 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         || traces.len() >= core::MAX_CALLS
         || nodes.len() >= core::MAX_NODES
         || program["round"].as_u64().unwrap_or(0) >= core::MAX_ROUNDS;
-    let phase = if phase == "synthesize" && !has_worlds && has_hypotheses {
+    let pending_world_checks = !exhausted
+        && has_worlds
+        && cursor < tasks.len() as u64
+        && program["stop_reason"] == "provider_error";
+    let phase = if pending_world_checks || (phase == "synthesize" && !has_worlds && has_hypotheses)
+    {
         "compose"
     } else if exhausted {
         if has_worlds {
@@ -452,6 +473,47 @@ mod tests {
         assert!(resume_checkpoint(&record, "w", 2000).is_err());
         record["trace_json"] = json!("[]");
         program["tasks"][0]["pair_ids"] = json!(["h", "h"]);
+        record["program_json"] = json!(program.to_string());
+        assert!(resume_checkpoint(&record, "w", 2000).is_err());
+    }
+
+    #[test]
+    fn partial_completed_answer_resumes_unfinished_checks_but_complete_answers_do_not() {
+        let mut record = checkpoint();
+        record["Status"] = json!("Completed");
+        record["phase"] = json!("synthesize");
+        let mut snapshot = core::parse(core::field(&record, "snapshot_json")).unwrap();
+        snapshot["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Id":"world-a","kind":"world","statement":"Joint future","edges":"[]"}));
+        record["snapshot_json"] = json!(snapshot.to_string());
+        let mut program = core::parse(core::field(&record, "program_json")).unwrap();
+        program["stage"] = json!("worlds");
+        program["tasks"] = json!([{"nodeId":"h","function":"estimate_likelihood"}]);
+        program["stop_reason"] = json!("provider_error");
+        program["world_refinement"] =
+            json!({"world-a":{"rounds":[{"round":1,"complete":false,"probability":null}]}});
+        record["program_json"] = json!(program.to_string());
+        let prepared = resume_checkpoint(&record, "w", 2000).unwrap();
+        assert_eq!(resume_transition(&prepared).unwrap(), "ResumePrepared");
+        assert_eq!(prepared["snapshot_json"], record["snapshot_json"]);
+        assert_eq!(prepared["trace_json"], record["trace_json"]);
+        assert_eq!(prepared["started_at_ms"], record["started_at_ms"]);
+        let resumed = core::parse(core::field(&prepared, "program_json")).unwrap();
+        assert_eq!(resumed["world_refinement"], program["world_refinement"]);
+        assert_eq!(resumed["cursor"], 0);
+        assert_eq!(resumed["stop_reason"], "resumed_after_provider_error");
+        let exhausted = resume_checkpoint(&record, "w", core::MAX_MS + 1000).unwrap();
+        assert_eq!(resume_transition(&exhausted).unwrap(), "Prepared");
+        assert_eq!(exhausted["phase"], "synthesize");
+        for reason in ["judgments_stable", "max_rounds", "time_budget", ""] {
+            program["stop_reason"] = json!(reason);
+            record["program_json"] = json!(program.to_string());
+            assert!(resume_checkpoint(&record, "w", 2000).is_err());
+        }
+        program["stop_reason"] = json!("provider_error");
+        program["cursor"] = json!(1);
         record["program_json"] = json!(program.to_string());
         assert!(resume_checkpoint(&record, "w", 2000).is_err());
     }

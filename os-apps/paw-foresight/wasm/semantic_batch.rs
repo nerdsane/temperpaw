@@ -52,7 +52,7 @@ pub fn prepare(snapshot: &Value, program: &Value, remaining: usize) -> Result<Ba
         let key = format!("q{}", batch.tasks.len());
         let mut state = individual["state"].clone();
         let mut common = json!({});
-        for field in ["world_question", "source_evidence", "baseline"] {
+        for field in ["world_question", "source_evidence", "baseline", "world", "previous_world_judgments"] {
             if let Some(value) = state.as_object_mut().and_then(|s| s.remove(field)) {
                 common[field] = value;
             }
@@ -98,6 +98,24 @@ pub fn answers(batch: &Batch, response: &Value) -> Result<Vec<(String, Value, Va
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn world_batches_share_immutable_world_and_feedback_without_dropping_case_events() {
+        let world=json!({"Id":"w","kind":"world","statement":"A, B and C jointly occur","component_ids":["a","b","c"],"counter_ids":[],"chain":[],"facets":[{"description":"long context ".repeat(1000)}],"assumptions":[],"edges":"[]"});
+        let snapshot=json!({"nodes":[{"Id":"a","kind":"scenario"},{"Id":"b","kind":"scenario"},{"Id":"c","kind":"scenario"},world]});
+        let program=json!({"cursor":0,"tasks":super::super::search::world_tasks(&world)});
+        let batch=prepare(&snapshot,&program,3).unwrap();
+        assert_eq!(batch.tasks.len(),3);
+        assert_eq!(batch.request["state"]["common"]["world"],world);
+        for (index,individual) in batch.individual.iter().enumerate() {
+            let case=&batch.request["state"]["cases"][format!("q{index}")];
+            assert!(case["world"].is_null());
+            assert!(case["previous_world_judgments"].is_null());
+            let mut restored=batch.request["state"]["common"].as_object().unwrap().clone();
+            restored.extend(case.as_object().unwrap().clone());
+            assert_eq!(Value::Object(restored),individual["state"]);
+        }
+    }
+
     #[test]
     fn batches_independent_pairs_but_stops_before_dependent_likelihood() {
         let s = json!({"nodes":[{"Id":"a","kind":"scenario"},{"Id":"b","kind":"scenario"},{"Id":"c","kind":"scenario"}]});

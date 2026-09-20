@@ -28,6 +28,7 @@ fn bytes() -> Vec<u8> {
     std::fs::read(String::from_utf8(build.stdout).unwrap().trim()).unwrap()
 }
 async fn check(record: Value) {
+    let partial = record.get("fields").unwrap_or(&record)["Status"] == "Completed";
     let fields = record.get("fields").unwrap_or(&record);
     let keys = [
         "Id",
@@ -90,7 +91,12 @@ async fn check(record: Value) {
         .await
         .unwrap();
     assert_eq!(
-        result.callback_action, "Prepared",
+        result.callback_action,
+        if partial {
+            "ResumePrepared"
+        } else {
+            "Prepared"
+        },
         "{}",
         result.callback_params["error_message"]
     );
@@ -111,7 +117,11 @@ async fn check(record: Value) {
     let before: Value = serde_json::from_str(selected["program_json"].as_str().unwrap()).unwrap();
     let mut after: Value =
         serde_json::from_str(result.callback_params["program_json"].as_str().unwrap()).unwrap();
-    if after["stop_reason"] == "time_budget" {
+    if after["stop_reason"] == "time_budget"
+        || (partial
+            && before["stop_reason"] == "provider_error"
+            && after["stop_reason"] == "resumed_after_provider_error")
+    {
         if let Some(reason) = before.get("stop_reason") {
             after["stop_reason"] = reason.clone();
         } else {
@@ -120,11 +130,14 @@ async fn check(record: Value) {
     }
     assert_eq!(
         after, before,
-        "Only an expired global budget may update stop_reason"
+        "Only budget exhaustion or explicit interrupted-provider resumption may update stop_reason"
     );
     let trace: Value =
         serde_json::from_str(result.callback_params["trace_json"].as_str().unwrap()).unwrap();
-    assert_eq!(trace.as_array().unwrap().len(), 1228);
+    assert_eq!(
+        trace.as_array().unwrap().len(),
+        if partial { 1229 } else { 1228 }
+    );
     println!(
         "checkpoint HTTP bytes={}; preserved checks={}",
         body.len(),
@@ -140,4 +153,25 @@ async fn checkpoint_larger_than_sdk_buffer_preserves_every_check() {
 async fn real_saved_checkpoint_roundtrips() {
     let path = std::env::var("ARN518_RESUME_RECORD").expect("saved record path");
     check(serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()).await;
+}
+
+#[tokio::test]
+async fn partial_completed_checkpoint_preserves_pending_checks_and_history() {
+    let mut record = fixture();
+    record["Status"] = json!("Completed");
+    record["phase"] = json!("synthesize");
+    let mut program: Value =
+        serde_json::from_str(record["program_json"].as_str().unwrap()).unwrap();
+    program["stage"] = json!("worlds");
+    program["tasks"] = json!([{"nodeId":"h1","function":"estimate_likelihood"}]);
+    program["stop_reason"] = json!("provider_error");
+    program["world_refinement"] =
+        json!({"world-a":{"rounds":[{"round":1,"complete":false,"probability":null}]}});
+    record["program_json"] = json!(program.to_string());
+    let mut trace: Value = serde_json::from_str(record["trace_json"].as_str().unwrap()).unwrap();
+    let mut last = trace[1227].clone();
+    last["index"] = json!(1228);
+    trace.as_array_mut().unwrap().push(last);
+    record["trace_json"] = json!(trace.to_string());
+    check(record).await;
 }

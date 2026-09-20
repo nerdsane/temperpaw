@@ -3,6 +3,29 @@ use temper_wasm_sdk::prelude::*;
 mod core {
     include!("../../semantic_core.rs");
 }
+fn provider_error(status: u16, body: &str, secret: &str) -> String {
+    let mut message = format!("Semantic provider HTTP {status}");
+    if body.len() <= 128 * 1024
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
+    {
+        let detail = value["error"]["message"]
+            .as_str()
+            .or_else(|| value["message"].as_str())
+            .or_else(|| value["detail"].as_str())
+            .or_else(|| value["error"].as_str());
+        if let Some(detail) = detail {
+            let safe = if secret.is_empty() {
+                detail.to_owned()
+            } else {
+                detail.replace(secret, "[redacted]")
+            };
+            message.push_str(": ");
+            message.extend(safe.chars().take(1024));
+        }
+    }
+    message
+}
+
 fn call(ctx: &Context) -> Result<(), String> {
     let mut p = core::parse(core::field(&ctx.entity_state, "program_json"))?;
     let mut trace = core::parse(core::field(&ctx.entity_state, "trace_json"))?;
@@ -64,7 +87,7 @@ fn call(ctx: &Context) -> Result<(), String> {
                 )
                 .map_err(|_| "Semantic provider transport failed")?;
             if !(200..300).contains(&r.status) {
-                return Err(format!("Semantic provider HTTP {}", r.status));
+                return Err(provider_error(r.status, &r.body, key));
             }
             if r.body.len() > 128 * 1024 {
                 return Err("Provider response exceeds bound".into());
@@ -128,4 +151,24 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
         Err(e) => set_success_result("Fail", &json!({"error_message":e})),
     };
     0
+}
+
+#[cfg(test)]
+#[test]
+fn provider_errors_preserve_bounded_reason_without_secrets_or_raw_bodies() {
+    assert_eq!(
+        provider_error(
+            400,
+            r#"{"error":{"message":"state token limit exceeded"}}"#,
+            "secret"
+        ),
+        "Semantic provider HTTP 400: state token limit exceeded"
+    );
+    assert!(!provider_error(400, r#"{"message":"bad secret"}"#, "secret").contains("secret"));
+    assert_eq!(
+        provider_error(400, "<html>raw upstream response</html>", "secret"),
+        "Semantic provider HTTP 400"
+    );
+    let huge = serde_json::json!({"message":"x".repeat(3000)}).to_string();
+    assert!(provider_error(400, &huge, "secret").len() < 1100);
 }
