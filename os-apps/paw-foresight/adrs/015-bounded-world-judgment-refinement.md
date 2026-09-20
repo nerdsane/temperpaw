@@ -1,0 +1,15 @@
+# Bounded refinement of judgments about the same world
+
+Each immutable composed world now receives two judgment passes when resources allow, and a third if its judgments still change. Pair compatibility, causal-link checks, conditional estimates, whole-set consistency and joint-world likelihood are all re-evaluated. Later requests carry the prior passes' actual scores, structural judgments and evidence identities alongside the current evidence. Previous judgments are explicitly model outputs, not new observations, target scores or proof.
+
+The existing `SearchPlanned` transition persists a new task pass through Temper. Before scheduling it, the engine appends a receipt to `program.world_refinement[world_id].rounds`, then clears that world's current task results and evaluations. The immutable trace and receipt history remain available. A partially completed pass therefore cannot silently reuse the preceding pass's probability. HTTP call context records `world_pass` and evidence IDs.
+
+Refinement stops after at least two complete passes if all structural labels remain unchanged, evidence identities match, and every numerical judgment changes by at most 0.02; otherwise it stops after three passes. The tolerance is an operational stability criterion, not a calibration claim. Resource exhaustion and provider failure stop immediately with explicit incomplete receipts. Probabilities may rise or fall. Nothing is averaged, multiplied or normalized across passes or worlds.
+
+`outcome.refinement` contains the world ID and exact definition, round receipts, a stop reason, `converged`, and `accuracy_verified:false`. Recomposition creates a new world ID and separate refinement history. Stable judgments do not establish consistency or accuracy: any remaining structural conflicts still feed the existing bounded recomposition loop, and unresolved audits remain visible.
+
+Verification exercises actual prior-state injection, cleared current estimates, immutable receipts, bounded three-pass termination, and partial provider failure. Live quality and forecast accuracy require separate evidence; passing this protocol does not demonstrate either.
+
+The engine reserves 3,600 of its 5,000 question budget for combination/world work and checks the exact next-pass task count before scheduling. The maximum allowed world shapes across all revisions can exceed the global budget; the reserve is not a completion guarantee. Time and trace limits remain hard limits, and every active world's receipt reports an interrupted pass rather than silently omitting a world.
+
+Provider feedback uses one task legend and indexed per-round judgment vectors, plus deduplicated evidence contexts. Canonical task IDs and complete structured evaluations remain in persisted receipts; no judgments or worlds are omitted from the compact provider view. A maximum valid 12-component connected DAG with long identities and large supplied evidence is covered by a third-pass payload regression under 128 KB.

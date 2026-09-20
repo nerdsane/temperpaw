@@ -1,0 +1,114 @@
+// Only independent structural questions share HTTP calls. Node decisions remain sequential.
+use serde_json::{Value, json};
+pub struct Batch {
+    pub request: Value,
+    pub tasks: Vec<Value>,
+    pub individual: Vec<Value>,
+}
+impl Batch {
+    pub fn question_key(&self, index: usize) -> String {
+        if super::search::is_structural(&self.tasks[0]) {
+            format!("q{index}")
+        } else {
+            "result".into()
+        }
+    }
+}
+pub fn prepare(snapshot: &Value, program: &Value, remaining: usize) -> Result<Batch, String> {
+    let cursor = program["cursor"].as_u64().ok_or("Missing cursor")? as usize;
+    let tasks = program["tasks"].as_array().ok_or("Missing tasks")?;
+    let first = tasks.get(cursor).ok_or("Task cursor exhausted")?;
+    let structural = super::search::is_structural(first);
+    if !structural && remaining > 0 {
+        let request = super::request(snapshot, program)?;
+        return Ok(Batch {
+            request: request.clone(),
+            tasks: vec![first.clone()],
+            individual: vec![request],
+        });
+    }
+    let mut batch = Batch {
+        request: json!({"model":super::MODEL,"state":{"common":{},"cases":{}},"questions":{}}),
+        tasks: vec![],
+        individual: vec![],
+    };
+    for (index, task) in tasks
+        .iter()
+        .enumerate()
+        .take(
+            tasks
+                .len()
+                .min(cursor + if structural { 16 } else { 1 })
+                .min(cursor + remaining),
+        )
+        .skip(cursor)
+    {
+        if structural && !super::search::is_structural(task) {
+            break;
+        }
+        let mut view = program.clone();
+        view["cursor"] = json!(index);
+        let individual = super::request(snapshot, &view)?;
+        let key = format!("q{}", batch.tasks.len());
+        let mut state = individual["state"].clone();
+        let mut common = json!({});
+        for field in ["world_question", "source_evidence", "baseline"] {
+            if let Some(value) = state.as_object_mut().and_then(|s| s.remove(field)) {
+                common[field] = value;
+            }
+        }
+        // Shared context is identical within this immutable checkpoint.
+        if !batch.tasks.is_empty() && batch.request["state"]["common"] != common {
+            break;
+        }
+        let mut candidate = batch.request.clone();
+        candidate["state"]["common"] = common;
+        candidate["state"]["cases"][&key] = state;
+        let mut question = individual["questions"]["result"].clone();
+        question["instructions"] = json!(format!(
+            "For this question, state means ONLY state.cases.{key} combined with state.common. Other cases are separate hypothetical questions, not assumed facts. {}",
+            super::field(&question, "instructions")
+        ));
+        candidate["questions"][&key] = question;
+        if candidate.to_string().len() > 128 * 1024 {
+            if batch.tasks.is_empty() {
+                return Err("Batched semantic request exceeds 128 KB".into());
+            }
+            break;
+        }
+        batch.request = candidate;
+        batch.tasks.push(task.clone());
+        batch.individual.push(individual);
+    }
+    if batch.tasks.is_empty() {
+        return Err("No question budget remains".into());
+    }
+    Ok(batch)
+}
+/// Validate every answer before advancing any cursor; malformed fan-out stays retryable.
+pub fn answers(batch: &Batch, response: &Value) -> Result<Vec<(String, Value, Value)>, String> {
+    if response["answers"].as_object().map(|a| a.len()) != Some(batch.tasks.len()) {
+        return Err("Provider fan-out answer count mismatch".into());
+    }
+    batch.individual.iter().enumerate().map(|(index,request)| {
+        let response=json!({"model":response["model"],"answers":{"result":response["answers"][batch.question_key(index)]}});
+        Ok((super::validate(request,&response)?,super::evaluation_value(request,&response)?,response))
+    }).collect()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn batches_independent_pairs_but_stops_before_dependent_likelihood() {
+        let s = json!({"nodes":[{"Id":"a","kind":"scenario"},{"Id":"b","kind":"scenario"},{"Id":"c","kind":"scenario"}]});
+        let p = json!({"cursor":0,"tasks":[{"nodeId":"pair:1:a:1:b","function":"check_pair","pair_ids":["a","b"]},{"nodeId":"pair:1:a:1:c","function":"check_pair","pair_ids":["a","c"]},{"nodeId":"a","function":"estimate_likelihood"}]});
+        let batch = prepare(&s, &p, 10).unwrap();
+        assert_eq!(batch.tasks.len(), 2);
+        let answer = json!({"type":"choice","choice":"compatible","probabilities":{"compatible":0.8,"conflict":0.1,"uncertain":0.1}});
+        let mut response = json!({"model":super::super::MODEL,"answers":{"q0":answer,"q1":answer}});
+        assert_eq!(answers(&batch, &response).unwrap().len(), 2);
+        response["answers"]["q1"]["probabilities"]["conflict"] = json!(0.9);
+        assert!(answers(&batch, &response).is_err());
+        assert_eq!(prepare(&s, &p, 1).unwrap().tasks.len(), 1);
+    }
+}

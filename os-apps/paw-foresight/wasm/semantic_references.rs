@@ -68,7 +68,7 @@ impl References {
                         | "parent"
                         | "hypothesis_id"
                         | "scenario_ids"
-                        | "requires" | "world_id" | "component_ids" | "counter_ids" | "evidence_ids"
+                        | "requires" | "world_id" | "component_ids" | "counter_ids" | "evidence_ids" | "from_ids" | "from_id" | "active_world_ids" | "supports" | "candidate_ids" | "pair_ids"
                 ) =>
             {
                 json!(self.forward.get(text).unwrap_or(text))
@@ -80,7 +80,7 @@ impl References {
         match value {
             Value::Object(map) => for (key, value) in map { self.resolve_world_fields(value, key); },
             Value::Array(values) => for value in values { self.resolve_world_fields(value, field); },
-            Value::String(text) if matches!(field, "world_id" | "component_ids" | "counter_ids" | "evidence_ids") => *text = self.resolve(text),
+            Value::String(text) if matches!(field, "world_id" | "component_ids" | "counter_ids" | "evidence_ids" | "from_ids" | "from_id" | "to_id" | "active_world_ids" | "supports" | "candidate_ids" | "pair_ids") => *text = self.resolve(text),
             _ => (),
         }
     }

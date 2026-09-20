@@ -362,10 +362,8 @@ pub fn validate_baseline(baseline: &Value, snapshot: &Value) -> Result<(), Strin
                 .ok_or("Unknown baseline evidence")?;
             if let (Some(observed), Some(vantage)) =
                 (node["observed_at"].as_str(), baseline["as_of"].as_str())
-            {
-                if observed.len() == 10 && vantage.len() == 10 && observed > vantage {
-                    return Err("Baseline evidence is later than its vantage date".into());
-                }
+                && observed.len() == 10 && vantage.len() == 10 && observed > vantage {
+                return Err("Baseline evidence is later than its vantage date".into());
             }
             if matches!(
                 node["kind"].as_str(),
@@ -402,7 +400,7 @@ fn validate_v3(answer: &Value, snapshot: &Value) -> Result<(), String> {
     let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
     let worlds: std::collections::BTreeMap<_, _> = nodes
         .iter()
-        .filter(|n| n["kind"] == "world")
+        .filter(|n| n["kind"] == "world" && n["archived"] != true)
         .filter_map(|n| n["Id"].as_str().map(|id| (id, n)))
         .collect();
     let outcomes = answer["outcomes"]

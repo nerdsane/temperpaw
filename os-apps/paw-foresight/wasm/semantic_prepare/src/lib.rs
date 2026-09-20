@@ -103,7 +103,9 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
     }
     let ids: std::collections::BTreeSet<_> = nodes.iter().map(|n| core::field(n, "Id")).collect();
     for task in tasks {
-        if !ids.contains(core::field(task, "nodeId")) {
+        if core::search::is_structural(task) {
+            core::search::request(&snapshot, &program, task)?;
+        } else if !ids.contains(core::field(task, "nodeId")) {
             return Err("Resume task references missing node".into());
         }
     }
@@ -112,8 +114,16 @@ fn resume_checkpoint(record: &Value, world_id: &str, now_ms: u64) -> Result<Valu
         return Err("Resume trace exceeds budget".into());
     }
     for (index, item) in traces.iter().enumerate() {
+        let structural = core::search::is_structural(&item["task"]);
+        let valid_subject = if structural {
+            item["task"]["nodeId"] == item["nodeId"]
+                && item["task"]["function"] == item["function"]
+                && core::search::request(&snapshot, &program, &item["task"]).is_ok()
+        } else {
+            ids.contains(core::field(item, "nodeId"))
+        };
         if item["index"].as_u64() != Some(index as u64)
-            || !ids.contains(core::field(item, "nodeId"))
+            || !valid_subject
             || !((item["response"].is_object() && item["request"].is_object())
                 || (item["requestFormat"] == "failed-attempt-hash-only"
                     && item["error"].as_str().is_some_and(|s| !s.is_empty())
@@ -367,6 +377,33 @@ mod tests {
         assert_eq!(resumed["stop_reason"], "resumed_after_provider_error");
         let completed = resume_checkpoint(&checkpoint(), "w", 2000).unwrap();
         assert_eq!(resume_transition(&completed).unwrap(), "Prepared");
+    }
+
+    #[test]
+    fn resume_checks_structural_subjects_even_when_trace_node_id_exists() {
+        let mut record = checkpoint();
+        let mut snapshot = core::parse(record["snapshot_json"].as_str().unwrap()).unwrap();
+        snapshot["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Id":"h2","kind":"scenario","statement":"Second future","edges":"[]"}));
+        let mut program = core::parse(record["program_json"].as_str().unwrap()).unwrap();
+        assert!(core::search::plan_combinations(&snapshot, &mut program, 10));
+        record["snapshot_json"] = json!(snapshot.to_string());
+        record["program_json"] = json!(program.to_string());
+        let task = program["tasks"][0].clone();
+        let mut trace = json!([{"index":0,"nodeId":task["nodeId"],"function":"check_pair","task":task,"request":{},"response":{}}]);
+        record["trace_json"] = json!(trace.to_string());
+        assert!(resume_checkpoint(&record, "w", 2000).is_ok());
+        trace[0]["nodeId"] = json!("h");
+        trace[0]["task"]["nodeId"] = json!("h");
+        trace[0]["task"]["pair_ids"] = json!(["h", "missing"]);
+        record["trace_json"] = json!(trace.to_string());
+        assert!(resume_checkpoint(&record, "w", 2000).is_err());
+        record["trace_json"] = json!("[]");
+        program["tasks"][0]["pair_ids"] = json!(["h", "h"]);
+        record["program_json"] = json!(program.to_string());
+        assert!(resume_checkpoint(&record, "w", 2000).is_err());
     }
 
     #[test]

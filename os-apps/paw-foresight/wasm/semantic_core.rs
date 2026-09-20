@@ -7,16 +7,31 @@ pub const MAX_NODES: usize = 2048;
 pub const MAX_MS: u64 = 3_600_000;
 pub const MAX_TRACE_BYTES: usize = 24 * 1024 * 1024;
 pub const MAX_ROUNDS: u64 = 64;
-pub const WORLD_CALL_RESERVE: usize = 32;
+// Questions, not HTTP requests: independent structural questions can share a call.
+pub const WORLD_CALL_RESERVE: usize = 3600;
 pub const WORLD_TIME_RESERVE_MS: u64 = 600_000;
 pub fn call_limit(program: &Value) -> usize {
-    if program["stage"] == "worlds" { MAX_CALLS } else { MAX_CALLS - WORLD_CALL_RESERVE }
+    if program["stage"] == "worlds" {
+        MAX_CALLS
+    } else {
+        MAX_CALLS - WORLD_CALL_RESERVE
+    }
 }
 pub fn time_limit(program: &Value) -> u64 {
-    if program["stage"] == "worlds" { MAX_MS } else { MAX_MS - WORLD_TIME_RESERVE_MS }
+    if program["stage"] == "worlds" {
+        MAX_MS
+    } else {
+        MAX_MS - WORLD_TIME_RESERVE_MS
+    }
 }
 pub mod evaluation {
     include!("semantic_evaluation.rs");
+}
+pub mod search {
+    include!("semantic_search.rs");
+}
+pub mod batch {
+    include!("semantic_batch.rs");
 }
 pub use evaluation::{evaluation_value, request, validate};
 pub fn field<'a>(v: &'a Value, key: &str) -> &'a str {

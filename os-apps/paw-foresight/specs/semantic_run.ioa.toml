@@ -87,6 +87,21 @@ max_memory = "268435456"
 max_fuel = "10000000000"
 
 [[action]]
+name = "SearchPlanned"
+kind = "input"
+from = ["Choosing"]
+to = "Choosing"
+params = ["program_json"]
+[[action.triggers]]
+name = "semantic_step"
+kind = "wasm"
+module = "semantic_step"
+on_failure = "Fail"
+[action.triggers.config]
+max_memory = "268435456"
+max_fuel = "10000000000"
+
+[[action]]
 name = "Evaluate"
 kind = "input"
 from = ["Choosing"]

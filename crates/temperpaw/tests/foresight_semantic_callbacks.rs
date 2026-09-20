@@ -14,7 +14,13 @@ fn semantic_callbacks_remain_machine_owned() {
     let system = SecurityContext::from_resolved_identity("scheduler", "system", None);
     let wasm = SecurityContext::from_resolved_identity("service:wasm-runtime", "service", None);
     let attrs = std::collections::HashMap::new();
-    for a in ["Fail", "CheckReasoning", "SpawnReasoning", "Complete"] {
+    for a in [
+        "Fail",
+        "CheckReasoning",
+        "SpawnReasoning",
+        "Complete",
+        "SearchPlanned",
+    ] {
         assert!(
             !e.authorize(&admin, a, "SemanticRun", &attrs).is_allowed(),
             "admin {a}"
@@ -32,8 +38,10 @@ fn semantic_callbacks_remain_machine_owned() {
             "system {a}"
         );
     }
-    assert!(
-        e.authorize(&wasm, "Fail", "SemanticRun", &attrs)
-            .is_allowed()
-    );
+    for action in ["Fail", "SearchPlanned"] {
+        assert!(
+            e.authorize(&wasm, action, "SemanticRun", &attrs)
+                .is_allowed()
+        );
+    }
 }

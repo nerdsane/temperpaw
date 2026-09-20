@@ -28,11 +28,54 @@ fn next_phase(
     } else {
         String::new()
     };
+    if program["stage"] == "combinations" {
+        core::search::finish_combinations(program);
+        if !exhausted.is_empty() {
+            program["stop_reason"] = json!(exhausted);
+        }
+        return "compose";
+    }
     if program["stage"] == "worlds" {
-        program["stop_reason"] = json!(if exhausted.is_empty() {
-            "worlds_evaluated"
-        } else {
+        if core::search::refine_worlds(snapshot, program, trace_len, elapsed_ms, &exhausted) {
+            return "refine";
+        }
+        let active = program["active_world_ids"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut unresolved = false;
+        let mut next_questions = 0;
+        if !program["world_audits"].is_object() {
+            program["world_audits"] = json!({});
+        }
+        for world in snapshot["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|n| active.contains(&n["Id"]))
+        {
+            let audit = core::search::audit_world(world, program);
+            unresolved |= audit["status"] != "no_conflict_found";
+            next_questions += core::search::world_tasks(world).len();
+            program["world_audits"][core::field(world, "Id")] = audit;
+        }
+        // Bounded feedback loop, with fresh immutable worlds and fresh audit contexts.
+        // Unknowns may remain; never rename a rewrite 'a gap cleared'.
+        if unresolved
+            && exhausted.is_empty()
+            && program["world_revision"].as_u64().unwrap_or(1) < 3
+            && core::MAX_CALLS.saturating_sub(trace_len) >= next_questions
+            && elapsed_ms < core::MAX_MS.saturating_sub(180_000)
+        {
+            program["stop_reason"] = json!("world_revision_needed");
+            return "compose";
+        }
+        program["stop_reason"] = json!(if !exhausted.is_empty() {
             &exhausted
+        } else if unresolved {
+            "world_audits_incomplete"
+        } else {
+            "worlds_evaluated"
         });
         return "synthesize";
     }
@@ -58,6 +101,9 @@ fn step(ctx: &Context) -> Result<(), String> {
     let elapsed = (Context::get_time_millis() as u64).saturating_sub(started);
     let count = program["tasks"].as_array().ok_or("Missing tasks")?.len();
     let calls = trace.as_array().ok_or("Missing trace")?.len();
+    if trace.to_string().len().saturating_add(192 * 1024) > core::MAX_TRACE_BYTES {
+        program["stop_reason"] = json!("trace_budget");
+    }
     let stopped = matches!(
         program["stop_reason"].as_str(),
         Some("trace_budget" | "provider_error" | "time_budget" | "call_budget")
@@ -71,6 +117,34 @@ fn step(ctx: &Context) -> Result<(), String> {
         program["remaining_calls"] = json!(core::MAX_CALLS.saturating_sub(calls));
         program["remaining_round_tasks"] = json!(count.saturating_sub(cursor));
         let phase = next_phase(&snapshot, &mut program, calls, elapsed);
+        if phase == "refine" {
+            set_success_result(
+                "SearchPlanned",
+                &json!({"program_json":program.to_string()}),
+            );
+            return Ok(());
+        }
+        if phase == "compose"
+            && program["stage"] == "exploration"
+            && program["combination_search"].is_null()
+            && !matches!(
+                program["stop_reason"].as_str(),
+                Some("provider_error" | "trace_budget" | "time_budget")
+            )
+            && core::search::plan_combinations(
+                &snapshot,
+                &mut program,
+                core::MAX_CALLS
+                    .saturating_sub(core::WORLD_CALL_RESERVE)
+                    .saturating_sub(calls),
+            )
+        {
+            set_success_result(
+                "SearchPlanned",
+                &json!({"program_json":program.to_string()}),
+            );
+            return Ok(());
+        }
         set_success_result(
             "Reason",
             &json!({"phase":phase,"program_json":program.to_string(),"trace_json":trace.to_string()}),
@@ -96,7 +170,7 @@ mod tests {
     fn evaluates_multiple_rounds_instead_of_one_deepening() {
         let s = json!({"nodes":[]});
         let mut p = json!({"round":3,"continue_exploring":true});
-        assert_eq!(next_phase(&s, &mut p, 1800, 900000), "explore");
+        assert_eq!(next_phase(&s, &mut p, 1000, 900000), "explore");
         assert_eq!(p["stop_reason"], "round_evaluated");
     }
     #[test]
@@ -116,7 +190,10 @@ mod tests {
     #[test]
     fn reserves_calls_and_time_for_world_evaluation() {
         let snapshot = json!({"nodes":[]});
-        for (calls, time) in [(core::MAX_CALLS - 32, 0), (0, core::MAX_MS - 600_000)] {
+        for (calls, time) in [
+            (core::MAX_CALLS - core::WORLD_CALL_RESERVE, 0),
+            (0, core::MAX_MS - 600_000),
+        ] {
             let mut program = json!({"stage":"exploration","continue_exploring":true});
             assert_eq!(next_phase(&snapshot, &mut program, calls, time), "compose");
         }
@@ -130,5 +207,15 @@ mod tests {
         assert_eq!(next_phase(&json!({"nodes":[]}), &mut p, 1, 0), "compose");
         p["stage"] = json!("worlds");
         assert_eq!(next_phase(&json!({"nodes":[]}), &mut p, 1, 0), "synthesize");
+    }
+    #[test]
+    fn world_conflict_triggers_revision_but_never_an_endless_rewrite() {
+        let s = json!({"nodes":[{"Id":"w","component_ids":["a","b","c"],"chain":[]}]});
+        let mut p = json!({"stage":"worlds","world_revision":1,"active_world_ids":["w"],"results":{"w":{"check_world_consistency":"conflict"}}});
+        assert_eq!(next_phase(&s, &mut p, 300, 1000), "compose");
+        assert_eq!(p["world_audits"]["w"]["status"], "conflicts_found");
+        p["world_revision"] = json!(3);
+        assert_eq!(next_phase(&s, &mut p, 300, 1000), "synthesize");
+        assert_eq!(p["stop_reason"], "world_audits_incomplete");
     }
 }

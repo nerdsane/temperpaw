@@ -98,22 +98,37 @@ impl WasmHost for WorldProvider {
         assert_eq!(url, "https://api.typesafe.ai/v1/systemone");
         let request: Value = serde_json::from_str(body).unwrap();
         self.requests.lock().unwrap().push(request.clone());
-        let q = &request["questions"]["result"];
-        let answer = if q["type"] == "noul" {
-            json!({"type":"noul","noul":0.23})
-        } else {
-            let options = q["criteria"].as_object().unwrap();
-            let probabilities: serde_json::Map<String, Value> = options
-                .keys()
-                .map(|k| (k.clone(), json!(if k == "none" { 1.0 } else { 0.0 })))
-                .collect();
-            json!({"type":"choice","choice":"none","probabilities":probabilities})
-        };
+        let answers: serde_json::Map<String, Value> = request["questions"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(key, q)| {
+                let answer = if q["type"] == "noul" {
+                    json!({"type":"noul","noul":0.23})
+                } else {
+                    let options = q["criteria"].as_object().unwrap();
+                    let choice = if options.contains_key("compatible") {
+                        "compatible"
+                    } else if options.contains_key("plausible") {
+                        "plausible"
+                    } else {
+                        "none"
+                    };
+                    let probabilities: serde_json::Map<String, Value> = options
+                        .keys()
+                        .map(|k| (k.clone(), json!(if k == choice { 1.0 } else { 0.0 })))
+                        .collect();
+                    json!({"type":"choice","choice":choice,"probabilities":probabilities})
+                };
+                (key.clone(), answer)
+            })
+            .collect();
         Ok((
             200,
-            json!({"model":"jev-1.13.0","answers":{"result":answer}}).to_string(),
+            json!({"model":"jev-1.13.0","answers":answers}).to_string(),
         ))
     }
+
     async fn http_call_binary(
         &self,
         _: &str,
@@ -129,14 +144,22 @@ impl WasmHost for WorldProvider {
     fn log(&self, _: &str, _: &str) {}
 }
 fn snapshot() -> Value {
-    json!({"world":{"Id":"question","target_date":"2027-09-20","last_ingest_date":"2026-09-20","hindcast_mode":"false"},"nodes":[
+    let mut s = json!({"world":{"Id":"question","target_date":"2027-09-20","last_ingest_date":"2026-09-20","hindcast_mode":"false"},"nodes":[
       {"Id":"e","kind":"evidence","statement":"A clinic already uses an assistant for appointment reminders.","quote":"The assistant sends appointment reminders today.","observed_at":"2026-09-19","claim_type":"observed","source_refs":["https://example.org/clinic"],"edges":"[]"},
       {"Id":"h1","kind":"scenario","statement":"Clinics automate bookings by September 2027.","edges":"[]"},
       {"Id":"h2","kind":"revision","statement":"Patients accept assistant-run bookings by September 2027.","edges":"[]"},
       {"Id":"counter","kind":"scenario","statement":"Patients demand human approval by September 2027.","edges":"[]"},
       {"Id":"w1","kind":"world","statement":"By September 2027 clinics run bookings without reception staff and patients accept this change.","component_ids":["h1","h2"],"counter_ids":["counter"],"resolve_by":"2027-09-20","edges":"[{\"kind\":\"requires\",\"to_id\":\"h1\"},{\"kind\":\"requires\",\"to_id\":\"h2\"},{\"kind\":\"requires\",\"to_id\":\"e\"}]"},
       {"Id":"w2","kind":"world","statement":"By September 2027 clinics automate routine bookings while humans approve every change.","component_ids":["h1","h2"],"counter_ids":["counter"],"resolve_by":"2027-09-20","edges":"[]"}
-    ]})
+    ]});
+    s["nodes"].as_array_mut().unwrap().push(json!({"Id":"h3","kind":"scenario","statement":"Clinics reduce reception staffing by September 2027.","edges":"[]"}));
+    for i in [4, 5] {
+        s["nodes"][i]["component_ids"] = json!(["h1", "h2", "h3"]);
+        s["nodes"][i]["facets"] = json!([{"id":"f1","title":"Bookings","description":"Booking work changes","component_ids":["h1"]},{"id":"f2","title":"Patients","description":"Patients accept the change","component_ids":["h2"]},{"id":"f3","title":"Staff","description":"Staffing changes","component_ids":["h3"]}]);
+        s["nodes"][i]["assumptions"] = json!([]);
+        s["nodes"][i]["chain"] = json!([{"id":"a","from_ids":["h1"],"to_id":"h2","mechanism":"Reliable automation earns acceptance","by":"2027-03-01"},{"id":"b","from_ids":["h2"],"to_id":"h3","mechanism":"Acceptance permits fewer reception shifts","by":"2027-09-20"}]);
+    }
+    s
 }
 fn answer(snapshot: &Value) -> Value {
     let outcome = |index: usize| {
@@ -214,6 +237,11 @@ async fn fresh_world_reply_is_not_a_component_probability() {
 async fn missing_world_scores_stay_null_and_baseline_cannot_cite_a_future() {
     let engine = WasmEngine::new().unwrap();
     let snapshot = snapshot();
+    let mut snapshot = snapshot;
+    let mut archived = snapshot["nodes"][4].clone();
+    archived["Id"] = json!("old-world");
+    archived["archived"] = json!(true);
+    snapshot["nodes"].as_array_mut().unwrap().push(archived);
     let mut draft = answer(&snapshot);
     let mut fields = json!({"phase":"synthesize","snapshot_json":snapshot.to_string(),"program_json":json!({"baseline":answer(&snapshot)["baseline"],"results":{"h1":{"estimate_likelihood":"0.9"},"h2":{"estimate_likelihood":"0.8"}}}).to_string(),"reasoning_result":draft.to_string()});
     let completed = invoke(&engine, "semantic_expand", fields.clone()).await;
@@ -245,7 +273,10 @@ async fn composition_schedules_new_world_calls_not_component_reuse() {
     let engine = WasmEngine::new().unwrap();
     let full = snapshot();
     let mut snapshot = full.clone();
-    snapshot["nodes"].as_array_mut().unwrap().truncate(4);
+    snapshot["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|n| n["kind"] != "world");
     let worlds: Vec<Value> = [4usize, 5]
         .iter()
         .map(|&i| {
@@ -276,7 +307,7 @@ async fn composition_schedules_new_world_calls_not_component_reuse() {
     .unwrap();
     assert_eq!(p["stage"], "worlds");
     let tasks = p["tasks"].as_array().unwrap();
-    for id in ["world-w1", "world-w2"] {
+    for id in ["world-r1-w1", "world-r1-w2"] {
         assert!(
             tasks
                 .iter()
@@ -285,7 +316,7 @@ async fn composition_schedules_new_world_calls_not_component_reuse() {
         assert!(
             tasks
                 .iter()
-                .any(|t| t["nodeId"] == id && t["function"] == "classify_gap")
+                .any(|t| t["nodeId"] == id && t["function"] == "check_world_consistency")
         );
         assert!(p["results"][id]["estimate_likelihood"].is_null());
     }
@@ -295,10 +326,150 @@ async fn composition_schedules_new_world_calls_not_component_reuse() {
             .all(|t| t["nodeId"].as_str().unwrap().starts_with("world-")),
         "Components are already evaluated"
     );
+    for defect in ["cycle", "reversed_time", "bad_date", "uncovered_facet"] {
+        let mut broken = generated.clone();
+        match defect {
+            "cycle" => broken["worlds"][0]["chain"][0]["from_ids"] = json!(["h3"]),
+            "reversed_time" => broken["worlds"][0]["chain"][1]["by"] = json!("2027-01-01"),
+            "bad_date" => broken["worlds"][0]["chain"][0]["by"] = json!("2027-02-30"),
+            _ => broken["worlds"][0]["facets"][2]["component_ids"] = json!(["h1"]),
+        }
+        fields["reasoning_result"] = json!(broken.to_string());
+        assert_eq!(
+            invoke(&engine, "semantic_expand", fields.clone()).await["callback_action"],
+            "Fail",
+            "{defect}"
+        );
+    }
     generated["baseline"]["observed"][0]["evidence_ids"] = json!(["h1"]);
     fields["reasoning_result"] = json!(generated.to_string());
     assert_eq!(
         invoke(&engine, "semantic_expand", fields).await["callback_action"],
         "Fail"
+    );
+}
+
+#[tokio::test]
+async fn structural_fanout_preserves_cases_and_separates_dependent_likelihood() {
+    let engine = WasmEngine::new().unwrap();
+    let snapshot = snapshot();
+    let host = Arc::new(WorldProvider::default());
+    let tasks = json!([
+      {"nodeId":"pair:2:h1:2:h2","function":"check_pair","pair_ids":["h1","h2"],"depth":0},
+      {"nodeId":"pair:2:h1:2:h3","function":"check_pair","pair_ids":["h1","h3"],"depth":0},
+      {"nodeId":"w1/link/a","world_id":"w1","link_id":"a","function":"conditional_on","depth":0},
+      {"nodeId":"w1","world_id":"w1","function":"check_world_consistency","depth":0},
+      {"nodeId":"w1","function":"estimate_likelihood"}
+    ]);
+    let p = json!({"cursor":0,"tasks":tasks,"baseline":answer(&snapshot)["baseline"],"results":{},"evaluations":{}});
+    let hash = engine.compile_and_cache(&bytes("semantic_call")).unwrap();
+    let ctx = WasmInvocationContext {
+        tenant: "test".into(),
+        entity_type: "SemanticRun".into(),
+        entity_id: "batch-test".into(),
+        trigger_action: "Evaluate".into(),
+        wasm_module: Some("semantic_call".into()),
+        trigger_params: json!({}),
+        entity_state: json!({"fields":{"snapshot_json":snapshot.to_string(),"program_json":p.to_string(),"trace_json":"[]"}}),
+        agent_id: None,
+        session_id: None,
+        integration_config: BTreeMap::from([("typesafe_api_key".into(), "fixture-only".into())]),
+        trace_id: String::new(),
+        workflow_root_entity_type: None,
+        workflow_root_entity_id: None,
+        workflow_run_id: None,
+        http_request: None,
+    };
+    let r = invoke_with_host(&engine, "semantic_call", ctx, host.clone(), hash).await;
+    assert_eq!(r["callback_action"], "Recorded", "{r}");
+    let p: Value =
+        serde_json::from_str(r["callback_params"]["program_json"].as_str().unwrap()).unwrap();
+    let t: Value =
+        serde_json::from_str(r["callback_params"]["trace_json"].as_str().unwrap()).unwrap();
+    assert_eq!(p["cursor"], 5);
+    assert_eq!(p["http_calls"], 2);
+    assert_eq!(t.as_array().unwrap().len(), 5);
+    let requests = host.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["questions"].as_object().unwrap().len(), 4);
+    assert_eq!(requests[1]["questions"].as_object().unwrap().len(), 1);
+    assert_eq!(requests[0]["state"]["cases"]["q0"]["events"][1]["Id"], "h2");
+    assert_eq!(requests[0]["state"]["cases"]["q1"]["events"][1]["Id"], "h3");
+    let conditional = &requests[0]["state"]["cases"]["q2"];
+    assert_eq!(conditional["target_event"]["Id"], "h2");
+    assert_eq!(conditional["prerequisite_events"][0]["Id"], "h1");
+    assert!(conditional["world"]["component_ids"].is_null());
+    assert_eq!(
+        requests[1]["state"]["assessment"]["check_world_consistency"],
+        "compatible"
+    );
+    for i in 0..4 {
+        assert_eq!(t[i]["httpCallId"], 1);
+        assert_eq!(t[i]["questionKey"], format!("q{i}"));
+        assert!(t[i]["response"]["answers"]["result"].is_object());
+    }
+    assert_eq!(t[4]["httpCallId"], 2);
+    assert_eq!(t[4]["questionKey"], "result");
+    assert_ne!(t[0]["caseHash"], t[1]["caseHash"]);
+    assert_eq!(t[0]["requestHash"], t[1]["requestHash"]);
+}
+
+#[tokio::test]
+async fn combinations_precede_composition_and_conflicts_force_bounded_revision() {
+    let engine = WasmEngine::new().unwrap();
+    let snapshot = snapshot();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let p = json!({"stage":"exploration","cursor":0,"tasks":[],"continue_exploring":false,"results":{},"evaluations":{}});
+    let mut fields = json!({"snapshot_json":snapshot.to_string(),"program_json":p.to_string(),"trace_json":"[]","started_at_ms":now.to_string()});
+    let planned = invoke(&engine, "semantic_step", fields.clone()).await;
+    assert_eq!(planned["callback_action"], "SearchPlanned", "{planned}");
+    let p: Value =
+        serde_json::from_str(planned["callback_params"]["program_json"].as_str().unwrap()).unwrap();
+    assert_eq!(p["stage"], "combinations");
+    assert_eq!(p["tasks"].as_array().unwrap().len(), 6);
+    fields["program_json"] = planned["callback_params"]["program_json"].clone();
+    assert_eq!(
+        invoke(&engine, "semantic_step", fields.clone()).await["callback_action"],
+        "Evaluate"
+    );
+    let mut p = json!({"stage":"worlds","cursor":0,"tasks":[],"world_revision":1,"active_world_ids":["w1"],"results":{"w1":{"check_world_consistency":"conflict"}},"evaluations":{}});
+    fields["program_json"] = json!(p.to_string());
+    let revise = invoke(&engine, "semantic_step", fields.clone()).await;
+    assert_eq!(revise["callback_action"], "Reason");
+    assert_eq!(revise["callback_params"]["phase"], "compose");
+    p["world_revision"] = json!(3);
+    fields["program_json"] = json!(p.to_string());
+    let stop = invoke(&engine, "semantic_step", fields).await;
+    assert_eq!(stop["callback_params"]["phase"], "synthesize");
+    let p: Value =
+        serde_json::from_str(stop["callback_params"]["program_json"].as_str().unwrap()).unwrap();
+    assert_eq!(p["world_audits"]["w1"]["status"], "conflicts_found");
+}
+
+#[tokio::test]
+async fn new_source_rechecks_the_same_hypothesis_instead_of_inheriting_its_score() {
+    let engine = WasmEngine::new().unwrap();
+    let mut snapshot = snapshot();
+    snapshot["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|n| n["kind"] != "world");
+    let p = json!({"round":1,"evidence_ids":["e"],"cursor":0,"tasks":[],"results":{"h1":{"estimate_likelihood":"0.9","classify_gap":"none"}},"evaluations":{"h1":{"estimate_likelihood":{"probability":0.9}}}});
+    let result = json!({"hypotheses":[],"research_evidence":[{"id":"new-source","statement":"A second clinic reports patients refusing automated changes.","url":"https://example.org/new-observation","quote":"Patients asked to approve every change.","observed_at":"2026-09-20","provenance":"observed"}],"continue_exploring":false,"exploration_note":"Contrary evidence needs evaluation."});
+    let fields = json!({"phase":"explore","snapshot_json":snapshot.to_string(),"program_json":p.to_string(),"reasoning_result":result.to_string()});
+    let r = invoke(&engine, "semantic_expand", fields).await;
+    assert_eq!(r["callback_action"], "Expanded", "{r}");
+    let p: Value =
+        serde_json::from_str(r["callback_params"]["program_json"].as_str().unwrap()).unwrap();
+    assert!(p["results"]["h1"]["estimate_likelihood"].is_null());
+    assert!(
+        p["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["nodeId"] == "h1" && t["function"] == "estimate_likelihood")
     );
 }

@@ -36,17 +36,17 @@ const WORLD_COMPOSITION_PROMPT: &str = r#"Turn the explored evidence and possibi
 
 Begin with the present at world.last_ingest_date. Separate supported observations, assumptions supplied by the user, and unresolved facts. A practice already common in the relevant setting is the starting point, not a future breakthrough. Describe what changes AFTER that starting point. Do not universalize a user's own workflow or an early-adopter example to everyone. Source retrieval dates are not publication dates. If current evidence is missing, state that plainly. The final worlds should differ in consequences and ways of living, not only in speed of adoption.
 
-Return JSON ONLY: {"baseline":{"as_of":"exact world.last_ingest_date","observed":[{"claim":"<=400 characters; present fact with scope and source-date limits","evidence_ids":["actual evidence node refs, not hypotheses"]}],"assumptions":["<=240 characters; user conditions or openly assumed premises"],"unknowns":["<=240 characters; missing current evidence"]},"worlds":[{"id":"unique short ASCII ID, not ref_","title":"<=100 characters; a clear claim people can picture","statement":"<=1000 characters; precise joint future event: ALL defining component changes happen together within the target horizon, with actors and scope","mechanism":"<=1200 characters; why these changes fit together and what could break the chain","component_ids":["2–12 different existing scenario/revision refs defining this world's joint event"],"counter_ids":["0–12 existing hypothesis refs that challenge this world; not its prerequisites"],"scene":"<=600 characters; an imagined everyday moment in this world","narrative":"<=1200 characters; why this world could happen, who gains or struggles, and a serious challenge","what_you_can_do":["0–4 practical steps, each <=240 characters"],"signals":["1–8 observable early signs, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
+Return JSON ONLY: {"baseline":{"as_of":"exact world.last_ingest_date","observed":[{"claim":"<=400 characters; present fact with scope and source-date limits","evidence_ids":["actual evidence node refs, not hypotheses"]}],"assumptions":["<=240 characters; user conditions or openly assumed premises"],"unknowns":["<=240 characters; missing current evidence"]},"worlds":[{"id":"unique short ASCII ID, not ref_","title":"<=100 characters; a clear claim people can picture","statement":"<=1000 characters; precise joint future event: ALL defining component changes happen together within the target horizon, with actors and scope","mechanism":"<=1200 characters; why these changes fit together and what could break the chain","component_ids":["3–12 different existing scenario/revision refs defining this world's joint event"],"counter_ids":["0–12 existing hypothesis refs that challenge this world; not its prerequisites"],"facets":[{"id":"unique local facet id <=80 characters","title":"short emergent dimension <=100 characters","description":"what changes and interacts with other facets, <=800 characters","component_ids":["defining component refs"]}],"chain":[{"id":"unique local link id <=80 characters","from_ids":["prerequisite component refs"],"to_id":"consequence component ref","mechanism":"why these conditions change the consequence, <=800 characters","by":"YYYY-MM-DD between baseline and horizon"}],"assumptions":["0–12 explicit assumptions, each <=600 characters"],"scene":"<=600 characters; an imagined everyday moment in this world","narrative":"<=1200 characters; why this world could happen, who gains or struggles, and a serious challenge","what_you_can_do":["0–4 practical steps, each <=240 characters"],"signals":["1–8 observable early signs, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
 
-Choose 2–6 distinct worlds, a compact answer rather than a quota to fill. Use only exact existing ref_ IDs for components and challenges. A component is a defining future change, not merely a source citation. Do not pick unrelated claims to make a story look rich. Do not invent new core events at this stage: they would bypass exploration. If exploration is weak or stopped early, say so in the baseline unknowns and the narratives. Each world will receive its OWN fresh Jev evaluation of the whole joint event, including dependencies and counterevidence. Never supply probabilities or combine the component estimates yourself. These worlds may overlap; they are not a complete partition of every possible future."#;
+Choose 2–6 distinct worlds, a compact answer rather than a quota to fill. Use only exact existing ref_ IDs for components and challenges. A component is a defining future change, not merely a source citation. Do not pick unrelated claims to make a story look rich. Do not invent new core events at this stage: they would bypass exploration. Build layered worlds, not lists of jobs or themed suggestions. Give each world 3–12 distinct facets: dimensions of everyday life or software that emerge from its actual changes, without a prescribed topic list. Each facet links its defining components. Give 2–24 explicit causal links between components, with a mechanism and date by which the link operates. Links form a connected directed prerequisite graph covering every component; do not create cycles. Each link has a distinct consequence to_id; combine its prerequisite from_ids into that link. Every component also belongs to a facet. Link dates must respect causal ordering. State assumptions separately. Use combination_search and world_audits as recorded model judgments: they are not proof. When prior worlds are challenged, construct revised worlds that address or openly retain the specific conflicts and unknowns. Never claim a check ran unless its actual result is supplied. If exploration is weak or stopped early, say so in the baseline unknowns and the narratives. Each world will receive its OWN fresh Jev evaluation of the whole joint event, including dependencies and counterevidence. Never supply probabilities or combine the component estimates yourself. These worlds may overlap; they are not a complete partition of every possible future."#;
 
 const WRITING_STYLE: &str = r#"Write for a curious person outside the industry. Be direct, concrete and easy to picture. No corporate language, news roundups, slogans or unexplained professional shorthand. Say what a person does, buys, stops needing or notices on an ordinary day. A scene is explicitly imagined, not evidence. A title makes a clear claim; it does not name a management theme. Explain why in familiar words, including what could stop it. Do not exaggerate to sound ambitious. Translate technical terms: suggested code changes, the project's code, who can see private data, connections to other tools. If a technical name is essential, explain it. Keep short paragraphs and avoid repeating the same point in every field."#;
 
-const SYNTHESIS_PROMPT: &str = r#"Present the composed WORLDS as the answer. These are joint futures built from many explored pieces, not individual event cards. The worlds have already been constructed and evaluated separately. Return one outcome for each supplied world, preserving its defining event, components and challenges. Do not invent, merge or split worlds at this writing step. Explain the different lives they imply, the causal path, and what could break each one. Start beyond what the baseline says is already happening. Present a few distinct worlds in plain, vivid prose rather than a summary of industry news.
+const SYNTHESIS_PROMPT: &str = r#"Present the composed WORLDS as the answer. These are joint futures built from many explored pieces, not individual event cards. The worlds have already been constructed and evaluated separately. Return one outcome for each supplied world, preserving its defining event, components and challenges. Do not invent, merge or split worlds at this writing step. Explain the different lives they imply, the causal path, and what could break each one. Start beyond what the baseline says is already happening. Present a few distinct worlds in plain, vivid prose rather than a summary of industry news. Explain how their supplied facets and causal chains interact. Distinguish recorded consistency judgments, conditional estimates, unresolved issues and whole-world odds. Do not claim uncertainty was resolved or consistency proven merely because an audit ran. Refinement rounds are repeated model judgments about the same world, not independent evidence. Stable scores do not establish accuracy; preserve incomplete rounds and the engine's stop reason.
 
 Return JSON ONLY: {"schema":"foresight-worlds-v3","headline":"<=160 characters; the important choice or contrast between these worlds","horizon":"exact world.target_date","probability_basis":"model_implied_world_estimate","probability_model":"overlapping_worlds","calibrated":false,"summary":"<=400 characters; what the reader learns from comparing the worlds","evidence_limits":["1–32 honest limitations, each <=240 characters"],"research_questions":["0–64 unresolved questions, each <=240 characters"],"outcomes":[{"id":"short stable ID","world_id":"exact supplied world ref_ ID","title":"<=100 characters; concrete claim","definition":"copy the exact world statement, <=1000 characters","component_ids":["copy world component refs"],"counter_ids":["copy world counter refs"],"scenario_ids":["related actual node refs, evidence or hypotheses"],"scene":"<=600 characters; a short imagined moment in this world","narrative":"<=1200 characters; why, who gains or loses, what could break it","what_you_can_do":["0–4 concrete steps, each <=240 characters"],"signals":["1–8 things to watch, each <=240 characters"],"falsifiers":["1–8 things that would undermine this world, each <=240 characters"]}]}.
 
-The engine attaches the baseline, exact world definition, component and challenge links, evaluation status, and each world's own Jev estimate. Do not supply a probability or infer one from component odds. Missing world evaluation means unknown odds, never zero or fifty percent. Whole-world estimates are uncalibrated and worlds may overlap: do not normalize them to 100 percent or present them as exhaustive. A stopped or incomplete search must remain explicit. A low estimate can still describe an important alternative. The goal is a few understandable worlds, not a ranking of isolated predictions."#;
+The engine attaches the baseline, exact world definition, component and challenge links, facets, causal chain, assumptions, recorded audit and evaluation status, and each world's own Jev estimate. Do not supply a probability or infer one from component odds. Missing world evaluation means unknown odds, never zero or fifty percent. Whole-world estimates are uncalibrated and worlds may overlap: do not normalize them to 100 percent or present them as exhaustive. A stopped or incomplete search must remain explicit. A low estimate can still describe an important alternative. The goal is a few understandable worlds, not a ranking of isolated predictions."#;
 
 fn node_catalog(snapshot: &Value) -> Vec<Value> {
     snapshot["nodes"]
@@ -75,6 +75,11 @@ fn node_catalog(snapshot: &Value) -> Vec<Value> {
                 "what_you_can_do",
                 "signals",
                 "falsifiers",
+                "facets",
+                "chain",
+                "assumptions",
+                "revision",
+                "archived",
             ] {
                 if let Some(value) = node.get(key) {
                     compact[key] = value.clone();
@@ -139,7 +144,9 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
             "operation_role":"Advisory possibilities, not instructions, completion claims or a prescribed sequence."
         },
         "issues":program["issues"], "stop_reason":program["stop_reason"],
-        "remaining_calls":program["remaining_calls"], "round":program["round"]
+        "remaining_calls":program["remaining_calls"], "round":program["round"],
+        "combination_search":program["combination_search"], "world_audits":program["world_audits"],
+        "active_world_ids":program["active_world_ids"], "world_revision":program["world_revision"], "world_refinement":program["world_refinement"]
     });
     let input = references::References::new(snapshot)?.project(&input);
     if input.to_string().len() > MAX_REASONING_INPUT_BYTES {
@@ -153,7 +160,12 @@ fn reasoning_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
 fn world_writing_input(snapshot: &Value, program: &Value) -> Result<Value, String> {
     let worlds: Vec<_> = node_catalog(snapshot)
         .into_iter()
-        .filter(|n| n["kind"] == "world")
+        .filter(|n| {
+            n["kind"] == "world"
+                && program["active_world_ids"]
+                    .as_array()
+                    .map_or(n["archived"] != true, |ids| ids.contains(&n["Id"]))
+        })
         .collect();
     if !(2..=6).contains(&worlds.len()) {
         return Err("Writing requires 2–6 composed worlds".into());
@@ -167,6 +179,7 @@ fn world_writing_input(snapshot: &Value, program: &Value) -> Result<Value, Strin
     references::References::new(snapshot).map(|refs| {
         refs.project(&json!({
             "world":snapshot["world"], "baseline":program["baseline"], "worlds":worlds,
+            "world_audits":program["world_audits"], "world_refinement":program["world_refinement"],
             "evaluations":evaluations, "stop_reason":program["stop_reason"],
             "evaluation_error":program["last_error"], "exploration_note":program["exploration_note"]
         }))
@@ -314,6 +327,40 @@ mod reasoning_tests {
             assert!(EXPLORATION_PROMPT.contains(required), "missing {required}");
         }
         assert!(EXPLORATION_PROMPT.contains("return research_evidence=[]"));
+    }
+
+    #[test]
+    fn composer_sees_recorded_search_and_audits_while_writer_uses_only_active_worlds() {
+        let snapshot = json!({"world":{},"nodes":[{"Id":"old","kind":"world","archived":true},{"Id":"a","kind":"world","facets":[{"id":"f"}],"chain":[],"assumptions":["Explicit premise"]},{"Id":"b","kind":"world"}]});
+        let program = json!({"active_world_ids":["a","b"],"world_revision":2,"combination_search":{"candidate_ids":["a","b"],"pairs":[{"pair_ids":["a","b"],"result":"compatible"}],"candidate_sets":[{"component_ids":["a","b"]}]},"world_audits":{"old":{"status":"challenged"}}});
+        let input = reasoning_input(&snapshot, &program).unwrap();
+        assert_eq!(input["world_revision"], 2);
+        assert_eq!(input["world_audits"]["ref_0001"]["status"], "challenged");
+        assert_eq!(
+            input["combination_search"]["candidate_ids"],
+            json!(["ref_0002", "ref_0003"])
+        );
+        assert_eq!(
+            input["combination_search"]["pairs"][0]["pair_ids"],
+            json!(["ref_0002", "ref_0003"])
+        );
+        assert_eq!(
+            input["combination_search"]["candidate_sets"][0]["component_ids"],
+            json!(["ref_0002", "ref_0003"])
+        );
+        let writer = world_writing_input(&snapshot, &program).unwrap();
+        assert_eq!(writer["worlds"].as_array().unwrap().len(), 2);
+        assert!(
+            writer["worlds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|n| n["Id"] != "ref_0001")
+        );
+        assert_eq!(
+            writer["worlds"][0]["facets"],
+            snapshot["nodes"][1]["facets"]
+        );
     }
 
     #[test]

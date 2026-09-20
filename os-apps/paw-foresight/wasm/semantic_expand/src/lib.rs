@@ -191,6 +191,20 @@ fn expand(
             },
             &known,
         )?;
+        // A source supports an event; the source's existence is not a future prerequisite.
+        let evidence_ids: std::collections::BTreeSet<_> = nodes
+            .iter()
+            .chain(added.iter())
+            .filter(|n| matches!(core::field(n, "kind"), "evidence" | "research_evidence"))
+            .map(|n| core::field(n, "Id").to_owned())
+            .collect();
+        let mut edges = core::parse(core::field(&node, "edges"))?;
+        for edge in edges.as_array_mut().ok_or("Invalid generated edges")? {
+            if evidence_ids.contains(core::field(edge, "to_id")) {
+                edge["kind"] = json!("supports");
+            }
+        }
+        node["edges"] = json!(edges.to_string());
         node["title"] = v["title"].clone();
         node["mechanism"] = v["mechanism"].clone();
         if let Some(parent) = parent {
@@ -227,6 +241,7 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
     if nodes.len() + worlds.len() > core::MAX_NODES {
         return Err("World composition exceeds node budget".into());
     }
+    let revision = old["world_revision"].as_u64().unwrap_or(0) + 1;
     let mut added = vec![];
     let mut identities = std::collections::BTreeSet::new();
     for world in worlds {
@@ -234,7 +249,7 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
         if local.starts_with(references::PREFIX) {
             return Err("Reserved world identity".into());
         }
-        let id = format!("world-{local}");
+        let id = format!("world-r{revision}-{local}");
         if by_id.contains_key(id.as_str()) || !identities.insert(id.clone()) {
             return Err("Duplicate world identity".into());
         }
@@ -265,8 +280,8 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
                 return Err("World components must be distinct existing hypotheses".into());
             }
         }
-        if components.len() < 2 || components.len() > 12 {
-            return Err("World needs two to twelve defining components".into());
+        if components.len() < 3 || components.len() > 12 {
+            return Err("World needs three to twelve defining components".into());
         }
         let counters = world["counter_ids"]
             .as_array()
@@ -288,6 +303,8 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
         node.as_object_mut().ok_or("Invalid world")?.remove("id");
         node["Id"] = json!(id);
         node["kind"] = json!("world");
+        node["revision"] = json!(revision);
+        node["archived"] = json!(false);
         node["Status"] = json!("Hypothesis");
         node["provenance"] = json!("composed_world_hypothesis");
         node["edges"] = json!(
@@ -300,17 +317,50 @@ fn compose(snapshot: &mut Value, generated: &Value, old: &Value) -> Result<Value
         added.push(node);
     }
     let mut updated = snapshot.clone();
+    for node in updated["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|n| n["kind"] == "world")
+    {
+        node["archived"] = json!(true);
+    }
     updated["nodes"].as_array_mut().unwrap().extend(added);
+    let active: Vec<_> = updated["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| identities.contains(core::field(n, "Id")))
+        .collect();
+    for node in &active {
+        core::search::validate_world(node, &updated)?;
+    }
+    let tasks: Vec<_> = active
+        .iter()
+        .flat_map(|n| core::search::world_tasks(n))
+        .collect();
     let mut program = core::plan(updated["nodes"].as_array().unwrap())?;
-    for key in ["results", "evaluations", "round", "rounds", "last_error"] {
+    for key in [
+        "results",
+        "evaluations",
+        "round",
+        "rounds",
+        "last_error",
+        "combination_search",
+        "world_audits",
+        "world_refinement",
+        "http_calls",
+        "evidence_ids",
+    ] {
         if !old[key].is_null() {
             program[key] = old[key].clone();
         }
     }
-    program["tasks"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|t| identities.contains(core::field(t, "nodeId")));
+    program["tasks"] = json!(tasks);
+    program["active_world_ids"] = json!(identities);
+    program["world_revision"] = json!(revision);
+    program["world_pass"] = json!(1);
+    program["evidence_ids"] = json!(evidence_ids(&updated));
     program["stage"] = json!("worlds");
     program["baseline"] = baseline.clone();
     program["continue_exploring"] = json!(false);
@@ -360,17 +410,19 @@ fn attach_world_probabilities(
     }
     let nodes = snapshot["nodes"].as_array().ok_or("Missing nodes")?;
     let mut evaluated = 0;
+    let mut outstanding_audits = 0;
     let outcomes = answer["outcomes"].as_array_mut().ok_or("Missing worlds")?;
     let count = outcomes.len();
     for outcome in outcomes {
         let id = outcome["world_id"]
             .as_str()
-            .ok_or("Missing world identity")?;
+            .ok_or("Missing world identity")?
+            .to_owned();
         let node = nodes
             .iter()
             .find(|n| core::field(n, "Id") == id && n["kind"] == "world")
             .ok_or("Outcome must reference a composed world")?;
-        let raw = &program["results"][id]["estimate_likelihood"];
+        let raw = &program["results"][&id]["estimate_likelihood"];
         let probability = if raw.is_null() {
             None
         } else {
@@ -385,10 +437,30 @@ fn attach_world_probabilities(
             evaluated += 1;
         }
         outcome["probability"] = json!(probability);
-        for key in ["component_ids", "counter_ids"] {
+        if let Some(active) = program["active_world_ids"].as_array()
+            && !active.iter().any(|v| v.as_str() == Some(id.as_str()))
+        {
+            return Err("Outcome references inactive world".into());
+        }
+        for key in [
+            "component_ids",
+            "counter_ids",
+            "facets",
+            "chain",
+            "assumptions",
+        ] {
             outcome[key] = node[key].clone();
         }
         outcome["definition"] = node["statement"].clone();
+        outcome["audit"] = core::search::audit_world(node, program);
+        if !program["world_refinement"][&id].is_null() {
+            outcome["refinement"] = program["world_refinement"][&id].clone();
+        } else if let Some(object) = outcome.as_object_mut() {
+            object.remove("refinement");
+        }
+        if outcome["audit"]["status"] != "no_conflict_found" {
+            outstanding_audits += 1;
+        }
     }
     answer["baseline"] = program["baseline"].clone();
     answer["evaluation_status"] = json!(if evaluated == count && count > 0 {
@@ -416,6 +488,12 @@ fn attach_world_probabilities(
         };
         format!("{evaluated} of {count} worlds were evaluated separately by Jev. {reason}")
     });
+    if outstanding_audits > 0 {
+        let note = answer["evaluation_note"].as_str().unwrap_or("");
+        answer["evaluation_note"] = json!(format!(
+            "{note} {outstanding_audits} world audits still have conflicts, uncertainty or unfinished checks; likelihood estimates do not establish consistency."
+        ));
+    }
     Ok(())
 }
 
@@ -430,7 +508,7 @@ fn attach_probabilities(answer: &mut Value, program: &Value) -> Result<(), Strin
         let id = outcome["hypothesis_id"]
             .as_str()
             .ok_or("Missing evaluated hypothesis")?;
-        let probability = program["results"][id]["estimate_likelihood"]
+        let probability = program["results"][&id]["estimate_likelihood"]
             .as_str()
             .ok_or("Hypothesis has no Jev event estimate")?
             .parse::<f64>()
@@ -443,9 +521,19 @@ fn attach_probabilities(answer: &mut Value, program: &Value) -> Result<(), Strin
     Ok(())
 }
 
+fn evidence_ids(snapshot: &Value) -> std::collections::BTreeSet<String> {
+    snapshot["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|n| matches!(core::field(n, "kind"), "evidence" | "research_evidence"))
+        .map(|n| core::field(n, "Id").to_owned())
+        .collect()
+}
+
 fn replan(snapshot: &Value, old: &Value, generated: &Value, added: usize) -> Result<Value, String> {
     let mut program = core::plan(snapshot["nodes"].as_array().ok_or("Missing nodes")?)?;
-    for key in ["results", "evaluations", "rounds"] {
+    for key in ["results", "evaluations", "rounds", "http_calls"] {
         if !old[key].is_null() {
             program[key] = old[key].clone();
         }
@@ -459,6 +547,32 @@ fn replan(snapshot: &Value, old: &Value, generated: &Value, added: usize) -> Res
         .as_array_mut()
         .ok_or("Invalid round history")?
         .push(receipt);
+    let current_evidence = evidence_ids(snapshot);
+    let previous_evidence: std::collections::BTreeSet<_> = old["evidence_ids"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    if !current_evidence.is_subset(&previous_evidence) {
+        // Receipts remain in the immutable trace. Current estimates are invalid
+        // until the same claim is assessed against the new evidence context.
+        for node in snapshot["nodes"]
+            .as_array()
+            .ok_or("Missing nodes")?
+            .iter()
+            .filter(|n| matches!(core::field(n, "kind"), "scenario" | "revision"))
+        {
+            for collection in ["results", "evaluations"] {
+                if let Some(values) = program[collection][core::field(node, "Id")].as_object_mut() {
+                    values.remove("classify_gap");
+                    values.remove("estimate_likelihood");
+                }
+            }
+        }
+    }
+    program["evidence_ids"] = json!(current_evidence);
     let results = program["results"].clone();
     program["tasks"]
         .as_array_mut()
@@ -536,8 +650,8 @@ pub extern "C" fn run(_: i32, _: i32) -> i32 {
 mod tests {
     use super::*;
     fn world_fixture() -> (Value, Value, Value) {
-        let snapshot = json!({"world":{"last_ingest_date":"2026-09-19","target_date":"2027-09-19"},"nodes":[{"Id":"e","kind":"evidence","statement":"Observed baseline","edges":"[]"},{"Id":"a","kind":"scenario","statement":"Component A","edges":"[]"},{"Id":"b","kind":"revision","statement":"Component B","edges":"[]"},{"Id":"c","kind":"scenario","statement":"Counter C","edges":"[]"}]});
-        let world = json!({"id":"one","title":"A whole world","statement":"A and B occur jointly","mechanism":"A enables B","component_ids":["ref_0002","ref_0003"],"counter_ids":["ref_0004"],"scene":"An imagined day","narrative":"A causes B but C may prevent it","what_you_can_do":[],"signals":["Observe A"],"falsifiers":["Observe C"]});
+        let snapshot = json!({"world":{"last_ingest_date":"2026-09-19","target_date":"2027-09-19"},"nodes":[{"Id":"e","kind":"evidence","statement":"Observed baseline","edges":"[]"},{"Id":"a","kind":"scenario","statement":"Component A","edges":"[]"},{"Id":"b","kind":"revision","statement":"Component B","edges":"[]"},{"Id":"c","kind":"scenario","statement":"Component C","edges":"[]"},{"Id":"d","kind":"scenario","statement":"Counter D","edges":"[]"}]});
+        let world = json!({"id":"one","title":"A whole world","statement":"A and B and C occur jointly","mechanism":"A enables B enables C","component_ids":["ref_0002","ref_0003","ref_0004"],"counter_ids":["ref_0005"],"scene":"An imagined day","narrative":"A causes B and C but D may prevent it","what_you_can_do":[],"signals":["Observe A"],"falsifiers":["Observe D"],"facets":[{"id":"f1","title":"First change","description":"A changes daily life","component_ids":["ref_0002"]},{"id":"f2","title":"Second change","description":"B changes software","component_ids":["ref_0003"]},{"id":"f3","title":"Third change","description":"C changes economic choices","component_ids":["ref_0004"]}],"chain":[{"id":"l1","from_ids":["ref_0002"],"to_id":"ref_0003","mechanism":"A makes B possible","by":"2027-03-01"},{"id":"l2","from_ids":["ref_0003"],"to_id":"ref_0004","mechanism":"B enables C","by":"2027-09-01"}],"assumptions":["The mechanism persists"]});
         let mut second = world.clone();
         second["id"] = json!("two");
         let generated = json!({"baseline":{"as_of":"2026-09-19","observed":[{"claim":"Observed baseline","evidence_ids":["ref_0001"]}],"assumptions":[],"unknowns":[]},"worlds":[world,second]});
@@ -549,24 +663,32 @@ mod tests {
         let (mut snapshot, generated, old) = world_fixture();
         snapshot["nodes"].as_array_mut().unwrap().push(json!({"Id":"recent","kind":"research_evidence","statement":"Recent extracted claim","quote":"Actual source excerpt","edges":"[]"}));
         let mut program = compose(&mut snapshot, &generated, &old).unwrap();
-        assert_eq!(program["tasks"].as_array().unwrap().len(), 4);
+        assert!(program["tasks"].as_array().unwrap().len() > 4);
         assert!(
             program["tasks"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|t| core::field(t, "nodeId").starts_with("world-"))
+                .all(|t| core::field(t, "world_id").starts_with("world-r1-")
+                    || core::field(t, "nodeId").starts_with("world-r1-"))
         );
-        assert!(program["results"]["world-one"].is_null());
+        assert!(program["results"]["world-r1-one"].is_null());
+        program["cursor"] = json!(
+            program["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|t| t["function"] == "estimate_likelihood")
+                .unwrap()
+        );
         let request = core::request(&snapshot, &program).unwrap();
-        assert_eq!(request["state"]["counter_hypotheses"][0]["node"]["Id"], "c");
+        assert_eq!(request["state"]["counter_hypotheses"][0]["node"]["Id"], "d");
         assert_eq!(request["state"]["source_evidence"][0]["Id"], "e");
         assert_eq!(request["state"]["source_evidence"][1]["Id"], "recent");
         assert_eq!(
             request["state"]["source_evidence"][1]["quote"],
             "Actual source excerpt"
         );
-        program["cursor"] = json!(1);
         let request = core::request(&snapshot, &program).unwrap();
         assert!(
             request["questions"]["result"]["instructions"]
@@ -574,16 +696,28 @@ mod tests {
                 .unwrap()
                 .contains("never average, multiply, inherit")
         );
-        let mut answer = json!({"schema":"foresight-worlds-v3","outcomes":[{"world_id":"world-one","probability":0.99},{"world_id":"world-two","probability":0.88}]});
+        let mut answer = json!({"schema":"foresight-worlds-v3","outcomes":[{"world_id":"world-r1-one","probability":0.99},{"world_id":"world-r1-two","probability":0.88}]});
         attach_world_probabilities(&mut answer, &program, &snapshot).unwrap();
         assert!(answer["outcomes"][0]["probability"].is_null());
         assert_eq!(answer["evaluation_status"], "unavailable");
-        program["results"]["world-one"] = json!({"estimate_likelihood":"0.23"});
+        program["results"]["world-r1-one"] = json!({"estimate_likelihood":"0.23"});
         attach_world_probabilities(&mut answer, &program, &snapshot).unwrap();
         assert_eq!(answer["outcomes"][0]["probability"], 0.23);
         assert_eq!(answer["evaluation_status"], "partial");
-        assert_eq!(answer["outcomes"][0]["definition"], "A and B occur jointly");
-        assert_eq!(answer["outcomes"][0]["component_ids"], json!(["a", "b"]));
+        assert!(
+            answer["evaluation_note"]
+                .as_str()
+                .unwrap()
+                .contains("unfinished checks")
+        );
+        assert_eq!(
+            answer["outcomes"][0]["definition"],
+            "A and B and C occur jointly"
+        );
+        assert_eq!(
+            answer["outcomes"][0]["component_ids"],
+            json!(["a", "b", "c"])
+        );
         assert_eq!(
             answer["baseline"]["observed"][0]["evidence_ids"],
             json!(["e"])
@@ -591,6 +725,101 @@ mod tests {
         answer["outcomes"][0]["world_id"] = json!("a");
         assert!(attach_world_probabilities(&mut answer, &program, &snapshot).is_err());
     }
+    #[test]
+    fn revised_worlds_archive_old_nodes_without_reusing_their_estimates() {
+        let (mut snapshot, generated, old) = world_fixture();
+        let mut first = compose(&mut snapshot, &generated, &old).unwrap();
+        first["results"]["world-r1-one"] = json!({"estimate_likelihood":"0.23"});
+        first["http_calls"] = json!(23);
+        first["world_audits"] = json!({"world-r1-one":{"status":"challenged"}});
+        first["combination_search"] = json!({"candidate_combinations":[["a","b","c"]]});
+        let second = compose(&mut snapshot, &generated, &first).unwrap();
+        assert_eq!(second["world_revision"], 2);
+        assert_eq!(second["http_calls"], 23);
+        assert_eq!(second["evidence_ids"], json!(["e"]));
+        assert_eq!(
+            second["active_world_ids"],
+            json!(["world-r2-one", "world-r2-two"])
+        );
+        assert_eq!(
+            second["results"]["world-r1-one"]["estimate_likelihood"],
+            "0.23"
+        );
+        assert!(second["results"]["world-r2-one"].is_null());
+        assert_eq!(second["world_audits"], first["world_audits"]);
+        assert_eq!(second["combination_search"], first["combination_search"]);
+        let nodes = snapshot["nodes"].as_array().unwrap();
+        assert!(
+            nodes
+                .iter()
+                .filter(|n| n["kind"] == "world" && n["revision"] == 1)
+                .all(|n| n["archived"] == true)
+        );
+        let node = nodes.iter().find(|n| n["Id"] == "world-r2-one").unwrap();
+        assert_eq!(node["facets"][0]["component_ids"], json!(["a"]));
+        assert_eq!(node["chain"][0]["from_ids"], json!(["a"]));
+        assert_eq!(node["chain"][0]["to_id"], "b");
+        let mut answer =
+            json!({"schema":"foresight-worlds-v3","outcomes":[{"world_id":"world-r1-one"}]});
+        assert!(attach_world_probabilities(&mut answer, &second, &snapshot).is_err());
+        answer["outcomes"][0]["world_id"] = json!("world-r2-one");
+        attach_world_probabilities(&mut answer, &second, &snapshot).unwrap();
+        assert!(answer["outcomes"][0]["probability"].is_null());
+        assert_eq!(answer["outcomes"][0]["facets"], node["facets"]);
+        assert_eq!(answer["outcomes"][0]["chain"], node["chain"]);
+        assert_eq!(answer["outcomes"][0]["assumptions"], node["assumptions"]);
+    }
+
+    #[test]
+    fn new_evidence_rechecks_same_claim_without_reusing_old_estimates() {
+        let mut snapshot = json!({"nodes":[{"Id":"e","kind":"evidence","edges":"[]"},{"Id":"h","kind":"scenario","statement":"The same event","edges":"[]"}]});
+        let old = json!({"http_calls":17,"rounds":[],"evidence_ids":["e"],"results":{"h":{"classify_gap":"evidence","estimate_likelihood":"0.4","evaluate_novelty":"2"}},"evaluations":{"h":{"classify_gap":{"selected":"evidence"},"estimate_likelihood":{"probability":0.4}}}});
+        let generated = json!({"continue_exploring":true,"exploration_note":"Investigate"});
+        let unchanged = replan(&snapshot, &old, &generated, 0).unwrap();
+        assert_eq!(unchanged["http_calls"], 17);
+        assert_eq!(unchanged["results"]["h"]["estimate_likelihood"], "0.4");
+        assert!(
+            !unchanged["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["nodeId"] == "h" && t["function"] == "estimate_likelihood")
+        );
+        snapshot["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Id":"new-source","kind":"research_evidence","edges":"[]"}));
+        let refreshed = replan(&snapshot, &old, &generated, 1).unwrap();
+        assert_eq!(refreshed["http_calls"], 17);
+        for function in ["classify_gap", "estimate_likelihood"] {
+            assert!(refreshed["results"]["h"][function].is_null());
+            assert!(refreshed["evaluations"]["h"][function].is_null());
+            assert!(
+                refreshed["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|t| t["nodeId"] == "h" && t["function"] == function)
+            );
+        }
+        assert_eq!(refreshed["results"]["h"]["evaluate_novelty"], "2");
+        assert_eq!(refreshed["evidence_ids"], json!(["e", "new-source"]));
+        assert_eq!(old["results"]["h"]["estimate_likelihood"], "0.4");
+    }
+
+    #[test]
+    fn source_support_is_not_a_future_prerequisite() {
+        let mut snapshot = json!({"world":{"hindcast_mode":"false"},"nodes":[{"Id":"e","kind":"evidence","statement":"Observed","edges":"[]"},{"Id":"h","kind":"scenario","statement":"Future premise","edges":"[]"}]});
+        let mut generated = batch("next");
+        generated["hypotheses"][0]["requires"] = json!(["e", "h"]);
+        expand(&mut snapshot, &generated, "explore", &json!({})).unwrap();
+        let edges = core::parse(snapshot["nodes"][2]["edges"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            edges,
+            json!([{"kind":"supports","to_id":"e"},{"kind":"requires","to_id":"h"}])
+        );
+    }
+
     #[test]
     fn composition_rejects_hypothetical_observations_and_unknown_components_atomically() {
         let (snapshot, generated, old) = world_fixture();
@@ -731,6 +960,7 @@ mod tests {
         let g = batch("h");
         expand(&mut s, &g, "seed", &json!({})).unwrap();
         let mut p = replan(&s, &json!({}), &g, 1).unwrap();
+        p["evidence_ids"] = json!(["e"]);
         p["results"] = json!({"e":{"classify_gap":"none","choose_next_operation":"monitor"},"r1-h":{"classify_gap":"evidence","estimate_likelihood":"0.37","evaluate_novelty":"0.8","decision_value":"0.7","choose_next_operation":"connect"}});
         expand(&mut s, &g, "explore", &p).unwrap();
         let next = replan(&s, &p, &g, 1).unwrap();

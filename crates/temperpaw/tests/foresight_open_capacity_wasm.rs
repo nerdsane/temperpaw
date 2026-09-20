@@ -90,7 +90,7 @@ fn actual_guest_mixed_primitives_and_5000_trace_boundary() {
  assert_eq!(trace[4]["request"]["state_ref"]["evaluations"]["estimate_likelihood"]["probability"],0.37);
  // Capacity fixture repeats real guest-produced trace shapes, not 4992 claimed executions.
  let full:Vec<_>=(0..4992).map(|i|{let mut e=trace[i%8].clone();e["index"]=json!(i);e}).collect();assert!(serde_json::to_string(&full).unwrap().len()<24*1024*1024);
- let mut p=p;p["cursor"]=json!(4992);
+ let mut p=p;p["stage"]=json!("worlds");p["cursor"]=json!(4992);
  let last=invoke(p,json!(full)).await;assert_eq!(last["callback_action"],"Recorded","{last}");
  let p:Value=serde_json::from_str(last["callback_params"]["program_json"].as_str().unwrap()).unwrap();let trace:Value=serde_json::from_str(last["callback_params"]["trace_json"].as_str().unwrap()).unwrap();
  assert_eq!(p["cursor"],5000);assert_eq!(trace.as_array().unwrap().len(),5000);assert_eq!(host.calls.load(Ordering::SeqCst),16);
