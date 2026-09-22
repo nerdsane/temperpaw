@@ -18,7 +18,7 @@ libc = "0.2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-temper-observe = { git = "https://github.com/nerdsane/temper.git", rev = "1642f01ead50d3a4e6c4eda166c56935ddfd876b" }
+temper-observe = { git = "https://github.com/nerdsane/temper.git", rev = "8ca3295faefe4ed350aff29379ae30fc9e2fa997" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
